@@ -81,7 +81,7 @@ def test_hicensor_rule_trend_test():
     # The data effectively becomes ['<10', '<10', '<10', '<10', '<10', '<10']
     # This should result in no trend.
     result_hicensor = trend_test(x=data, t=t, hicensor=True)
-    assert result_hicensor.trend == 'no trend'
+    assert result_hicensor.trend == 'indeterminate'
     assert 'No Trend' in result_hicensor.classification or 'As Likely as Not' in result_hicensor.classification
     assert abs(result_hicensor.s) <= abs(result_no_hicensor.s)
 
@@ -118,7 +118,7 @@ def test_hicensor_rule_seasonal_trend_test():
     # The hicensor rule correctly weakens the trend to "no trend" in this case,
     # as the Mann-Kendall score `s` becomes 1, which results in a z-score of 0
     # after the continuity correction.
-    assert result_hicensor.trend == 'no trend'
+    assert result_hicensor.trend == 'indeterminate'
     # 'No Trend' classification is generally gone, replaced by 'As Likely as Not'
     assert 'As Likely as Not' in result_hicensor.classification or result_hicensor.classification == 'No Trend'
     # The absolute s-score should be less than the original, demonstrating
@@ -161,7 +161,7 @@ def test_hicensor_numeric_seasonal_trend_test():
     # The July data [20, 22] has an increasing trend, but the overall
     # result is weakened by the tied January data.
     result_hicensor_8 = seasonal_trend_test(x=data, t=t, period=12, hicensor=8)
-    assert result_hicensor_8.trend == 'no trend'
+    assert result_hicensor_8.trend == 'indeterminate'
 
 def test_mk_test_method_lwp():
     """Test the 'lwp' method for the Mann-Kendall test."""

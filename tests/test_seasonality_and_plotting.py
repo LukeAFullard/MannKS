@@ -44,7 +44,8 @@ def test_plot_seasonal_distribution(seasonal_data):
     if os.path.exists(plot_path):
         os.remove(plot_path)
 
-    returned_path = plot_seasonal_distribution(x, t, plot_path=plot_path)
+    with pytest.warns(PendingDeprecationWarning, match="vert: bool"):
+        returned_path = plot_seasonal_distribution(x, t, plot_path=plot_path)
 
     assert returned_path == plot_path
     assert os.path.exists(plot_path)

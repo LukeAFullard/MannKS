@@ -21,7 +21,9 @@ def test_get_season_func_various_types(season_type, period, date_str, expected_s
             _get_season_func(season_type, period)
     else:
         func = _get_season_func(season_type, period)
-        assert func(dates)[0] == expected_season
+        result = func(dates)
+        val = result.iloc[0] if isinstance(result, pd.Series) else result[0]
+        assert val == expected_season
 
 # --- Tests for _get_agg_func ---
 
@@ -42,4 +44,6 @@ def test_get_agg_func_various_periods(agg_period, date_str, expected_group):
             _get_agg_func(agg_period)
     else:
         func = _get_agg_func(agg_period)
-        assert func(dates)[0] == expected_group
+        result = func(dates)
+        val = result.iloc[0] if isinstance(result, pd.Series) else result[0]
+        assert val == expected_group

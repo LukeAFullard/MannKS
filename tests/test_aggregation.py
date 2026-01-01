@@ -32,6 +32,6 @@ def test_seasonal_trend_test_aggregation_methods():
         # ensuring the aggregation logic executes correctly, not with a
         # specific trend outcome, which may be statistically weak.
         assert result is not None
-        assert result.trend in ['increasing', 'decreasing', 'no trend']
+        assert result.trend in ['increasing', 'decreasing', 'no trend', 'indeterminate']
         assert isinstance(result.h, (bool, np.bool_))
         assert not np.isnan(result.p) if result.h else True

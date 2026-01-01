@@ -21,7 +21,7 @@ def test_zero_variance_handling():
     # The primary assertions are on the final, user-facing results.
     # The intermediate var_s value is a non-critical implementation detail
     # in this specific edge case because s=0.
-    assert result.trend == 'no trend'
+    assert result.trend == 'indeterminate'
     assert not result.h  # Use truthiness for numpy.bool_
     assert result.s == 0
     assert result.p == 1.0

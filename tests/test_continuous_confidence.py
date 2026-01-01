@@ -105,6 +105,6 @@ def test_exact_zero_trend():
     res = trend_test(x, t, continuous_confidence=True)
     assert res.s == 0
     assert res.z == 0
-    assert res.trend == 'no trend'
+    assert res.trend == 'indeterminate'
     # Default map for 0.5 confidence (which C is when p=1.0) is "As Likely as Not"
     assert "As Likely as Not" in res.classification

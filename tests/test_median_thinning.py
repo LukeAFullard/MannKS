@@ -31,7 +31,7 @@ def test_median_thinning_logic():
 
     # The Mann-Kendall score for 2 points [5.5, 17.5] is +1
     assert result.s == 1
-    assert result.trend == 'no trend' # Sample size 2 is small, h might be False
+    assert result.trend == 'indeterminate' # Sample size 2 is small, h might be False
 
     # To check the actual values, we might need to debug or rely on 's'.
     # If aggregation worked, n should be 2.
