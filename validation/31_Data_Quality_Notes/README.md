@@ -1,0 +1,14 @@
+# V-31 Data Quality Analysis Notes Validation
+
+This validation case explicitly triggers and verifies the data quality warnings defined in `analysis_notes.py`.
+
+## Results
+| Test ID                     | Expected Note                                                 | Actual Notes                                                                                                                                    | Match   |     Slope |     P-Value |
+|:----------------------------|:--------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:--------|----------:|------------:|
+| V-31_All_NA                 | Data all NA values                                            | Data all NA values                                                                                                                              | True    | nan       | nan         |
+| V-31_Low_Unique             | < 3 unique values                                             | < 3 unique values; Long run of single value; WARNING: Sen slope based on tied non-censored values                                               | True    |   0.125   |   0.0396687 |
+| V-31_Low_NonCensored        | < 5 Non-censored values                                       | < 5 Non-censored values; Long run of single value; WARNING: Sen slope influenced by left-censored values.                                       | True    |  -1.54159 |   0.105042  |
+| V-31_Long_Run               | Long run of single value                                      | Long run of single value; WARNING: Sen slope based on tied non-censored values                                                                  | True    |  -0.125   |   0.128379  |
+| V-31_Sen_Slope_LeftCensored | influenced by left-censored values                            | < 3 unique values; sample size (4) below minimum (10); WARNING: Sen slope influenced by left-censored values.                                   | True    |   3.4607  |   0.148562  |
+| V-31_Sen_Slope_Tied         | based on tied non-censored values                             | < 3 unique values; sample size (5) below minimum (10); Long run of single value; WARNING: Sen slope based on tied non-censored values           | True    |   0       |   0.462433  |
+| V-31_Critical_Censored      | CRITICAL: Sen slope is based on a pair of two censored values | < 3 unique values; sample size (5) below minimum (10); Long run of single value; CRITICAL: Sen slope is based on a pair of two censored values. | True    |   0       |   0.358326  |
