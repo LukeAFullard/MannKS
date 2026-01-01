@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MannKS"
+version = "0.1.0"
+description = "Non-parametric trend analysis for unequally spaced time series with censored data"
+authors = [{name = "Luke Fullard"}]
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+keywords = ["mann-kendall", "sen-slope", "trend-analysis", "censored-data", "time-series"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+]
+
+dependencies = [
+    "numpy>=1.19.0",
+    "pandas>=1.1.0",
+    "scipy>=1.5.0",
+    "matplotlib>=3.3.0",
+    "seaborn>=0.11.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=6.0", "pytest-cov"]
+
+[project.urls]
+Homepage = "https://github.com/LukeAFullard/MannKS"
+Documentation = "https://github.com/LukeAFullard/MannKS/tree/main/Examples"
+Repository = "https://github.com/LukeAFullard/MannKS"
+
+[tool.setuptools]
+packages = ["MannKS"]
