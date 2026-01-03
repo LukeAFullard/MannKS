@@ -81,6 +81,8 @@ Each example is a self-contained "chapter" that includes the full Python code, t
     *   **Goal:** Learn how to interpret residual diagnostic plots to check assumptions of linearity and homoscedasticity.
 *   [**Example 29: Block Bootstrap for Autocorrelation**](./29_Block_Bootstrap_Autocorrelation/README.md)
     *   **Goal:** Learn how to use Block Bootstrap to avoid false positives when analyzing data with serial correlation (autocorrelation).
+*   [**Example 30: Rolling Trend Analysis**](./30_Rolling_Trend_Analysis/README.md)
+    *   **Goal:** Learn how to perform a rolling window analysis to detect when trends start, stop, or change direction over time.
 
 ## Detailed Guides
 

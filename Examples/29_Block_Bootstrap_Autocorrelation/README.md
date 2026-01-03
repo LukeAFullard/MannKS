@@ -171,11 +171,11 @@ Block Size Used: 10
 
 --- Test 4: Seasonal Block Bootstrap ---
 Seasonal Trend: increasing
-p-value: 0.4400
+p-value: 0.2920
 Significant? False
 Slope: 0.0267 units per year
-Confidence Interval (95%): [-0.0339, 0.0828]
-Block Size Used: 3 (cycles)
+Confidence Interval (95%): [-0.0188, 0.0712]
+Block Size Used: 4 (cycles)
 
 ```
 

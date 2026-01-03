@@ -131,6 +131,9 @@ print(f"Block Size Used: {result_seas.block_size_used} (cycles)")
 # --- 2. Execute the Code and Capture Output ---
 output_buffer = io.StringIO()
 
+# Ensure the example code runs deterministically
+np.random.seed(42)
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 original_cwd = os.getcwd()
 os.chdir(script_dir)

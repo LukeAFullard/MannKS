@@ -176,6 +176,7 @@ def run_scenario_4_ats():
     return res
 
 def main():
+    np.random.seed(42)  # Ensure reproducibility
     output_dir = os.path.dirname(__file__)
     readme_path = os.path.join(output_dir, 'README.md')
 

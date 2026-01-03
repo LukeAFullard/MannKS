@@ -35,18 +35,18 @@ Trend: increasing
 
 --- Scenario 2: High Censoring + Bootstrap ---
 High Censor Rule Applied: ['Long run of single value', 'WARNING: Sen slope influenced by left-censored values.']
-Block Size Used: 10
+Block Size Used: 8
 P-value: 0.0000
 
 --- Scenario 3: Seasonal Bootstrap ---
 Block Size Used (Cycles): 3
-P-value: 0.0050
+P-value: 0.0000
 Trend: increasing
 
 --- Scenario 4: ATS Slope + Bootstrap P-value ---
-Slope (ATS): 0.0348
-CI (ATS): [0.0144, 0.0550]
-P-value (Bootstrap): 0.0400
+Slope (ATS): 0.0373
+CI (ATS): [0.0146, 0.0618]
+P-value (Bootstrap): 0.0200
 ```
 
 ## Conclusion

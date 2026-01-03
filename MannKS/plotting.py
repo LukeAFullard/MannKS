@@ -4,6 +4,7 @@ This script provides plotting utilities for the MannKS package.
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import seaborn as sns
 from ._helpers import _preprocessing
 from ._datetime import _get_season_func, _is_datetime_like, _get_cycle_identifier
@@ -398,4 +399,210 @@ def plot_residuals(data, results, save_path):
         plt.savefig(save_path, format='png')
     else:
         plt.savefig(save_path)
+    plt.close()
+
+def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None,
+                      highlight_significant=True, show_global_trend=False,
+                      global_result=None, change_points=None,
+                      save_path=None, figsize=(14, 8)):
+    """
+    Visualize rolling trend analysis results.
+
+    Args:
+        rolling_results: DataFrame from rolling_trend_test
+        data: Original data (optional, for background scatter)
+        time_col, value_col: Column names in data
+        highlight_significant: Color significant windows differently
+        show_global_trend: Overlay single global trend line
+        global_result: Result from trend_test on full dataset
+        change_points: List of detected change points (optional)
+        save_path: Path to save figure
+        figsize: Figure size
+    """
+    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+
+    # Determine if datetime based on window_center column
+    is_datetime = pd.api.types.is_datetime64_any_dtype(rolling_results['window_center'])
+
+    # --- Panel 1: Original data with rolling trend lines ---
+    ax1 = axes[0]
+
+    if data is not None and time_col and value_col:
+        # Check if time column in data is datetime
+        data_is_datetime = pd.api.types.is_datetime64_any_dtype(data[time_col])
+        if is_datetime and not data_is_datetime:
+             # Try converting if possible
+             try:
+                 x_data = pd.to_datetime(data[time_col])
+             except:
+                 x_data = data[time_col]
+        else:
+             x_data = data[time_col]
+
+        ax1.scatter(x_data, data[value_col],
+                   alpha=0.3, s=20, color='gray', label='Data')
+
+    # Plot each window's trend line
+    # Only if we have the necessary columns
+    has_intercept = 'intercept' in rolling_results.columns
+    has_unscaled = 'slope_per_second' in rolling_results.columns
+
+    for idx, row in rolling_results.iterrows():
+        # Skip failed windows (NaN slope)
+        if pd.isna(row['slope']):
+            continue
+
+        if has_intercept and has_unscaled and pd.notna(row['intercept']):
+            # Robust plotting with intercept and unscaled slope
+            # If datetime, convert bounds to timestamps for calculation
+            t_start = row['window_start']
+            t_end = row['window_end']
+
+            if is_datetime:
+                # Convert to numeric timestamp for y = mx + c
+                ts_start = pd.to_datetime(t_start).timestamp()
+                ts_end = pd.to_datetime(t_end).timestamp()
+                x_num = np.array([ts_start, ts_end])
+            else:
+                x_num = np.array([t_start, t_end])
+
+            # Calculate y values
+            # slope_per_second is unscaled (e.g. units/sec or units/unit_t)
+            slope_raw = row['slope_per_second']
+            y_vals = slope_raw * x_num + row['intercept']
+
+            # Plot segment
+            # For x-axis, if datetime, convert back to datetime for matplotlib
+            if is_datetime:
+                x_plot_seg = [t_start, t_end]
+            else:
+                x_plot_seg = [t_start, t_end]
+
+            # Use significant color or gray?
+            # If significant, maybe red line? Or just dark gray.
+            color = 'red' if (highlight_significant and row.get('h', False)) else 'black'
+            alpha_line = 0.5 if (highlight_significant and row.get('h', False)) else 0.2
+            width = 2 if (highlight_significant and row.get('h', False)) else 1
+
+            ax1.plot(x_plot_seg, y_vals, color=color, alpha=alpha_line, linewidth=width)
+
+    if show_global_trend and global_result:
+        # Here we have global slope and intercept usually.
+        # But trend_test returns 'intercept'.
+        if hasattr(global_result, 'intercept') and pd.notna(global_result.intercept):
+            # We need t_min/t_max from data or results
+            if data is not None and time_col:
+                t_min = data[time_col].min()
+                t_max = data[time_col].max()
+            else:
+                t_min = rolling_results['window_start'].min()
+                t_max = rolling_results['window_end'].max()
+
+            # Unscaled slope
+            g_slope = getattr(global_result, 'slope_per_second', global_result.slope)
+
+            if is_datetime:
+                ts_min = pd.to_datetime(t_min).timestamp()
+                ts_max = pd.to_datetime(t_max).timestamp()
+                x_num_g = np.array([ts_min, ts_max])
+            else:
+                x_num_g = np.array([t_min, t_max])
+
+            y_g = g_slope * x_num_g + global_result.intercept
+
+            if is_datetime:
+                x_g = [t_min, t_max]
+            else:
+                x_g = [t_min, t_max]
+
+            ax1.plot(x_g, y_g, color='blue', linestyle='--', linewidth=2, label='Global Trend')
+
+
+    ax1.set_ylabel('Value')
+    ax1.set_title('Original Data with Rolling Trend Lines')
+    if data is not None:
+        ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # --- Panel 2: Rolling slope with confidence intervals ---
+    ax2 = axes[1]
+
+    x_plot = rolling_results['window_center']
+
+    # Color by significance (h)
+    if highlight_significant and 'h' in rolling_results.columns:
+        sig_mask = rolling_results['h'].astype(bool)
+        if sig_mask.any():
+            ax2.scatter(x_plot[sig_mask], rolling_results.loc[sig_mask, 'slope'],
+                       color='red', s=30, label='Significant', zorder=3)
+        if (~sig_mask).any():
+            ax2.scatter(x_plot[~sig_mask], rolling_results.loc[~sig_mask, 'slope'],
+                       color='gray', s=30, alpha=0.5, label='Not significant', zorder=3)
+    else:
+        ax2.scatter(x_plot, rolling_results['slope'], s=30, zorder=3)
+
+    # Confidence intervals
+    if 'lower_ci' in rolling_results.columns and 'upper_ci' in rolling_results.columns:
+        ax2.fill_between(x_plot,
+                         rolling_results['lower_ci'],
+                         rolling_results['upper_ci'],
+                         alpha=0.2, color='blue', label='95% CI')
+
+    # Zero line
+    ax2.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+
+    # Change points
+    if change_points:
+        for cp in change_points:
+            ax2.axvline(cp, color='orange', linestyle=':', linewidth=2, alpha=0.7)
+
+    ax2.set_ylabel('Slope')
+    ax2.set_title('Rolling Sen\'s Slope')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    # --- Panel 3: P-values and confidence ---
+    ax3 = axes[2]
+    ax3_twin = ax3.twinx()
+
+    # P-values (log scale)
+    if 'p_value' in rolling_results.columns:
+        # Handle p=0 for log scale
+        p_safe = rolling_results['p_value'].replace(0, 1e-10)
+        ax3.semilogy(x_plot, p_safe,
+                    color='purple', marker='o', linestyle='', label='P-value', markersize=3, alpha=0.6)
+        ax3.axhline(0.05, color='red', linestyle='--', linewidth=1, label='α=0.05')
+
+    ax3.set_ylabel('P-value', color='purple')
+    ax3.tick_params(axis='y', labelcolor='purple')
+
+    # Confidence in direction
+    if 'C' in rolling_results.columns:
+        ax3_twin.plot(x_plot, rolling_results['C'],
+                     color='green', marker='s', linestyle='', label='Confidence', markersize=3, alpha=0.6)
+        ax3_twin.set_ylabel('Confidence (C)', color='green')
+        ax3_twin.tick_params(axis='y', labelcolor='green')
+        ax3_twin.set_ylim([0.4, 1.0])
+
+    ax3.set_xlabel('Time (Window Center)')
+    ax3.set_title('Statistical Significance & Confidence')
+    ax3.grid(True, alpha=0.3)
+
+    # Format x-axis for datetime
+    if is_datetime:
+        for ax in axes:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            # Locator depends on data span, letting auto handle it is usually safest
+            # ax.xaxis.set_major_locator(mdates.YearLocator())
+
+    plt.tight_layout()
+
+    if save_path:
+        if hasattr(save_path, 'write'):
+            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
+        else:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
+
     plt.close()
