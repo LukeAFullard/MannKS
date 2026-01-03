@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="MannKS Logo" width="600"/>
+  <img src="https://raw.githubusercontent.com/LukeAFullard/MannKS/main/assets/logo.png" alt="MannKS Logo" width="600"/>
 
   # MannKS
   ### (Mann-Kendall Sen)
@@ -12,8 +12,7 @@
 ## 📦 Installation
 
 ```bash
-pip install -r requirements.txt
-pip install -e .
+pip install mannks
 ```
 
 **Requirements:** Python 3.7+, NumPy, Pandas, SciPy, Matplotlib
@@ -33,7 +32,13 @@ Use this package when your data has:
 - **No normal distribution** (non-parametric methods don't require it)
 - **Small to moderate sample sizes** (n < 5,000 recommended)
 
-**Don't use** for highly autocorrelated data (test first) or if you need n > 46,340 observations.
+**Don't use** if you need n > 46,340 observations.
+
+**NEW IN V0.2.0**: The `trend_test` and `seasonal_trend_test` functions now support a **Block Bootstrap** method (`autocorr_method='block_bootstrap'`). This feature provides robust trend testing for data with serial correlation (autocorrelation) by resampling blocks of data rather than individual points, preserving the internal dependency structure.
+
+See [Statistical Methodology: Bootstrap](./bootstrap.md) for a detailed explanation of the hybrid methodology:
+*   **Hypothesis Testing (P-values)**: Uses *Detrended Residual Block Bootstrap* to generate a null distribution while preserving autocorrelation.
+*   **Confidence Intervals (Sen's Slope)**: Uses *Pairs Block Bootstrap* to avoid bias when "reconstructing" censored data values from residuals.
 
 ---
 
@@ -72,7 +77,7 @@ Slope: 24.57 mg/L per year
 Confidence: 98.47%
 ```
 
-![Trend Analysis Plot](assets/quick_start_trend.png)
+![Trend Analysis Plot](https://raw.githubusercontent.com/LukeAFullard/MannKS/main/assets/quick_start_trend.png)
 
 ---
 
@@ -97,6 +102,8 @@ Confidence: 98.47%
 - **Data Quality Checks**: Automatic warnings for tied values, long runs, insufficient data
 - **Robust Methods**: ATS estimator for heavily censored data
 - **Flexible Testing**: Kendall's Tau-a or Tau-b, custom significance levels
+- **Block Bootstrap** (New in v0.2.0): Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](./bootstrap.md) for details.
+
 
 ---
 
@@ -170,6 +177,7 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 - **[Regional Tests](./Examples/Detailed_Guides/regional_test_guide/README.md)** - Multi-site aggregation
 - **[Analysis Notes](./Examples/Detailed_Guides/analysis_notes_guide.md)** - Interpreting data quality warnings
 - **[Trend Classification](./Examples/Detailed_Guides/trend_classification_guide.md)** - Understanding confidence levels
+- **[Bootstrap Methodology](./bootstrap.md)** - Block bootstrap for autocorrelated data
 
 ### Examples
 The [Examples](./Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.

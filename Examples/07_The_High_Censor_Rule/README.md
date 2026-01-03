@@ -93,12 +93,12 @@ Interpretation: FALSE POSITIVE. The test found a decreasing trend because we
 substituted values based on the changing detection limit.
 
 --- Test 2: Standard Robust Analysis (hicensor=False) ---
-Trend: no trend
+Trend: indeterminate
 Sen's Slope: nan
 Interpretation: CORRECT. The robust method ignores ambiguous pairs, finding no trend.
 
 --- Test 3: High Censor Rule (hicensor=True) ---
-Trend: no trend
+Trend: indeterminate
 Sen's Slope: nan
 Analysis Notes: ['< 3 unique values', 'Long run of single value']
 Interpretation: CORRECT & CONSERVATIVE. By unifying the censoring level,

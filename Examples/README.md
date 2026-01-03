@@ -79,6 +79,8 @@ Each example is a self-contained "chapter" that includes the full Python code, t
     *   **Goal:** Compare the default "Continuous Confidence" approach against traditional binary hypothesis testing to show how it provides more nuanced results for weak trends.
 *   [**Example 28: Residual Diagnostics**](./28_Residual_Diagnostics/README.md)
     *   **Goal:** Learn how to interpret residual diagnostic plots to check assumptions of linearity and homoscedasticity.
+*   [**Example 29: Block Bootstrap for Autocorrelation**](./29_Block_Bootstrap_Autocorrelation/README.md)
+    *   **Goal:** Learn how to use Block Bootstrap to avoid false positives when analyzing data with serial correlation (autocorrelation).
 
 ## Detailed Guides
 

@@ -6,6 +6,7 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 import warnings
+from scipy.stats import norm
 from ._stats import (_z_score, _p_value, _sens_estimator_unequal_spacing,
                      _confidence_intervals, _mk_probability,
                      _mk_score_and_var_censored, _sens_estimator_censored,
@@ -40,7 +41,10 @@ def trend_test(
     continuous_confidence: bool = True,
     x_unit: str = "units",
     slope_scaling: Optional[str] = None,
-    seasonal_coloring: bool = False
+    seasonal_coloring: bool = False,
+    autocorr_method: str = 'none',
+    block_size: Union[str, int] = 'auto',
+    n_bootstrap: int = 1000
 ) -> namedtuple:
     """
     Mann-Kendall test for unequally spaced time series.
@@ -146,6 +150,21 @@ def trend_test(
                                       probability, even if p > alpha. If False, follows classical
                                       hypothesis testing where non-significant trends are reported
                                       as 'no trend'.
+        autocorr_method (str): Method to handle autocorrelation.
+            - 'none' (default): No correction.
+            - 'auto': Automatically check for significant autocorrelation and apply
+                      block bootstrap if detected.
+            - 'block_bootstrap': Use moving block bootstrap to estimate p-value
+                                 and confidence intervals.
+                                 P-values use residual bootstrap (tests H0: no trend).
+                                 CIs use pairs bootstrap (preserves trend structure).
+                                 This combination is statistically rigorous.
+            - 'yue_wang': Use Yue & Wang (2004) effective sample size correction
+                          for variance.
+        block_size (Union[str, int]): Block size for bootstrap. 'auto' calculates
+                                      optimal size based on Politis & White (2004).
+        n_bootstrap (int): Number of bootstrap resamples (default 1000).
+
     Output:
         A namedtuple containing the following fields:
         - trend: The trend of the data ('increasing', 'decreasing', or 'no trend').
@@ -162,6 +181,9 @@ def trend_test(
         - upper_ci: The upper confidence interval of the slope.
         - C: The confidence of the trend direction.
         - Cd: The confidence that the trend is decreasing.
+        - acf1: Lag-1 autocorrelation coefficient.
+        - n_effective: Effective sample size after correcting for autocorrelation.
+        - block_size_used: The block size used for bootstrapping.
 
     Statistical Assumptions:
     ----------------------
@@ -207,7 +229,8 @@ def trend_test(
         'sen_probability', 'sen_probability_max', 'sen_probability_min',
         'prop_censored', 'prop_unique', 'n_censor_levels',
         'slope_per_second', 'lower_ci_per_second', 'upper_ci_per_second',
-        'scaled_slope', 'slope_units'
+        'scaled_slope', 'slope_units',
+        'acf1', 'n_effective', 'block_size_used'
     ])
 
     # --- Method String Validation ---
@@ -235,6 +258,10 @@ def trend_test(
     if tie_break_method not in valid_tie_break_methods:
         raise ValueError(f"Invalid `tie_break_method`. Must be one of {valid_tie_break_methods}.")
 
+    valid_autocorr_methods = ['none', 'auto', 'block_bootstrap', 'yue_wang']
+    if autocorr_method not in valid_autocorr_methods:
+        raise ValueError(f"Invalid `autocorr_method`. Must be one of {valid_autocorr_methods}.")
+
     analysis_notes = []
     data_filtered, is_datetime = _prepare_data(x, t, hicensor)
 
@@ -247,7 +274,8 @@ def trend_test(
     if n < 2:
         return res('no trend', False, np.nan, 0, 0, 0, 0, np.nan, np.nan,
                    np.nan, np.nan, np.nan, np.nan, 'insufficient data', analysis_notes,
-                   np.nan, np.nan, np.nan, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, '')
+                   np.nan, np.nan, np.nan, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, '',
+                   np.nan, np.nan, None)
 
     if min_size is not None and n < min_size:
         analysis_notes.append(f'sample size ({n}) below minimum ({min_size})')
@@ -331,13 +359,93 @@ def trend_test(
     if len(x_filtered) < 2:
         return res('no trend', False, np.nan, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
                    'insufficient data post-aggregation', analysis_notes,
-                   np.nan, np.nan, np.nan, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, '')
+                   np.nan, np.nan, np.nan, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, '',
+                   np.nan, np.nan, None)
+
+    # --- Autocorrelation Handling ---
+    acf1 = 0.0
+    n_eff = len(x_filtered)
+    block_size_used = None
+    needs_correction = False
+
+    if autocorr_method == 'auto':
+        from ._autocorr import should_apply_correction
+        needs_correction, acf1, n_eff = should_apply_correction(x_filtered)
+        if needs_correction:
+            analysis_notes.append(f'Autocorrelation detected (ACF1={acf1:.3f}), applying block bootstrap')
+            autocorr_method = 'block_bootstrap'
+
+    elif autocorr_method == 'block_bootstrap' or autocorr_method == 'yue_wang':
+        from ._autocorr import estimate_acf, effective_sample_size
+        acf, _ = estimate_acf(x_filtered)
+        acf1 = acf[1] if len(acf) > 1 else 0.0
+        n_eff, _ = effective_sample_size(x_filtered)
+        needs_correction = True
 
     s, var_s, D, Tau = _mk_score_and_var_censored(
         x_filtered, t_filtered, censored_filtered, cen_type_filtered,
         tau_method=tau_method, mk_test_method=mk_test_method,
         tie_break_method=tie_break_method
     )
+
+    # Apply bootstrap correction if needed
+    if autocorr_method == 'block_bootstrap':
+        from ._bootstrap import block_bootstrap_mann_kendall, block_bootstrap_confidence_intervals, optimal_block_size
+        from ._autocorr import estimate_acf
+
+        # Determine block size used
+        if block_size == 'auto':
+            acf, _ = estimate_acf(x_filtered)
+            block_size_used = optimal_block_size(len(x_filtered), acf)
+        else:
+            block_size_used = block_size
+
+        # Bootstrap p-value
+        p_boot, s_obs, s_boot_dist = block_bootstrap_mann_kendall(
+            x_filtered, t_filtered, censored_filtered, cen_type_filtered,
+            block_size=block_size_used, n_bootstrap=n_bootstrap,
+            tau_method=tau_method, mk_test_method=mk_test_method
+        )
+
+        p = p_boot
+        # Estimate z-score from p-value for consistency
+        # Avoid infinity if p=0 or p=1
+        p_safe = np.clip(p, 1e-10, 1 - 1e-10)
+        z = norm.ppf(1 - p_safe/2) * np.sign(s)
+        h = p < alpha
+
+        # Use empirical variance from bootstrap distribution
+        var_s = np.var(s_boot_dist, ddof=1)
+
+        # Determine trend direction string
+        if continuous_confidence:
+            if z < 0: trend = 'decreasing'
+            elif z > 0: trend = 'increasing'
+            else: trend = 'indeterminate'
+        else:
+            if not h: trend = 'no trend'
+            else: trend = 'decreasing' if z < 0 else 'increasing'
+
+    elif autocorr_method == 'yue_wang':
+        # Simpler correction: adjust variance by effective sample size
+        # Var*(n/n_eff) or Var*(n_eff/n)?
+        # Yue & Wang: Var_corrected = Var_original * (ESS correction factor)
+        # Typically ESS < n, so variance increases, Z decreases.
+        # Actually standard formula is Var(S) ~ n*(n-1)*(2n+5)/18.
+        # If samples are correlated, actual variance is HIGHER.
+        # Correction factor V* = V * (1 + 2*sum(rho...))
+        # And n_eff = n / (1 + 2*sum(rho...))
+        # So V* = V * (n / n_eff)
+        var_s_corrected = var_s * (len(x_filtered) / n_eff)
+        z = _z_score(s, var_s_corrected)
+        p, h, trend = _p_value(z, alpha, continuous_confidence=continuous_confidence)
+        analysis_notes.append(f'Yue-Wang correction applied (n_eff={n_eff:.1f})')
+        var_s = var_s_corrected # Update reported variance
+
+    else:
+        # Standard calculation
+        z = _z_score(s, var_s)
+        p, h, trend = _p_value(z, alpha, continuous_confidence=continuous_confidence)
 
     # LWP-TRENDS Compatibility Mode:
     # If ci_method is 'lwp', we recalculate the variance specifically for the
@@ -357,8 +465,6 @@ def trend_test(
         )
         var_s_ci = var_s_unc
 
-    z = _z_score(s, var_s)
-    p, h, trend = _p_value(z, alpha, continuous_confidence=continuous_confidence)
     C, Cd = _mk_probability(p, s)
 
     # --- Slope Calculation ---
@@ -408,8 +514,20 @@ def trend_test(
         if not np.isnan(slope):
             intercept = np.nanmedian(x_filtered) - np.nanmedian(t_filtered) * slope
 
-        lower_ci, upper_ci = _confidence_intervals(slopes, var_s_ci, alpha, method=ci_method)
-        sen_prob, sen_prob_max, sen_prob_min = _sen_probability(slopes, var_s_ci)
+        if autocorr_method == 'block_bootstrap' and sens_slope_method != 'ats':
+             # Bootstrap confidence intervals for slope
+             from ._bootstrap import block_bootstrap_confidence_intervals
+             _, lower_ci, upper_ci, _ = block_bootstrap_confidence_intervals(
+                x_filtered, t_filtered, censored_filtered, cen_type_filtered,
+                block_size=block_size_used, n_bootstrap=n_bootstrap, alpha=alpha,
+                method=sens_slope_method,
+                lt_mult=lt_mult, gt_mult=gt_mult
+             )
+             # Note: sen_probability logic remains standard approx or needs bootstrap update (omitted for now)
+             sen_prob, sen_prob_max, sen_prob_min = _sen_probability(slopes, var_s_ci) # Approximation
+        else:
+            lower_ci, upper_ci = _confidence_intervals(slopes, var_s_ci, alpha, method=ci_method)
+            sen_prob, sen_prob_max, sen_prob_min = _sen_probability(slopes, var_s_ci)
 
     # --- Slope Scaling ---
     slope_per_second = slope
@@ -452,7 +570,8 @@ def trend_test(
                   '', [], sen_prob, sen_prob_max, sen_prob_min,
                   prop_censored, prop_unique, n_censor_levels,
                   slope_per_second, lower_ci, upper_ci,
-                  scaled_slope, slope_units)
+                  scaled_slope, slope_units,
+                  acf1, n_eff, block_size_used)
 
 
     # Final Classification and Notes

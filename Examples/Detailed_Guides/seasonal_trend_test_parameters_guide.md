@@ -56,6 +56,33 @@ These parameters are crucial for defining the seasonal structure of your data. T
 
 ---
 
+### Autocorrelation & Bootstrap Parameters
+
+These parameters enable the block bootstrap method for handling autocorrelated data within seasons.
+
+#### `autocorr_method`
+-   **Type:** `str`, **Default:** `'none'`
+-   **Description:** Method to handle autocorrelation.
+-   **Usefulness:**
+    *   `'none'` (Default): No correction.
+    *   `'auto'`: Automatically detects significant autocorrelation.
+    *   `'block_bootstrap'`: Explicitly enables the Block Bootstrap method.
+    *   `'yue_wang'`: Uses the effective sample size correction.
+
+#### `block_size`
+-   **Type:** `int` or `'auto'`, **Default:** `'auto'`
+-   **Description:** The size of the blocks used for resampling.
+-   **Usefulness:** If your seasonal data is autocorrelated over years (e.g., January 2000 is correlated with January 2001), standard tests may be invalid. Block bootstrapping corrects for this.
+    *   `'auto'` (Default): Automatically calculates an optimal block size based on the autocorrelation function (ACF).
+    *   `int`: Manually specifies the block size.
+
+#### `n_bootstrap`
+-   **Type:** `int`, **Default:** `1000`
+-   **Description:** The number of bootstrap resamples to generate.
+-   **Usefulness:** Controls the precision of the bootstrap p-value.
+
+---
+
 ### Aggregation Parameters
 
 Aggregation in a seasonal context is about ensuring that you have **one representative value per season per cycle**. For example, one value for "January 2010", one for "January 2011", etc.

@@ -333,7 +333,7 @@ def ats_slope(x: np.ndarray, y: np.ndarray, censored: np.ndarray,
             except Exception:
                 pass
 
-        if len(boot_betas) >= max(20, int(0.1 * n_boot)):
+        if len(boot_betas) >= max(20, int(0.8 * n_boot)):
             lo = np.quantile(boot_betas, ci_alpha/2)
             hi = np.quantile(boot_betas, 1 - ci_alpha/2)
             result['ci_lower'] = float(lo)
@@ -344,7 +344,7 @@ def ats_slope(x: np.ndarray, y: np.ndarray, censored: np.ndarray,
             result['ci_upper'] = None
             result['notes'].append(
                 f'bootstrap produced only {len(boot_betas)} valid samples '
-                f'(need >= {max(20, int(0.1 * n_boot))})'
+                f'(need >= {max(20, int(0.8 * n_boot))})'
             )
     return result
 
@@ -476,7 +476,7 @@ def seasonal_ats_slope(x: np.ndarray, y: np.ndarray, censored: np.ndarray, seaso
             except Exception:
                 pass
 
-        if len(boot_betas) >= max(20, int(0.1 * n_boot)):
+        if len(boot_betas) >= max(20, int(0.8 * n_boot)):
             lo = np.quantile(boot_betas, ci_alpha/2)
             hi = np.quantile(boot_betas, 1 - ci_alpha/2)
             result['ci_lower'] = float(lo)
@@ -487,7 +487,7 @@ def seasonal_ats_slope(x: np.ndarray, y: np.ndarray, censored: np.ndarray, seaso
             result['ci_upper'] = None
             result['notes'].append(
                 f'bootstrap produced only {len(boot_betas)} valid samples '
-                f'(need >= {max(20, int(0.1 * n_boot))})'
+                f'(need >= {max(20, int(0.8 * n_boot))})'
             )
 
     return result

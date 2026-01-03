@@ -1,41 +1,36 @@
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "MannKS"
-version = "0.1.0"
+[tool.poetry]
+name = "mannks"
+version = "0.2.0"
 description = "Non-parametric trend analysis for unequally spaced time series with censored data"
-authors = [{name = "Luke Fullard"}]
+authors = ["Luke Fullard"]
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.7"
-license = {text = "MIT"}
-keywords = ["mann-kendall", "sen-slope", "trend-analysis", "censored-data", "time-series"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering :: Mathematics",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
+homepage = "https://github.com/LukeAFullard/MannKS"
+repository = "https://github.com/LukeAFullard/MannKS"
+documentation = "https://github.com/LukeAFullard/MannKS/tree/main/Examples"
+keywords = [
+    "mann-kendall",
+    "sen-slope",
+    "trend-analysis",
+    "censored-data",
+    "time-series"
 ]
 
-dependencies = [
-    "numpy>=1.19.0",
-    "pandas>=1.1.0",
-    "scipy>=1.5.0",
-    "matplotlib>=3.3.0",
-    "seaborn>=0.11.0",
-]
+packages = [{ include = "MannKS" }]
 
-[project.optional-dependencies]
-dev = ["pytest>=6.0", "pytest-cov"]
+[tool.poetry.dependencies]
+python = ">=3.7"
+numpy = ">=1.19.0"
+pandas = ">=1.1.0"
+scipy = ">=1.5.0"
+matplotlib = ">=3.3.0"
+seaborn = ">=0.11.0"
 
-[project.urls]
-Homepage = "https://github.com/LukeAFullard/MannKS"
-Documentation = "https://github.com/LukeAFullard/MannKS/tree/main/Examples"
-Repository = "https://github.com/LukeAFullard/MannKS"
+[tool.poetry.group.dev.dependencies]
+pytest = ">=6.0"
+pytest-cov = "*"
 
-[tool.setuptools]
-packages = ["MannKS"]
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+

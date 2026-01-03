@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import MannKS as mk
 
+np.random.seed(42)
+
 # --- Part 1: High Frequency Data (Minutes/Seconds) ---
 # Goal: Demonstrate that the package can handle very small time increments
 # and use `slope_scaling` to return meaningful results.

@@ -13,6 +13,7 @@ from .inspection import inspect_trend_data
 from .regional_test import regional_test
 from .classification import classify_trend
 from .preprocessing import prepare_censored_data
+from ._bootstrap import block_bootstrap_mann_kendall, block_bootstrap_confidence_intervals
 
 __all__ = [
     'trend_test',
@@ -22,5 +23,9 @@ __all__ = [
     'inspect_trend_data',
     'regional_test',
     'classify_trend',
-    'prepare_censored_data'
+    'prepare_censored_data',
+    'block_bootstrap_mann_kendall',
+    'block_bootstrap_confidence_intervals'
 ]
+
+__version__ = "0.2.0"

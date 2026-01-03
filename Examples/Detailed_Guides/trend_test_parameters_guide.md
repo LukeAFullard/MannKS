@@ -35,6 +35,33 @@ These are the essential parameters you will always need to provide.
 
 ---
 
+### Autocorrelation & Bootstrap Parameters
+
+These parameters enable the block bootstrap method for handling autocorrelated data.
+
+#### `autocorr_method`
+-   **Type:** `str`, **Default:** `'none'`
+-   **Description:** Method to handle autocorrelation.
+-   **Usefulness:** Standard Mann-Kendall tests assume that observations are independent. Autocorrelation (serial correlation) can violate this assumption.
+    *   `'none'` (Default): No correction.
+    *   `'auto'`: Automatically detects significant autocorrelation. If found, it switches to `'block_bootstrap'`.
+    *   `'block_bootstrap'`: Explicitly enables the Block Bootstrap method. This uses a **Detrended Residual Block Bootstrap** for the p-value (preserving H0: no trend) and a **Pairs Block Bootstrap** for confidence intervals (preserving trend-residual dependence). This is the most robust method for autocorrelated data.
+    *   `'yue_wang'`: Uses the effective sample size correction by Yue & Wang (2004). This adjusts the variance of the test statistic. It is faster than bootstrap but relies on asymptotic assumptions.
+
+#### `block_size`
+-   **Type:** `int` or `'auto'`, **Default:** `'auto'`
+-   **Description:** The size of the blocks used for resampling in the Moving Block Bootstrap.
+-   **Usefulness:** Block bootstrapping preserves the correlation structure within blocks while reshuffling the blocks themselves.
+    *   `'auto'` (Default): Automatically calculates an optimal block size based on the autocorrelation function (ACF) of the data. This is recommended for most users.
+    *   `int`: Manually specifying the block size allows for sensitivity analysis.
+
+#### `n_bootstrap`
+-   **Type:** `int`, **Default:** `1000`
+-   **Description:** The number of bootstrap resamples to generate.
+-   **Usefulness:** A higher number of bootstraps provides a more precise estimate of the p-value and confidence intervals but increases computation time.
+
+---
+
 ### Censored Data Parameters
 
 These parameters control how the test handles censored data.

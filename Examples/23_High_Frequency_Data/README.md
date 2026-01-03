@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import MannKS as mk
 
+np.random.seed(42)
+
 # --- Part 1: High Frequency Data (Minutes/Seconds) ---
 # Goal: Demonstrate that the package can handle very small time increments
 # and use `slope_scaling` to return meaningful results.
@@ -99,15 +101,15 @@ print(f"Confidence Interval: [{result_hourly.lower_ci:.4f}, {result_hourly.upper
 ```text
 --- Part 1: High-Frequency Sensor Data (Seconds) ---
 Detected Trend: increasing
-Sen's Slope: 0.5001 (degrees per minute)
+Sen's Slope: 0.5003 (degrees per minute)
 Expected Slope: 0.5000
-Confidence Interval: [0.4994, 0.5008]
+Confidence Interval: [0.4997, 0.5008]
 
 --- Part 2: Hourly Data with Diurnal Seasonality ---
 Detected Trend: increasing
-Sen's Slope: 0.0929 (units per day)
+Sen's Slope: 0.0895 (units per day)
 Expected Slope: 0.1000
-Confidence Interval: [0.0697, 0.1195]
+Confidence Interval: [0.0652, 0.1139]
 
 ```
 

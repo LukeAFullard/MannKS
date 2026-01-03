@@ -48,12 +48,16 @@ def plot_seasonal_distribution(x, t, period=12, season_type='month', plot_path='
     df = pd.DataFrame({'Value': x, 'Season': seasons})
 
     plt.figure(figsize=(10, 6))
-    sns.boxplot(x='Season', y='Value', data=df)
+    # orient='v' is implied by x/y, but explicit setting helps silence some matplotlib warnings
+    sns.boxplot(x='Season', y='Value', data=df, hue='Season', legend=False, orient='v')
     plt.title('Distribution of Values Across Seasons')
     plt.xlabel('Season')
     plt.ylabel('Value')
 
-    plt.savefig(plot_path)
+    if hasattr(plot_path, 'write'):
+        plt.savefig(plot_path, format='png')
+    else:
+        plt.savefig(plot_path)
     plt.close()
 
     return plot_path
@@ -151,7 +155,10 @@ def plot_inspection_data(data, plot_path, value_col, time_col, time_increment, i
             ax4.text(0.5, 0.5, f"Could not generate count matrix:\n{e}", ha='center', va='center')
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    if hasattr(plot_path, 'write'):
+        plt.savefig(plot_path, format='png', dpi=300, bbox_inches='tight')
+    else:
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
 
     return plot_path
@@ -311,7 +318,10 @@ def plot_trend(data, results, save_path, alpha, seasonal_coloring=False):
 
 
     plt.tight_layout(rect=[0, 0.03, 1, 1])
-    plt.savefig(save_path)
+    if hasattr(save_path, 'write'):
+        plt.savefig(save_path, format='png')
+    else:
+        plt.savefig(save_path)
     plt.close()
 
 
@@ -384,5 +394,8 @@ def plot_residuals(data, results, save_path):
 
     plt.suptitle(f"Residual Diagnostics (Slope: {results.slope:.4g} {getattr(results, 'slope_units', '')})")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(save_path)
+    if hasattr(save_path, 'write'):
+        plt.savefig(save_path, format='png')
+    else:
+        plt.savefig(save_path)
     plt.close()
