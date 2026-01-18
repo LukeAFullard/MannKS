@@ -354,8 +354,7 @@ class ValidationUtils:
         slope_error = np.nan
         slope_pct_error = np.nan
 
-        # Use patched result for error calculation if standard failed, OR keep standard?
-        # User wants to "keep the failing LWP mode". So error calc should probably be NaN if standard failed.
+        # If standard LWP mode failed, error calculation is set to NaN.
         # But we can also compute error against patched version if we want to show match.
         # Let's default to standard for the main 'slope_error' column to reflect the failure in main stats.
         if not np.isnan(r_res['slope']):
@@ -409,7 +408,7 @@ class ValidationUtils:
              for col in df.columns:
                  if col not in cols:
                      # This is tricky if master csv structure is rigid.
-                     # For now, just append what matches or rewrite the file if structure changes?
+                     # Append matching results to the file.
                      # Let's just drop extra columns to keep master CSV consistent,
                      # OR allow master CSV to grow.
                      pass

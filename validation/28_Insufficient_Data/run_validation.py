@@ -334,7 +334,7 @@ def run():
     utils = ValidationUtils(os.path.dirname(__file__))
 
     # V-28: Insufficient Data
-    # Testing min_size parameter. Default is usually small (4 or 5?).
+    # Testing min_size parameter. Default is typically small (e.g., 4 or 5).
     # We will explicitly set min_size=5 and provide n=4.
 
     # Scenario 1: Strong Increasing (but small N)

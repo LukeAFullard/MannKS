@@ -266,7 +266,7 @@ def test_empty_input():
     assert not result_orig.h
     assert np.isnan(result_orig.p)
 
-    result_seasonal = seasonal_trend_test([], [])
+    result_seasonal = seasonal_trend_test([], [], period=12)
     assert result_seasonal.trend == 'no trend'
     assert not result_seasonal.h
     assert np.isnan(result_seasonal.p)
@@ -282,7 +282,7 @@ def test_all_nan_input():
     assert not result_orig.h
     assert np.isnan(result_orig.p)
 
-    result_seasonal = seasonal_trend_test(x, t)
+    result_seasonal = seasonal_trend_test(x, t, period=12)
     assert result_seasonal.trend == 'no trend'
     assert not result_seasonal.h
     assert np.isnan(result_seasonal.p)

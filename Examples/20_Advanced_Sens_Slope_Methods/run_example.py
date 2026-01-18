@@ -15,7 +15,7 @@ import os
 
 # 1. Generate Synthetic Data
 # We create a dataset with censored values that create ambiguous slopes.
-# Ambiguous: Slope between a censored value and a real value where direction is uncertain?
+# Ambiguous: Slope between a censored value and a real value where direction is uncertain.
 # Actually, LWP defines ambiguous cases specifically.
 # Let's use a small dataset to trace it easily.
 x = [2, '<1', 5, 6, '<1', 8]

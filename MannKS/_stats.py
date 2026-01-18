@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 from scipy.stats import norm, rankdata
 
 # --- Module-level Constants ---
@@ -87,12 +88,11 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
         )
 
     if n > 5000:
-        import warnings
         mem_gb = (n**2 * 8 / 1e9)
         warnings.warn(
             f"Large sample size (n={n}) requires ~{mem_gb:.1f} GB memory "
             f"for pairwise calculations. Maximum safe n is {MAX_SAFE_N}. "
-            f"Consider using regional_test() for aggregating multiple smaller sites.",
+            f"Using `regional_test()` for aggregating multiple smaller sites is recommended.",
             UserWarning
         )
 
@@ -221,7 +221,7 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     tmpx_uc[tmpx_uc < 0] = 0
     nrxlng_uc = np.sum(tmpx_uc)
     x1_uc = nrxlng_uc * 2 * 1 * (2 * 2 + 5)
-    x2_uc = 0 # (2-2) = 0
+    x2_uc = 0 # This term is zero by definition for this correction component
     x3_uc = nrxlng_uc * 2 * 1
 
     tmpy_uc = intg * dcy - 1
@@ -253,7 +253,6 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
         Tau = kenS / D
     else:
         Tau = 0
-        import warnings
         warnings.warn("Denominator near zero in Tau calculation", UserWarning)
 
     return kenS, varS, D, Tau
@@ -261,7 +260,6 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
 
 def _z_score(s, var_s):
     if var_s < EPSILON:
-        import warnings
         warnings.warn("Variance near zero, Z-score may be unreliable", UserWarning)
         return 0
 
@@ -336,12 +334,11 @@ def _sens_estimator_unequal_spacing(x, t):
         )
 
     if n > 5000:
-        import warnings
         mem_gb = (n**2 * 8 / 1e9)
         warnings.warn(
             f"Large sample size (n={n}) requires ~{mem_gb:.1f} GB memory "
             f"for pairwise calculations. Maximum safe n is {MAX_SAFE_N}. "
-            f"Consider using regional_test() for aggregating multiple smaller sites.",
+            f"Using `regional_test()` for aggregating multiple smaller sites is recommended.",
             UserWarning
         )
 
@@ -418,12 +415,11 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
         )
 
     if n > 5000:
-        import warnings
         mem_gb = (n**2 * 8 / 1e9)
         warnings.warn(
             f"Large sample size (n={n}) requires ~{mem_gb:.1f} GB memory "
             f"for pairwise calculations. Maximum safe n is {MAX_SAFE_N}. "
-            f"Consider using regional_test() for aggregating multiple smaller sites.",
+            f"Using `regional_test()` for aggregating multiple smaller sites is recommended.",
             UserWarning
         )
 
@@ -518,7 +514,6 @@ def _confidence_intervals(slopes, var_s, alpha, method='direct'):
             lower_ci = sorted_slopes[lower_idx]
             upper_ci = sorted_slopes[upper_idx]
         else:
-            import warnings
             warnings.warn(
                 f"Confidence interval calculation failed: calculated indices "
                 f"({lower_idx}, {upper_idx}) were out of bounds for the {n} valid slopes. "

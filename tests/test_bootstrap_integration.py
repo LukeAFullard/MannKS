@@ -62,7 +62,7 @@ def test_trend_test_auto_detection():
 
     # Should NOT use bootstrap, OR if it does (due to random chance in higher lags),
     # the acf1 should still be low.
-    # The 'auto' heuristic checks for ANY significant lag, which can be trigger-happy with 50 lags.
+    # The 'auto' heuristic checks for ANY significant lag, which can be overly sensitive with 50 lags.
     if result_low.block_size_used is not None:
         # If it triggered, verify it wasn't because of lag-1
         assert abs(result_low.acf1) < 0.1
@@ -125,10 +125,10 @@ def test_variance_reporting_bootstrap_trend_test():
 
     # Check that res_boot.var_s is close to variance of a bootstrap distribution
     # We can't access the internal s_boot_dist easily here without modifying the return type
-    # but we can check if it's plausible.
+    # but we can verify its plausibility.
     # The analytic variance is for independent data.
     # For AR(1) with rho=0.7, variance should be inflated by (1+rho)/(1-rho) approx?
-    # Actually, MK variance inflation is complex.
+    # Note: MK variance inflation is complex.
     # But we know they shouldn't be equal.
 
     print(f"Standard Var(S): {res_std.var_s}")

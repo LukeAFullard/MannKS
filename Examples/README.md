@@ -81,8 +81,12 @@ Each example is a self-contained "chapter" that includes the full Python code, t
     *   **Goal:** Learn how to interpret residual diagnostic plots to check assumptions of linearity and homoscedasticity.
 *   [**Example 29: Block Bootstrap for Autocorrelation**](./29_Block_Bootstrap_Autocorrelation/README.md)
     *   **Goal:** Learn how to use Block Bootstrap to avoid false positives when analyzing data with serial correlation (autocorrelation).
-*   [**Example 30: Rolling Trend Analysis**](./30_Rolling_Trend_Analysis/README.md)
+*   [**Example 30: Block Bootstrap Validation**](./30_Block_Bootstrap_Validation/README.md)
+    *   **Goal:** Technical validation of the Block Bootstrap integration with other features like censoring and seasonality.
+*   [**Example 31: Rolling Trend Analysis**](./31_Rolling_Trend_Analysis/README.md)
     *   **Goal:** Learn how to perform a rolling window analysis to detect when trends start, stop, or change direction over time.
+*   [**Example 32: Segmented Sen's Slope & Breakpoint Probability**](./32_Segmented_Regression/README.md)
+    *   **Goal:** Use hybrid segmented regression to detect structural changes (breakpoints) in trends and calculate the probability of a change occurring in a specific year.
 
 ## Detailed Guides
 
@@ -97,3 +101,5 @@ In addition to the practical examples, the following deep-dive guides are availa
 *   [**Seasonal Trend Test Parameters Guide**](./Detailed_Guides/seasonal_trend_test_parameters_guide.md): Parameter reference for `seasonal_trend_test`.
 *   [**Trend Classification Guide**](./Detailed_Guides/trend_classification_guide.md): How trends are classified based on confidence levels.
 *   [**Trend Test Parameters Guide**](./Detailed_Guides/trend_test_parameters_guide.md): Parameter reference for `trend_test`.
+*   [**Rolling Trend Analysis Guide**](./Detailed_Guides/rolling_trend_guide.md): Moving window analysis.
+*   [**Segmented Trend Analysis Guide**](./Detailed_Guides/segmented_trend_guide.md): Structural breakpoint detection.

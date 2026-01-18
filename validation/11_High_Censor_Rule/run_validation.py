@@ -171,7 +171,7 @@ def run_lwp_r_script_v2102(df):
         uci = result[3][0]
 
         # Handle NAs
-        if np.isnan(slope): slope = 0.0 # R script returns NA for slope 0 sometimes? No, usually fine.
+        if np.isnan(slope): slope = 0.0
 
         os.remove(temp_csv)
         return slope, p_value, lci, uci
@@ -320,7 +320,7 @@ def generate_combined_plot(scenarios, filename, main_title):
         is_censored = df['value_str'].str.contains('<')
 
         # Color coding: Black = Observed, Red = Censored (Original),
-        # Blue = Censored (High Censor - Hypothetical visualization?)
+        # Blue = Censored (High Censor Visualization)
         # Actually, let's just show Red for any censored.
 
         colors = np.where(is_censored, 'red', 'black')
@@ -337,33 +337,23 @@ def generate_combined_plot(scenarios, filename, main_title):
             # Need numeric time for slope calc
             t_numeric = (x_plot - pd.Timestamp("1970-01-01")).dt.days / 365.25
 
-            # Slope is per year (from scaling)
-            # Intercept is calculated at t=median(t) usually?
-            # mk_result.intercept is y - slope*t_median
+            # Slope is per year (from scaling).
+            # The intercept returned by trend_test depends on the time units used during calculation.
+            # To ensure the plot line matches the slope correctly, we reconstruct it pivoting around the median.
 
             # Re-calculate line points
             y_trend = mk_result.slope * t_numeric.values + mk_result.intercept
 
-            # MannKS intercept is y_med - slope * t_med.
-            # If slope is scaled, t_med must match the unit.
-            # trend_test scales slope but returns intercept based on unscaled t.
-            # We trust the result object if we use the same t basis as input.
-            # However, since we passed datetime, MannKS converts to seconds internally for unscaled.
-            # With `slope_scaling='year'`, it returns scaled slope.
-            # The intercept logic: `intercept = y_med - t_med * slope`
-            # If slope is per year, t_med should be in years.
-            # MannKS likely uses seconds for t_med if input was datetime.
-            # So `intercept` might be inconsistent if `slope` is scaled but `t` wasn't converted.
-            # Actually, `trend_test` doesn't automatically rescale `t` for the intercept calculation in the simple way.
-            # Let's plot using the `slope` and pivot around median to be safe.
+            # MannKS intercept is calculated as y_med - slope * t_med.
+            # If slope is scaled (e.g., per year), care must be taken with units.
+            # We plot using the slope and pivoting around the median for consistency.
 
             t_seconds = (x_plot - x_plot.min()).dt.total_seconds()
             t_years = t_seconds / 31557600 # Approx
 
             # Re-calculate a safe trend line for plotting based on the returned slope
-            # Pivot at median time and median value (which MK uses)
-            # Since we don't have exact y_med used inside, we approximate with raw data median?
-            # Or better, rely on the fact that the trend line passes through (t_med, y_med)
+            # Pivot at median time and median value
+            # The trend line passes through (t_med, y_med)
 
             # Approximate center
             t_mid = x_plot.mean()

@@ -100,31 +100,17 @@ class ValidationUtils:
             # Fake a 'Month' column so other parts don't crash if they look for it
             ro.r('df_r$Month <- format(df_r$myDate, "%b")')
 
-            # CRITICAL: For weekly analysis, we need TimeIncr to be unique per period.
-            # Usually TimeIncr is Month. Here it should be Week-Year or similar?
-            # Actually, SeasonalTrendAnalysis aggregates by Season and Year.
-            # So as long as we have Year and Season (Week), it should work.
-            # But the script might check for TimeIncr. Let's set it to Month just in case, or make it Week?
-            # LWP script usually sets TimeIncr via InspectTrendData.
-            # Let's try to manually set TimeIncr to be the week index or something unique.
-            # Actually, standard usage is TimeIncr = Month.
-            # If we want weekly, maybe we can trick it?
-            # But wait, SeasonalTrendAnalysis splits by Season.
-            # Let's see if we can just run it with Season set to Week.
+            # CRITICAL: For weekly analysis, unique TimeIncr per period is required.
+            # While standard usage expects 'Month', we rely on Year and Season (Week) here.
 
             if seasonal:
                 # Ensure we have one obs per season per year if aggregating.
-                # Since our generated data is already one per week, we are good.
+                # Use TimeIncrMed=FALSE to avoid aggregation defaults tied to standard months.
                 cmd = """
                 suppressWarnings(
                     result <- SeasonalTrendAnalysis(df_r, do.plot=FALSE, TimeIncrMed=FALSE, UseMidObs=FALSE)
                 )
                 """
-                # Note: TimeIncrMed=FALSE to avoid it trying to aggregate by "Month" if it defaults to that.
-                # But we want to test LWP aggregation logic?
-                # If we have 1 value per week, aggregation shouldn't change anything if we group correctly.
-                # However, LWP script is hardcoded for monthly/quarterly often.
-                # Let's try to run it. If it fails, we might skip R for this specific unusual seasonality.
                 try:
                     ro.r(cmd)
                 except Exception as e:

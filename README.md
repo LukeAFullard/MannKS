@@ -15,7 +15,7 @@
 pip install mannks
 ```
 
-**Requirements:** Python 3.7+, NumPy, Pandas, SciPy, Matplotlib
+**Requirements:** Python 3.7+, NumPy, Pandas, SciPy, Matplotlib, Piecewise-Regression
 
 ---
 
@@ -33,6 +33,8 @@ Use this package when your data has:
 - **Small to moderate sample sizes** (n < 5,000 recommended)
 
 **Don't use** if you need n > 46,340 observations.
+
+**NEW IN V0.4.0**: **Segmented Trend Analysis**. The `segmented_trend_test` function performs a hybrid segmented regression analysis. It uses **Piecewise Regression** (OLS) to automatically identify structural breakpoints in the time series, followed by robust **Mann-Kendall / Sen's Slope** estimation on each identified segment. This allows you to detect distinct phases in a trend (e.g., "Stable" -> "Rapid Decrease" -> "Stable").
 
 **NEW IN V0.3.0**: **Rolling Trend Analysis**. The `rolling_trend_test` function allows you to perform a rolling window analysis, calculating the Sen's slope, Mann-Kendall score, and confidence intervals over time. This enables the detection of when a trend started, stopped, or changed direction, rather than just providing a single global summary. The feature includes:
 *   Flexible window sizes (numeric or time-based, e.g., '10 years')
@@ -106,7 +108,8 @@ Confidence: 98.47%
 - **Data Quality Checks**: Automatic warnings for tied values, long runs, insufficient data
 - **Robust Methods**: ATS estimator for heavily censored data
 - **Flexible Testing**: Kendall's Tau-a or Tau-b, custom significance levels
-- **Rolling Trends** (New in v0.3.0): Analyze how trends evolve over time with `rolling_trend_test`. See [Example 30](./Examples/30_Rolling_Trend_Analysis).
+- **Rolling Trends** (New in v0.3.0): Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](./Examples/31_Rolling_Trend_Analysis).
+- **Segmented Trends** (New in v0.4.0): Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](./Examples/32_Segmented_Regression).
 - **Block Bootstrap** (New in v0.2.0): Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](./bootstrap.md) for details and [Example 29](./Examples/29_Block_Bootstrap_Autocorrelation).
 
 
@@ -118,16 +121,15 @@ Confidence: 98.47%
 ```python
 from MannKS import seasonal_trend_test, check_seasonality
 
-# Check if seasonality exists
-seasonality = check_seasonality(x=data, t=dates, period=12, season_type='month')
+# Check if seasonality exists (period=12 is inferred from season_type='month')
+seasonality = check_seasonality(x=data, t=dates, season_type='month')
 print(f"Seasonal pattern detected: {seasonality.is_seasonal}")
 
 # Run seasonal trend test
 result = seasonal_trend_test(
     x=data,
     t=dates,
-    period=12,
-    season_type='month',
+    season_type='month',         # Infers period=12 automatically
     agg_method='robust_median',  # Aggregates multiple samples per month
     slope_scaling='year'
 )
@@ -183,6 +185,8 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 - **[Analysis Notes](./Examples/Detailed_Guides/analysis_notes_guide.md)** - Interpreting data quality warnings
 - **[Trend Classification](./Examples/Detailed_Guides/trend_classification_guide.md)** - Understanding confidence levels
 - **[Bootstrap Methodology](./bootstrap.md)** - Block bootstrap for autocorrelated data
+- **[Rolling Trend Analysis](./Examples/Detailed_Guides/rolling_trend_guide.md)** - Moving window analysis
+- **[Segmented Trend Analysis](./Examples/Detailed_Guides/segmented_trend_guide.md)** - Structural breakpoint detection
 
 ### Examples
 The [Examples](./Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.

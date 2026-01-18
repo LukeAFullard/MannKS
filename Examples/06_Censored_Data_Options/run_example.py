@@ -88,13 +88,8 @@ output_buffer = io.StringIO()
 
 with contextlib.redirect_stdout(output_buffer):
     local_scope = {}
-    # We must ensure __file__ is available in the exec scope for the paths to work
-    # However, standard exec won't have it. We should probably hardcode the path relative to THIS script
-    # or rely on the fact that when run via `python3 file.py`, __file__ is set.
-    # But wait, we are executing string code. The string code uses __file__.
-    # When we exec() the string, `__file__` inside the string refers to... nothing unless we define it.
-
-    # We need to inject __file__ into global scope of exec
+    # Ensure correct path resolution when executing string code.
+    # We need to inject __file__ into the execution scope.
     exec_globals = globals().copy()
     exec_globals['__file__'] = __file__
 

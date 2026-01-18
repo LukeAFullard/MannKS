@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mannks"
-version = "0.3.0"
+version = "0.4.0"
 description = "Non-parametric trend analysis for unequally spaced time series with censored data"
 authors = ["Luke Fullard"]
 license = "MIT"
@@ -13,7 +13,12 @@ keywords = [
     "sen-slope",
     "trend-analysis",
     "censored-data",
-    "time-series"
+    "time-series",
+    "segmented-regression",
+    "piecewise-regression",
+    "breakpoint-detection",
+    "rolling-trend",
+    "bootstrap"
 ]
 
 packages = [{ include = "MannKS" }]
@@ -25,6 +30,7 @@ pandas = ">=1.1.0"
 scipy = ">=1.5.0"
 matplotlib = ">=3.3.0"
 seaborn = ">=0.11.0"
+piecewise-regression = "^1.5.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=6.0"
@@ -33,4 +39,3 @@ pytest-cov = "*"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-

@@ -54,8 +54,8 @@ print(f"  Trend Classification: {result.classification}")
 #   Confidence < 0.90   -> "No Trend" / "Stable"
 # (Note: The exact defaults depend on the alpha level provided, usually alpha=0.05 implies 95% cutoff)
 
-# But what if your organization uses different standards?
-# Maybe you want to be very strict (99% confidence) or very loose (80% confidence).
+# Organizations may have different standards for trend classification,
+# requiring strict (99% confidence) or loose (80% confidence) thresholds.
 
 # We can define a CUSTOM category map.
 # Keys are the minimum confidence threshold (0.0 to 1.0).

@@ -39,15 +39,17 @@ These are the essential parameters you will always need to provide.
 These parameters are crucial for defining the seasonal structure of your data. The goal is to correctly group your data into distinct seasons (like "January", "February", etc.) so the test can analyze them.
 
 #### `period`
--   **Type:** `int`, **Default:** `12`
+-   **Type:** `int`, **Default:** `None`
 -   **Description:** This defines the length of a full seasonal cycle.
--   **Usefulness and Nuances:** This parameter is primarily used when your time vector `t` is **numeric**. For example, if your time data is `[2001, 2001.25, 2001.5, 2002, 2002.25, 2002.5]`, you would use `period=4` to specify quarterly data. The default of `12` is for monthly data where `t` might be integer months. **If you are using datetime objects in `t`, the `season_type` parameter is strongly recommended as it is more explicit and powerful.**
+-   **Usefulness and Nuances:**
+    -   **Datetime Inputs:** If `t` contains datetime objects, this parameter is **automatically inferred** from the `season_type`. For example, `season_type='day_of_week'` automatically sets `period=7`. You only need to provide `period` if you want to override this default or use a custom cycle.
+    -   **Numeric Inputs:** If your time vector `t` is **numeric** (e.g., `[1, 2, 3...]`), this parameter is **required**. For example, if your numeric data represents quarters `[2001.0, 2001.25, 2001.5, 2001.75]`, you must specify `period=4`.
 
 #### `season_type`
 -   **Type:** `str`, **Default:** `'month'`
--   **Description:** When `t` contains datetime objects, this parameter specifies how to extract the seasonal component from each timestamp.
+-   **Description:** When `t` contains datetime objects, this parameter specifies how to extract the seasonal component from each timestamp. It also automatically sets the `period`.
 -   **Usefulness and Nuances:** This is the most flexible and common way to define seasons.
-    -   `'month'` (default): For standard monthly seasonality (12 seasons).
+    -   `'month'` (default): For standard monthly seasonality (Infers `period=12`).
     -   `'quarter'`: For quarterly data (4 seasons).
     -   `'day_of_week'`: For cycles within a week, like Monday vs. Tuesday (7 seasons).
     -   `'week_of_year'`: For weekly patterns across a year (52/53 seasons).

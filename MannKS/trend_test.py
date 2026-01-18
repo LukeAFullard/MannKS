@@ -427,15 +427,9 @@ def trend_test(
             else: trend = 'decreasing' if z < 0 else 'increasing'
 
     elif autocorr_method == 'yue_wang':
-        # Simpler correction: adjust variance by effective sample size
-        # Var*(n/n_eff) or Var*(n_eff/n)?
-        # Yue & Wang: Var_corrected = Var_original * (ESS correction factor)
-        # Typically ESS < n, so variance increases, Z decreases.
-        # Actually standard formula is Var(S) ~ n*(n-1)*(2n+5)/18.
-        # If samples are correlated, actual variance is HIGHER.
-        # Correction factor V* = V * (1 + 2*sum(rho...))
-        # And n_eff = n / (1 + 2*sum(rho...))
-        # So V* = V * (n / n_eff)
+        # Apply the Yue and Wang (2004) variance correction.
+        # The variance of S is inflated by a factor related to the effective sample size (ESS).
+        # V* = V * (n / n_eff)
         var_s_corrected = var_s * (len(x_filtered) / n_eff)
         z = _z_score(s, var_s_corrected)
         p, h, trend = _p_value(z, alpha, continuous_confidence=continuous_confidence)

@@ -266,8 +266,9 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
          # Calculate number of steps
          try:
             n_steps = int((t_max - t_min) / step_size) + 2 # Add buffer
-         except:
-            n_steps = 10000 # Safety
+         except (ValueError, TypeError, ZeroDivisionError):
+             # Catch potential overflow or invalid step sizes
+            n_steps = 10000
 
          for i in range(n_steps):
             current = t_min + i * step_size

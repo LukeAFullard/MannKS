@@ -7,37 +7,6 @@ import MannKS as mk
 import matplotlib.pyplot as plt
 
 # --- 1. Define the Example Code as a String ---
-# Note: In the exec() block, we need to handle paths dynamically or assume CWD.
-# For the generated README to be reproducible, we'll assume the user runs this
-# from the directory or we'll inject the path handling.
-# However, for simplicity and standard usage in these examples, we will keep the code clean
-# and handle the actual file saving path in the `exec` context if needed,
-# or just rely on the fact that we will move the files or run it in the right place.
-
-# To make the example code printed in README looks clean (e.g. plot_path='plot_none.png'),
-# but actually save files to the correct location when we run it here,
-# we can't easily intercept the string unless we modify the string itself.
-
-# Strategy: We will use the `example_code` string EXACTLY as we want it to appear in the README.
-# But when we `exec` it, we will monkeypatch or modify the `mk.trend_test` call OR
-# simply accept that files are created in CWD and then we move them.
-# Given the constraints, let's use the explicit path in the executed code but make it
-# readable in the README. Wait, the previous review said:
-# "The PNG files must be moved into the Examples/08_Aggregation_and_Clustered_Data/ directory."
-# And "It would be more robust if the script saved images to the same directory as the README"
-
-# So, we should construct the path in the code.
-# But showing `os.path.join(os.path.dirname(__file__), 'plot.png')` in a tutorial is ugly.
-# Solution: We can define `plot_dir = os.path.dirname(__file__)` (or similar) at the start
-# of the example code, or just use `.` and ensure we run it from the right dir?
-# The `run_example.py` is executed by me from the root.
-# So `plot_path='plot_none.png'` saves to root.
-
-# The cleanest way for the *generated README* (which is for the user) is to assume
-# they are running it in the folder.
-# But for *my execution* right now, I need to put the files in the folder.
-
-# Let's modify the example code to use a variable for the output directory.
 
 example_code = """
 import os
@@ -46,9 +15,7 @@ import pandas as pd
 import MannKS as mk
 import matplotlib.pyplot as plt
 
-# Determine where to save the plots (current directory by default)
-# When running this as part of the repo structure, we might want to be specific.
-# For this example, we'll save to the current directory.
+# Configure the output directory.
 output_dir = '.'
 
 # 1. Generate Synthetic Data with Ties and Clusters
@@ -165,13 +132,7 @@ script_dir = os.path.dirname(__file__)
 
 with contextlib.redirect_stdout(output_buffer):
     try:
-        # We replace the line "output_dir = '.'" with the actual path logic in execution ONLY.
-        # But wait, `exec` uses the string.
-        # So we can just prepopulate `output_dir` in `local_scope` and REMOVE the line from the executed string?
-        # Or simpler: Just set output_dir in the code string to use os.path.dirname(__file__) if it was running as a script.
-        # But we are exec-ing a string. __file__ might not be defined inside exec.
-
-        # Let's modify the string before exec to set the correct output path.
+        # Modify the string before exec to set the correct output path.
         # This way the generated README will show `output_dir = '.'` (clean),
         # but the execution will use the correct path.
 

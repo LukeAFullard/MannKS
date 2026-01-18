@@ -35,21 +35,16 @@ def run_sensitivity_analysis(n_sims=50, n=100, rho=0.6, slope=0.05, block_sizes=
 
     print(f"Running Sensitivity Analysis: {n_sims} simulations, N={n}, Rho={rho}...")
 
-    # We will compute the average p-value across simulations for each block size
-    # Ideally, for a true trend, p-value should be small.
+    # We compute the average p-value across simulations for each block size.
+    # For a true trend, p-value should be small.
     # For no trend, it should be uniformly distributed (mean 0.5).
-    # Let's use a borderline trend or a null case?
-    # The audit report says "Results should be stable for reasonable block sizes".
-    # Let's use a null case (slope=0) to see if Type I error rate (rejection rate) is stable,
-    # OR use a specific dataset and show how p-value changes?
-    # A simulation average is more robust. Let's track Rejection Rate (Type I error) vs Block Size for H0.
+    # We use a null case (slope=0) to see if Type I error rate (rejection rate) is stable.
+    # The audit report states: "Results should be stable for reasonable block sizes".
 
-    # Actually, let's look at a single representative realization for the plot to show "sensitivity",
-    # but run a small simulation for the table statistics.
-
-    # Let's do Rejection Rate under H0 (slope=0) as it's the most critical metric for validity.
+    # We track Rejection Rate (Type I error) vs Block Size for H0.
+    # Rejection Rate under H0 (slope=0) is the most critical metric for validity.
     # If block size is too small, rejection rate will be high (inflated).
-    # If block size is good, it should be near alpha.
+    # If block size is appropriate, it should be near alpha.
 
     alpha = 0.05
     true_slope = 0.0 # H0
@@ -101,9 +96,8 @@ def create_report(df_results: pd.DataFrame, output_dir: str, n, rho):
         f.write("## Results\n")
         f.write("The table below shows the Rejection Rate and Average Confidence Interval Width for various block sizes.\n\n")
 
-        # Determine optimal block size for context
-        # Politis & White formula typically gives N^(1/3) scaling
-        # For N=100, roughly 4-5? But depends on Rho.
+        # Determine optimal block size for context.
+        # Politis & White formula typically gives N^(1/3) scaling.
 
         df_display = df_results.copy()
         df_display['Rejection Rate'] = df_display['Rejection Rate'].apply(lambda x: f"{x:.2f}")

@@ -33,7 +33,7 @@ def test_median_thinning_logic():
     assert result.s == 1
     assert result.trend == 'indeterminate' # Sample size 2 is small, h might be False
 
-    # To check the actual values, we might need to debug or rely on 's'.
+    # Verification of values is inferred from 's'.
     # If aggregation worked, n should be 2.
     # We can infer n from s variance or by checking analysis notes if sample size is small.
     # Or just use a larger sample size.
