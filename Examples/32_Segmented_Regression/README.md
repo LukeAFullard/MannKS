@@ -22,62 +22,79 @@ import MannKS as mk
 from MannKS.segmented_trend_test import find_best_segmentation, calculate_breakpoint_probability
 from MannKS import plot_segmented_trend
 
+# -----------------------------------------------------------------------------
 # 1. Generate Synthetic Data with a Structural Break
+# -----------------------------------------------------------------------------
 # Scenario: A river's pollutant levels were stable/increasing until a
 # Policy Reform was introduced in 2010, after which they started decreasing.
+# We create a datetime range spanning 20 years.
 np.random.seed(42)
 dates = pd.date_range(start='2000-01-01', end='2020-01-01', freq='ME')
 
-# Use numeric time (seconds) for precise linear trend generation
+# Convert dates to numeric seconds for precise linear trend generation.
+# This ensures the underlying true signal is perfectly linear before adding noise.
 t_sec = dates.astype(np.int64) // 10**9
 t_sec = t_sec - t_sec[0] # Start at 0
 
-# True Breakpoint: June 2010
+# True Breakpoint: June 2010 (Policy Reform)
 break_date = pd.Timestamp('2010-06-01')
 break_sec = (break_date - dates[0]).total_seconds()
 
 # Define Slopes (units per second)
-# Approx 0.1 units/month increasing, then -0.3 units/month decreasing
-seconds_per_month = 30.44 * 24 * 3600
-# Target slopes per year for readability:
-# Slope 1: +1.2 units/year
-# Slope 2: -3.6 units/year
+# - Period 1 (Pre-2010): Increasing trend (+1.2 units/year)
+# - Period 2 (Post-2010): Decreasing trend (-3.6 units/year)
 slope1_per_year = 1.2
 slope2_per_year = -3.6
 slope1 = slope1_per_year / (365.25 * 24 * 3600)
 slope2 = slope2_per_year / (365.25 * 24 * 3600)
 
-# Generate values
+# Generate true values (piecewise linear function)
 values = np.zeros(len(dates))
 mask_before = t_sec < break_sec
 mask_after = t_sec >= break_sec
 
 values[mask_before] = slope1 * t_sec[mask_before]
-# Continuous hinge
+# Ensure continuous hinge at the breakpoint
 val_at_break = slope1 * break_sec
 values[mask_after] = val_at_break + slope2 * (t_sec[mask_after] - break_sec)
 
-# Add noise
+# Add Gaussian noise to simulate measurement error
 values += np.random.normal(0, 0.5, len(dates))
 
-# Add some censored data (values < 1.0)
+# -----------------------------------------------------------------------------
+# 2. Simulate Censored Data
+# -----------------------------------------------------------------------------
+# In environmental monitoring, low concentrations often fall below a
+# detection limit (e.g., < 1.0). We simulate this by marking values < 1.0
+# as censored strings ("<1.0").
 censored_mask = values < 1.0
 values_str = values.astype(str)
 values_str[censored_mask] = '<1.0'
 
-# Pre-process censored data
+# Pre-process censored data into a format suitable for MannKS
+# This converts "<1.0" into numeric 1.0 and sets censored=True
 df_censored = mk.prepare_censored_data(values_str)
 df_censored['date'] = dates
 
-# --- SCENARIO A: Censored Data Analysis ---
+# -----------------------------------------------------------------------------
+# 3. SCENARIO A: Analyzing Censored Data
+# -----------------------------------------------------------------------------
 print("--- SCENARIO A: Censored Data Analysis ---")
+# We use 'find_best_segmentation' to automatically determine the optimal
+# number of breakpoints (0, 1, or 2) using the BIC criterion.
+#
+# Key Parameters:
+# - max_breakpoints=2: Search for up to 2 changes in trend.
+# - use_bagging=True: Use Bootstrap Aggregating to find robust breakpoint locations.
+#                     This is crucial for censored/noisy data to avoid local minima.
+# - slope_scaling='year': Report slopes in units per year (easier to interpret).
 print("Running Model Selection (0-2 breakpoints) on Censored Data...")
 result_censored, summary_censored = find_best_segmentation(
     x=df_censored,
     t=df_censored['date'],
     max_breakpoints=2,
     use_bagging=True,
-    n_bootstrap=20,
+    n_bootstrap=20, # Use >=100 for production
     alpha=0.05,
     slope_scaling='year'
 )
@@ -86,7 +103,8 @@ print("\nModel Selection Summary (Censored):")
 print(summary_censored.to_markdown(index=False))
 print(f"\nBest Model (Censored): {result_censored.n_breakpoints} Breakpoints")
 
-# Visualize Censored
+# Visualize the result
+# The plot will show the segments, confidence intervals, and breakpoints.
 plot_path_censored = os.path.join(os.path.dirname(__file__), 'segmented_plot_censored.png')
 plot_segmented_trend(
     result_censored,
@@ -96,10 +114,12 @@ plot_segmented_trend(
 )
 print(f"Plot saved to {plot_path_censored}")
 
-# --- SCENARIO B: Uncensored Data Analysis ---
+# -----------------------------------------------------------------------------
+# 4. SCENARIO B: Analyzing Uncensored Data (Hypothetical)
+# -----------------------------------------------------------------------------
 print("\n--- SCENARIO B: Uncensored Data Analysis (Hypothetical) ---")
-# If we had better detection limits, the data would look like the raw 'values'.
-# We run the analysis on the raw numeric values.
+# For comparison, we run the same analysis on the raw numeric values,
+# assuming we had a perfect instrument with no detection limit.
 print("Running Model Selection (0-2 breakpoints) on Uncensored Data...")
 result_uncensored, summary_uncensored = find_best_segmentation(
     x=values,
@@ -125,18 +145,26 @@ plot_segmented_trend(
 )
 print(f"Plot saved to {plot_path_uncensored}")
 
-# Compare Breakpoints with Standard OLS (No Bagging) for Reference
+# -----------------------------------------------------------------------------
+# 5. Deep Dive: Bootstrap vs Standard OLS
+# -----------------------------------------------------------------------------
+# We compare two methods for calculating breakpoint confidence intervals (CIs):
+# 1. Bootstrap (Bagging): Non-parametric, handles complex error distributions.
+#    Often yields wider, asymmetric CIs that better reflect reality.
+# 2. Standard OLS: Parametric, assumes normal errors. Often yields symmetric,
+#    optimistically narrow CIs.
 print("\n--- CI Comparison: Bootstrap vs Standard OLS ---")
 
 # Re-run Censored without bagging to get Standard OLS CIs
 if result_censored.n_breakpoints > 0:
-    # Bootstrap CI
+    # Bootstrap CI (from previous run)
     bp_cens = result_censored.breakpoints[0]
     ci_cens = result_censored.breakpoint_cis[0]
     print(f"Censored (Bootstrap): {bp_cens} (CI: {ci_cens[0]} to {ci_cens[1]})")
 
     # Standard OLS CI
-    # We fix n_breakpoints to match the best result found above
+    # We fix n_breakpoints to match the best result found above.
+    # setting use_bagging=False triggers the standard OLS path.
     res_cens_std = mk.segmented_trend_test(
         df_censored, df_censored['date'],
         n_breakpoints=result_censored.n_breakpoints,
@@ -184,6 +212,13 @@ if result_uncensored.n_breakpoints > 0:
     )
     print(f"Standard OLS Uncensored Plot saved to {plot_path_uncens_ols}")
 
+# -----------------------------------------------------------------------------
+# 6. Breakpoint Probability Analysis
+# -----------------------------------------------------------------------------
+# Using bagging results, we can ask probabilistic questions:
+# "What is the probability that the trend change occurred in 2010?"
+# This aggregates the counts from all bootstrap iterations.
+
 # Calculate Probability for Uncensored
 prob_uncens = calculate_breakpoint_probability(
     result_uncensored,
@@ -192,7 +227,7 @@ prob_uncens = calculate_breakpoint_probability(
 )
 print(f"Uncensored: Probability change occurred in 2010: {prob_uncens:.1%}")
 
-# Calculate Probability for Censored (since we used bagging there too)
+# Calculate Probability for Censored
 prob_cens = calculate_breakpoint_probability(
     result_censored,
     start_date='2010-01-01',

@@ -637,6 +637,10 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
 
     from ._datetime import _to_numeric_time
 
+    # Determine CI label from alpha if available
+    alpha_val = getattr(result, 'alpha', 0.05)
+    ci_percent = int((1 - alpha_val) * 100)
+
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Prepare data for plotting
@@ -706,7 +710,7 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
                     y_lower = x_center + slope_lower * (x_seg_numeric - t_center)
                     y_upper = x_center + slope_upper * (x_seg_numeric - t_center)
 
-                    ax.fill_between(x_seg_plot, y_lower, y_upper, alpha=0.2, label=f'95% CI (Seg {i+1})')
+                    ax.fill_between(x_seg_plot, y_lower, y_upper, alpha=0.2, label=f'{ci_percent}% CI (Seg {i+1})')
 
 
     # Plot Breakpoints and their CIs
@@ -718,7 +722,7 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
             ci_low, ci_high = result.breakpoint_cis[i]
             # Add shaded region
             if pd.notna(ci_low) and pd.notna(ci_high):
-                ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label='Breakpoint 95% CI')
+                ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label=f'Breakpoint {ci_percent}% CI')
 
     ax.set_title('Segmented Trend Analysis')
     ax.set_xlabel('Time')

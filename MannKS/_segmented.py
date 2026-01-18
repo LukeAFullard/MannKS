@@ -2,11 +2,11 @@
 import numpy as np
 import pandas as pd
 import piecewise_regression
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, t as t_dist
 from scipy.signal import find_peaks
 import warnings
 
-def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05):
+def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05, random_state=None):
     """
     Bootstrap the breakpoint detection to find robust breakpoint locations.
 
@@ -16,6 +16,7 @@ def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05):
         n_breakpoints: Number of breakpoints to find
         n_bootstrap: Number of bootstrap iterations
         alpha_n: Significance level (not used directly here but standard arg)
+        random_state: Seed for random number generator.
 
     Returns:
         all_breakpoints: List of lists. Each inner list contains breakpoints
@@ -28,9 +29,12 @@ def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05):
     n = len(x)
     all_breakpoints = []
 
+    # Initialize random generator
+    rng = np.random.default_rng(random_state)
+
     for _ in range(n_bootstrap):
         # Bootstrap Resampling
-        indices = np.random.choice(n, n, replace=True)
+        indices = rng.choice(n, n, replace=True)
         t_boot = t[indices]
         x_boot = x[indices]
 
@@ -68,7 +72,7 @@ def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05):
 
     return all_breakpoints
 
-def find_bagged_breakpoints(t, x, n_breakpoints, n_bootstrap=100):
+def find_bagged_breakpoints(t, x, n_breakpoints, n_bootstrap=100, random_state=None):
     """
     Find robust breakpoints using Bagging and KDE per breakpoint index.
 
@@ -81,6 +85,7 @@ def find_bagged_breakpoints(t, x, n_breakpoints, n_bootstrap=100):
         x: Data vector
         n_breakpoints: Number of breakpoints to identify
         n_bootstrap: Number of bootstrap iterations
+        random_state: Seed for random number generator.
 
     Returns:
         robust_breakpoints: Array of robust breakpoint locations
@@ -93,7 +98,7 @@ def find_bagged_breakpoints(t, x, n_breakpoints, n_bootstrap=100):
     if n_breakpoints == 0:
         return np.array([]), []
 
-    all_bps_structured = _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap)
+    all_bps_structured = _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap, random_state=random_state)
 
     robust_bps = []
 
@@ -145,7 +150,7 @@ class HybridSegmentedTrend:
     identified segments to estimate robust slopes and confidence intervals.
     """
 
-    def __init__(self, max_breakpoints=5, n_breakpoints=None, use_bagging=False, n_bootstrap=100, criterion='bic'):
+    def __init__(self, max_breakpoints=5, n_breakpoints=None, use_bagging=False, n_bootstrap=100, criterion='bic', random_state=None):
         """
         Args:
             max_breakpoints (int): Maximum number of breakpoints to search for (if n_breakpoints is None).
@@ -153,12 +158,14 @@ class HybridSegmentedTrend:
             use_bagging (bool): Use bootstrap aggregating for breakpoint location.
             n_bootstrap (int): Number of bootstrap samples if bagging is used.
             criterion (str): Model selection criterion ('bic' or 'aic'). Default 'bic'.
+            random_state (int, optional): Seed for random number generator.
         """
         self.max_breakpoints = max_breakpoints
         self.n_breakpoints = n_breakpoints
         self.use_bagging = use_bagging
         self.n_bootstrap = n_bootstrap
         self.criterion = criterion.lower()
+        self.random_state = random_state
 
         self.breakpoints_ = None
         self.breakpoint_cis_ = None
@@ -283,7 +290,25 @@ class HybridSegmentedTrend:
                             for key, val in estimates.items():
                                 if key.startswith('breakpoint'):
                                     est = val['estimate']
-                                    ci = val.get('confidence_interval')
+
+                                    # Manually calculate CI for requested alpha
+                                    # piecewise_regression defaults to 95%
+                                    se = val.get('se')
+                                    if se is not None and not np.isnan(se):
+                                        # df = n_samples - n_params
+                                        # n_params = 2 (const, beta1) + n_breakpoints (alphas) + n_breakpoints (bps)
+                                        # For muggeo: roughly 2 + 2*k
+                                        n_params = 2 + 2 * k
+                                        df = len(x) - n_params
+                                        if df > 0:
+                                            # t-statistic for two-tailed alpha
+                                            t_crit = t_dist.ppf(1 - alpha / 2, df)
+                                            ci = (est - t_crit * se, est + t_crit * se)
+                                        else:
+                                            ci = (np.nan, np.nan)
+                                    else:
+                                        ci = val.get('confidence_interval', (np.nan, np.nan))
+
                                     if ci is None: ci = (np.nan, np.nan)
                                     bps_data.append((est, ci))
 
@@ -300,7 +325,7 @@ class HybridSegmentedTrend:
 
         # 2. Refine Locations with Bagging (if enabled and N > 0)
         if self.use_bagging and best_n > 0:
-            robust_bps, all_samples_structured = find_bagged_breakpoints(t, x_ols, best_n, self.n_bootstrap)
+            robust_bps, all_samples_structured = find_bagged_breakpoints(t, x_ols, best_n, self.n_bootstrap, random_state=self.random_state)
             self.bootstrap_samples_ = all_samples_structured
 
             if len(robust_bps) == best_n:
