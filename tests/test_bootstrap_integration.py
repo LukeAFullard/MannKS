@@ -74,7 +74,7 @@ def test_seasonal_trend_test_integration_bootstrap():
     np.random.seed(42)
     # 5 years of monthly data
     n_years = 10
-    dates = pd.date_range(start='2000-01-01', periods=n_years*12, freq='M')
+    dates = pd.date_range(start='2000-01-01', periods=n_years*12, freq='ME')
     # Seasonal signal + trend + noise
     seasonal = np.tile(np.sin(np.linspace(0, 2*np.pi, 12)), n_years)
     trend = np.linspace(0, 5, n_years*12)

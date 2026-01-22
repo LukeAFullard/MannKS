@@ -28,6 +28,9 @@ def rolling_trend_test(
     slope_scaling: Optional[str] = None,
     x_unit: str = "units",
     continuous_confidence: bool = True,
+    large_dataset_mode: str = 'auto',
+    max_pairs: Optional[int] = None,
+    random_state: Optional[int] = None,
     **kwargs
 ) -> pd.DataFrame:
     """
@@ -57,6 +60,16 @@ def rolling_trend_test(
         x_unit: Unit of measurement for x (e.g., 'mg/L').
         continuous_confidence: If True (default for rolling), uses continuous confidence (C)
                                interpretation. If False, uses classical p-value testing.
+        large_dataset_mode : str, default 'auto'
+            Controls algorithm selection for large datasets:
+            - 'auto': Automatic based on sample size (recommended)
+            - 'full': Force exact calculations (may be slow/crash for large n)
+            - 'fast': Force fast approximations
+            - 'aggregate': Force aggregation workflow
+        max_pairs : int, optional
+            Maximum number of pairs to sample in fast mode.
+        random_state : int, optional
+            Random seed for reproducible results in fast mode.
         **kwargs: Additional arguments passed to `trend_test` or `seasonal_trend_test`.
 
     Returns:
@@ -183,6 +196,9 @@ def rolling_trend_test(
                 'slope_scaling': slope_scaling,
                 'x_unit': x_unit,
                 'continuous_confidence': continuous_confidence,
+                'large_dataset_mode': large_dataset_mode,
+                'max_pairs': max_pairs,
+                'random_state': random_state,
                 **kwargs
             }
 
@@ -234,6 +250,7 @@ def rolling_trend_test(
                 'slope_per_second': result.slope_per_second,
                 'lower_ci_per_second': result.lower_ci_per_second,
                 'upper_ci_per_second': result.upper_ci_per_second,
+                'warnings': result.warnings
             })
 
         except Exception as e:
@@ -245,7 +262,7 @@ def rolling_trend_test(
             'window_start', 'window_end', 'window_center', 'n_obs',
             'slope', 'lower_ci', 'upper_ci', 'p_value', 'h',
             'classification', 'C', 'Cd', 'tau', 's',
-            'intercept', 'slope_per_second', 'lower_ci_per_second', 'upper_ci_per_second'
+            'intercept', 'slope_per_second', 'lower_ci_per_second', 'upper_ci_per_second', 'warnings'
         ])
 
     return pd.DataFrame(results)
@@ -278,7 +295,8 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
             windows.append((current, win_end))
 
             if len(windows) > 10000:
-                raise ValueError("Too many windows generated. Check window/step sizes.")
+                warnings.warn("Too many windows generated. Check window/step sizes.", UserWarning)
+                return []
     else:
         # Datetime uses Timedelta/Offset which is robust to accumulation usually
         # because it operates on calendar logic or fixed integers (nanoseconds)
@@ -289,7 +307,8 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
             current += step_size
 
             if len(windows) > 10000:
-                raise ValueError("Too many windows generated. Check window/step sizes.")
+                warnings.warn("Too many windows generated. Check window/step sizes.", UserWarning)
+                return []
 
     return windows
 

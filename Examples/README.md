@@ -87,6 +87,10 @@ Each example is a self-contained "chapter" that includes the full Python code, t
     *   **Goal:** Learn how to perform a rolling window analysis to detect when trends start, stop, or change direction over time.
 *   [**Example 32: Segmented Sen's Slope & Breakpoint Probability**](./32_Segmented_Regression/README.md)
     *   **Goal:** Use hybrid segmented regression to detect structural changes (breakpoints) in trends and calculate the probability of a change occurring in a specific year.
+*   [**Example 33: Segmented Trend Alpha**](./33_Segmented_Trend_Alpha/README.md)
+    *   **Goal:** Demonstrate how to use the `alpha` parameter in segmented trend analysis to control the confidence intervals of breakpoints and slopes.
+*   [**Example 35: Large Dataset Trend Analysis**](./35_Large_Data_Trend/README.md)
+    *   **Goal:** Demonstrate how to efficiently analyze large datasets (n > 5,000) using fast stochastic estimators and stratified sampling.
 
 ## Detailed Guides
 
@@ -103,3 +107,4 @@ In addition to the practical examples, the following deep-dive guides are availa
 *   [**Trend Test Parameters Guide**](./Detailed_Guides/trend_test_parameters_guide.md): Parameter reference for `trend_test`.
 *   [**Rolling Trend Analysis Guide**](./Detailed_Guides/rolling_trend_guide.md): Moving window analysis.
 *   [**Segmented Trend Analysis Guide**](./Detailed_Guides/segmented_trend_guide.md): Structural breakpoint detection.
+*   [**Large Dataset Analysis Guide**](./Detailed_Guides/large_dataset_guide.md): Strategies for analyzing big data.

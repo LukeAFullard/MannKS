@@ -68,7 +68,8 @@ def test_seasonal_slope_scaling():
     true_slope_per_sec = 10.0 / seconds_per_year
 
     # Use numeric timestamps for value generation to be precise
-    t_num = t.astype(np.int64) // 10**9
+    # Robustly convert to seconds regardless of resolution (ns, us, etc.)
+    t_num = t.map(pd.Timestamp.timestamp).to_numpy()
     values = true_slope_per_sec * (t_num - t_num[0])
 
     # Add a tiny bit of noise to avoid perfect fit issues but keep trend clear

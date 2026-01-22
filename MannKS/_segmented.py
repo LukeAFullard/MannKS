@@ -176,7 +176,8 @@ class HybridSegmentedTrend:
         self.selection_summary_ = None
         self.bootstrap_samples_ = None
 
-    def fit(self, t, x, censored=None, cen_type=None, lt_mult=0.5, gt_mult=1.1, alpha=0.05):
+    def fit(self, t, x, censored=None, cen_type=None, lt_mult=0.5, gt_mult=1.1, alpha=0.05,
+            large_dataset_mode='auto', max_pairs=None):
         t = np.asarray(t)
         x = np.asarray(x)
 
@@ -373,6 +374,8 @@ class HybridSegmentedTrend:
         # --- Phase 2: Robust Estimation (MannKS) ---
         # Import here to avoid potential circular dependencies.
         from ._stats import (
+            _sens_estimator_adaptive,
+            _sens_estimator_censored_adaptive,
             _sens_estimator_unequal_spacing,
             _sens_estimator_censored,
             _mk_score_and_var_censored,
@@ -405,10 +408,17 @@ class HybridSegmentedTrend:
             if censored is not None:
                 cen_seg = censored[mask]
                 cen_type_seg = cen_type[mask]
-                slopes = _sens_estimator_censored(x_seg, t_seg, cen_type_seg, lt_mult, gt_mult)
+                # Use adaptive censored estimator
+                slopes = _sens_estimator_censored_adaptive(
+                    x_seg, t_seg, cen_type_seg, lt_mult, gt_mult,
+                    max_pairs=max_pairs, random_state=self.random_state
+                )
                 s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, cen_seg, cen_type_seg)
             else:
-                slopes = _sens_estimator_unequal_spacing(x_seg, t_seg)
+                # Use adaptive estimator
+                slopes = _sens_estimator_adaptive(
+                    x_seg, t_seg, max_pairs=max_pairs, random_state=self.random_state
+                )
                 dummy_cen = np.zeros(len(x_seg), dtype=bool)
                 dummy_type = np.full(len(x_seg), 'not', dtype=object)
                 s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, dummy_cen, dummy_type)
@@ -417,7 +427,13 @@ class HybridSegmentedTrend:
                 slope = np.nan
             else:
                 slope = np.nanmedian(slopes)
-            lower_ci, upper_ci = _confidence_intervals(slopes, var_s, alpha=alpha)
+
+            # Confidence Intervals
+            # Scale total_pairs for correct CIs if subsampling was used
+            n_seg = len(x_seg)
+            total_pairs = n_seg * (n_seg - 1) // 2
+
+            lower_ci, upper_ci = _confidence_intervals(slopes, var_s, alpha=alpha, total_pairs=total_pairs)
 
             # Robust Intercept
             if censored is not None:

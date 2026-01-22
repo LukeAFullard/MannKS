@@ -4,6 +4,7 @@ the LWP-TRENDS R script.
 """
 import pandas as pd
 import numpy as np
+import warnings
 from scipy.stats import norm
 from collections import namedtuple
 
@@ -79,7 +80,7 @@ def regional_test(
     """
     RegionalTrendResult = namedtuple('RegionalTrendResult',
                                      ['M', 'TAU', 'VarTAU', 'CorrectedVarTAU',
-                                      'DT', 'CT'])
+                                      'DT', 'CT', 'warnings'])
 
     # --- 1. Input Validation ---
     required_trend_cols = [site_col, s_col, c_col]
@@ -92,93 +93,115 @@ def regional_test(
         raise ValueError(f"time_series_data DataFrame must contain the "
                          f"following columns: {required_ts_cols}")
 
-    # --- 2. Determine Modal Direction and Aggregate TAU ---
-    results = trend_results.dropna(subset=[s_col, c_col]).copy()
-    M = len(results)
+    # Capture warnings
+    captured_warnings = []
 
-    if M == 0:
-        return RegionalTrendResult(0, np.nan, np.nan, np.nan, 'Insufficient Data', np.nan)
+    with warnings.catch_warnings(record=True) as w_log:
+        warnings.simplefilter("always")
 
-    # Determine the modal direction
-    s_signs = np.sign(results[s_col])
-    modal_direction = np.sign(np.sum(s_signs) + np.sum(s_signs == 0) / 2)
-    if modal_direction == 0:
-        return RegionalTrendResult(M, 0.5, np.nan, np.nan,
-                                   'No Clear Direction', np.nan)
+        # --- 2. Determine Modal Direction and Aggregate TAU ---
+        results = trend_results.dropna(subset=[s_col, c_col]).copy()
+        M = len(results)
 
-    DT = 'Increasing' if modal_direction == 1 else 'Decreasing'
+        if M == 0:
+            # Collect warnings
+            for w in w_log:
+                captured_warnings.append(str(w.message))
+            return RegionalTrendResult(0, np.nan, np.nan, np.nan, 'Insufficient Data', np.nan, captured_warnings)
 
-    # Calculate TAU
-    num_in_modal_direction = (np.sum(s_signs == modal_direction) +
-                              np.sum(s_signs == 0) / 2)
-    TAU = num_in_modal_direction / M
+        # Determine the modal direction
+        s_signs = np.sign(results[s_col])
+        modal_direction = np.sign(np.sum(s_signs) + np.sum(s_signs == 0) / 2)
+        if modal_direction == 0:
+            # Collect warnings
+            for w in w_log:
+                captured_warnings.append(str(w.message))
+            return RegionalTrendResult(M, 0.5, np.nan, np.nan,
+                                    'No Clear Direction', np.nan, captured_warnings)
 
-    # --- 3. Inter-site Covariance Calculation ---
-    # Calculate the probability of being in the modal direction for each site
-    results['p_modal'] = np.where(s_signs == modal_direction,
-                                  results[c_col], 1 - results[c_col])
+        DT = 'Increasing' if modal_direction == 1 else 'Decreasing'
 
-    # Uncorrected variance
-    sum_var_tau = np.sum(results['p_modal'] * (1 - results['p_modal']))
-    VarTAU = (1 / M**2) * sum_var_tau
+        # Calculate TAU
+        num_in_modal_direction = (np.sum(s_signs == modal_direction) +
+                                np.sum(s_signs == 0) / 2)
+        TAU = num_in_modal_direction / M
 
-    # Site alignment validation
-    sites_in_trends = set(results[site_col].unique())
-    sites_in_ts = set(time_series_data[site_col].unique())
+        # --- 3. Inter-site Covariance Calculation ---
+        # Calculate the probability of being in the modal direction for each site
+        results['p_modal'] = np.where(s_signs == modal_direction,
+                                    results[c_col], 1 - results[c_col])
 
-    if not sites_in_trends.issubset(sites_in_ts):
-        missing_sites = sites_in_trends - sites_in_ts
-        raise ValueError(f"Sites in trend_results not found in time_series_data: {missing_sites}")
+        # Uncorrected variance
+        sum_var_tau = np.sum(results['p_modal'] * (1 - results['p_modal']))
+        VarTAU = (1 / M**2) * sum_var_tau
 
-    # Pivot the time series data to a wide format
-    ts_wide = time_series_data.pivot_table(index=time_col,
-                                           columns=site_col,
-                                           values=value_col)
+        # Site alignment validation
+        sites_in_trends = set(results[site_col].unique())
+        sites_in_ts = set(time_series_data[site_col].unique())
 
-    # Align columns with trend_results
-    sites_in_common = results[site_col].unique()
-    ts_wide = ts_wide[sites_in_common]
+        if not sites_in_trends.issubset(sites_in_ts):
+            missing_sites = sites_in_trends - sites_in_ts
+            raise ValueError(f"Sites in trend_results not found in time_series_data: {missing_sites}")
 
-    if ts_wide.empty:
-        import warnings
-        warnings.warn("Time series pivot resulted in empty DataFrame. Check that timestamps align across sites.", UserWarning)
-        return RegionalTrendResult(M, TAU, VarTAU, np.nan, DT, np.nan)
+        # Pivot the time series data to a wide format
+        ts_wide = time_series_data.pivot_table(index=time_col,
+                                            columns=site_col,
+                                            values=value_col)
 
-    # Calculate the pairwise correlation matrix
-    cor_matrix = ts_wide.corr(method='pearson')
+        # Align columns with trend_results
+        sites_in_common = results[site_col].unique()
+        ts_wide = ts_wide[sites_in_common]
 
-    # Calculate the covariance term
-    p_modal_series = results.set_index(site_col)['p_modal']
-    site_variances = p_modal_series * (1 - p_modal_series)
-    cov_matrix = np.outer(np.sqrt(site_variances), np.sqrt(site_variances))
+        if ts_wide.empty:
+            warnings.warn("Time series pivot resulted in empty DataFrame. Check that timestamps align across sites.", UserWarning)
+            # Collect warnings
+            for w in w_log:
+                captured_warnings.append(str(w.message))
+            return RegionalTrendResult(M, TAU, VarTAU, np.nan, DT, np.nan, captured_warnings)
 
-    # Align the correlation matrix with the covariance matrix
-    cor_matrix = cor_matrix.reindex(index=p_modal_series.index, columns=p_modal_series.index)
+        # Calculate the pairwise correlation matrix
+        cor_matrix = ts_wide.corr(method='pearson')
 
-    cov_term_matrix = cov_matrix * cor_matrix
+        # Calculate the covariance term
+        p_modal_series = results.set_index(site_col)['p_modal']
+        site_variances = p_modal_series * (1 - p_modal_series)
+        cov_matrix = np.outer(np.sqrt(site_variances), np.sqrt(site_variances))
 
-    # Sum the lower triangle of the covariance term matrix
-    sum_cov_term = np.sum(np.tril(cov_term_matrix, k=-1))
+        # Align the correlation matrix with the covariance matrix
+        cor_matrix = cor_matrix.reindex(index=p_modal_series.index, columns=p_modal_series.index)
 
-    # Calculate the corrected variance
-    CorrectedVarTAU = (1 / M**2) * (sum_var_tau + 2 * sum_cov_term)
+        cov_term_matrix = cov_matrix * cor_matrix
 
-    # --- 4. Calculate Final Regional Trend Confidence ---
-    if CorrectedVarTAU > 0:
-        z_score = (TAU - 0.5) / np.sqrt(CorrectedVarTAU)
-        CT = norm.cdf(z_score)
-    else:
-        # If variance is zero, we are 100% confident in the direction indicated by TAU
-        # provided TAU is not 0.5.
-        if TAU > 0.5:
-            CT = 1.0
-        elif TAU < 0.5:
-            # If TAU < 0.5, it contradicts the modal direction definition (TAU >= 0.5),
-            # but for completeness:
-            CT = 0.0
+        # Sum the lower triangle of the covariance term matrix
+        sum_cov_term = np.sum(np.tril(cov_term_matrix, k=-1))
+
+        # Calculate the corrected variance
+        CorrectedVarTAU = (1 / M**2) * (sum_var_tau + 2 * sum_cov_term)
+
+        # --- 4. Calculate Final Regional Trend Confidence ---
+        if CorrectedVarTAU > 0:
+            z_score = (TAU - 0.5) / np.sqrt(CorrectedVarTAU)
+            CT = norm.cdf(z_score)
         else:
-            # TAU = 0.5 means no direction
-            CT = 0.5
+            # If variance is zero, we are 100% confident in the direction indicated by TAU
+            # provided TAU is not 0.5.
+            if TAU > 0.5:
+                CT = 1.0
+            elif TAU < 0.5:
+                # If TAU < 0.5, it contradicts the modal direction definition (TAU >= 0.5),
+                # but for completeness:
+                CT = 0.0
+            else:
+                # TAU = 0.5 means no direction
+                CT = 0.5
+
+        # Collect warnings
+        for w in w_log:
+            captured_warnings.append(str(w.message))
+
+    # Re-issue warnings
+    for w_str in captured_warnings:
+        warnings.warn(w_str, UserWarning)
 
     return RegionalTrendResult(M=M, TAU=TAU, VarTAU=VarTAU,
-                               CorrectedVarTAU=CorrectedVarTAU, DT=DT, CT=CT)
+                               CorrectedVarTAU=CorrectedVarTAU, DT=DT, CT=CT, warnings=captured_warnings)

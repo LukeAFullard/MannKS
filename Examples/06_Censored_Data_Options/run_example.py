@@ -52,7 +52,7 @@ plot_path_robust = os.path.join(os.path.dirname(__file__), 'plot_robust.png')
 result_robust = mk.trend_test(
     df, t,
     mk_test_method='robust',       # Conservative ranking
-    sens_slope_method='nan',       # Exclude ambiguous slopes
+    sens_slope_method='unbiased',  # Exclude ambiguous slopes
     plot_path=plot_path_robust
 )
 print(f"Trend: {result_robust.trend}")

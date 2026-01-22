@@ -12,7 +12,7 @@ from ._helpers import _get_slope_scaling_factor
 _Segmented_Trend_Test_Tuple = namedtuple('Segmented_Trend_Test', [
     'n_breakpoints', 'breakpoints', 'breakpoint_cis', 'segments',
     'is_datetime', 'bic', 'aic', 'score', 'selection_summary', 'bootstrap_samples',
-    'alpha'
+    'alpha', 'warnings', 'computation_mode'
 ])
 
 class SegmentedTrendResult(_Segmented_Trend_Test_Tuple):
@@ -148,6 +148,8 @@ def segmented_trend_test(
     n_bootstrap: int = 100,
     slope_scaling: Optional[str] = None,
     random_state: Optional[int] = None,
+    large_dataset_mode: str = 'auto',
+    max_pairs: Optional[int] = None,
     **kwargs
 ):
     """
@@ -169,6 +171,8 @@ def segmented_trend_test(
         n_bootstrap: Number of bootstrap iterations if bagging is enabled.
         slope_scaling: Unit to scale the slope to (e.g. 'year'). Only for datetime t.
         random_state: Seed for random number generator.
+        large_dataset_mode: Controls large dataset handling (passed to slope estimator).
+        max_pairs: Max pairs for fast slope estimation.
         **kwargs: Additional arguments for trend estimation (e.g. lt_mult, gt_mult).
 
     Returns:
@@ -181,90 +185,128 @@ def segmented_trend_test(
         and unscaled slope (units per second). If you wish to reconstruct the line using
         the scaled slope, you must adjust the time variable accordingly.
     """
-    # 1. Data Prep
-    data_filtered, is_datetime = _prepare_data(x, t, hicensor)
+    # Capture warnings
+    captured_warnings = []
 
-    x_val = data_filtered['value'].to_numpy()
-    t_numeric = data_filtered['t'].to_numpy()
-    censored = data_filtered['censored'].to_numpy()
-    cen_type = data_filtered['cen_type'].to_numpy()
+    with warnings.catch_warnings(record=True) as w_log:
+        warnings.simplefilter("always")
 
-    if len(x_val) < 2:
-        raise ValueError("Insufficient data for segmented analysis.")
+        # 1. Data Prep
+        data_filtered, is_datetime = _prepare_data(x, t, hicensor)
 
-    # 2. Fit Hybrid Model
-    hybrid_model = _HybridSegmentedTrend(
-        max_breakpoints=max_breakpoints,
-        n_breakpoints=n_breakpoints,
-        use_bagging=use_bagging,
-        n_bootstrap=n_bootstrap,
-        criterion=criterion,
-        random_state=random_state
-    )
+        x_val = data_filtered['value'].to_numpy()
+        t_numeric = data_filtered['t'].to_numpy()
+        censored = data_filtered['censored'].to_numpy()
+        cen_type = data_filtered['cen_type'].to_numpy()
 
-    # Extract kwargs relevant for estimation
-    lt_mult = kwargs.get('lt_mult', 0.5)
-    gt_mult = kwargs.get('gt_mult', 1.1)
+        if len(x_val) < 2:
+            warnings.warn("Insufficient data for segmented analysis.", UserWarning)
+            # Collect warnings (including the one we just issued)
+            for w in w_log:
+                captured_warnings.append(str(w.message))
 
-    hybrid_model.fit(t_numeric, x_val, censored, cen_type, lt_mult, gt_mult, alpha=alpha)
+            return SegmentedTrendResult(
+                n_breakpoints=0,
+                breakpoints=[],
+                breakpoint_cis=[],
+                segments=pd.DataFrame(),
+                is_datetime=is_datetime,
+                bic=np.nan,
+                aic=np.nan,
+                score=np.nan,
+                selection_summary=None,
+                bootstrap_samples=None,
+                alpha=alpha,
+                warnings=captured_warnings,
+                computation_mode='insufficient'
+            )
 
-    # 3. Format Results
-    breakpoints = hybrid_model.breakpoints_
-    n_bp = hybrid_model.n_breakpoints_
+        # 2. Fit Hybrid Model
+        hybrid_model = _HybridSegmentedTrend(
+            max_breakpoints=max_breakpoints,
+            n_breakpoints=n_breakpoints,
+            use_bagging=use_bagging,
+            n_bootstrap=n_bootstrap,
+            criterion=criterion,
+            random_state=random_state
+        )
 
-    # Convert breakpoints back to original time format if datetime
-    if is_datetime:
-        breakpoints_final = pd.to_datetime(breakpoints, unit='s')
+        # Extract kwargs relevant for estimation
+        lt_mult = kwargs.get('lt_mult', 0.5)
+        gt_mult = kwargs.get('gt_mult', 1.1)
 
-        # Convert CIs to Datetime
-        breakpoint_cis_final = []
-        if hybrid_model.breakpoint_cis_:
-            for ci in hybrid_model.breakpoint_cis_:
-                # ci should be [low, high] in numeric time
-                if isinstance(ci, (list, tuple, np.ndarray)) and len(ci) == 2:
-                    low_val = ci[0]
-                    high_val = ci[1]
+        hybrid_model.fit(
+            t_numeric, x_val, censored, cen_type, lt_mult, gt_mult,
+            alpha=alpha,
+            large_dataset_mode=large_dataset_mode,
+            max_pairs=max_pairs
+        )
 
-                    low_dt = pd.to_datetime(low_val, unit='s') if pd.notna(low_val) else pd.NaT
-                    high_dt = pd.to_datetime(high_val, unit='s') if pd.notna(high_val) else pd.NaT
-                    breakpoint_cis_final.append((low_dt, high_dt))
-                else:
-                    breakpoint_cis_final.append((pd.NaT, pd.NaT))
-        else:
-            breakpoint_cis_final = [(pd.NaT, pd.NaT)] * n_bp
-    else:
-        breakpoints_final = breakpoints
-        if hybrid_model.breakpoint_cis_:
-            breakpoint_cis_final = hybrid_model.breakpoint_cis_
-        else:
-            breakpoint_cis_final = [(np.nan, np.nan)] * n_bp
+        # 3. Format Results
+        breakpoints = hybrid_model.breakpoints_
+        n_bp = hybrid_model.n_breakpoints_
 
-    # Format segments for output
-    segments_list = pd.DataFrame(hybrid_model.segments_)
-
-    # Apply Slope Scaling
-    if slope_scaling and not segments_list.empty:
+        # Convert breakpoints back to original time format if datetime
         if is_datetime:
-            try:
-                factor = _get_slope_scaling_factor(slope_scaling)
-                segments_list['slope_per_second'] = segments_list['slope']
-                segments_list['lower_ci_per_second'] = segments_list['lower_ci']
-                segments_list['upper_ci_per_second'] = segments_list['upper_ci']
+            breakpoints_final = pd.to_datetime(breakpoints, unit='s')
 
-                segments_list['slope'] *= factor
-                segments_list['lower_ci'] *= factor
-                segments_list['upper_ci'] *= factor
-                segments_list['slope_units'] = f"units per {slope_scaling}"
-            except Exception as e:
-                warnings.warn(f"Slope scaling failed: {e}", UserWarning)
+            # Convert CIs to Datetime
+            breakpoint_cis_final = []
+            if hybrid_model.breakpoint_cis_:
+                for ci in hybrid_model.breakpoint_cis_:
+                    # ci should be [low, high] in numeric time
+                    if isinstance(ci, (list, tuple, np.ndarray)) and len(ci) == 2:
+                        low_val = ci[0]
+                        high_val = ci[1]
+
+                        low_dt = pd.to_datetime(low_val, unit='s') if pd.notna(low_val) else pd.NaT
+                        high_dt = pd.to_datetime(high_val, unit='s') if pd.notna(high_val) else pd.NaT
+                        breakpoint_cis_final.append((low_dt, high_dt))
+                    else:
+                        breakpoint_cis_final.append((pd.NaT, pd.NaT))
+            else:
+                breakpoint_cis_final = [(pd.NaT, pd.NaT)] * n_bp
         else:
-             warnings.warn("slope_scaling requires datetime inputs.", UserWarning)
-    elif not segments_list.empty:
-         # Store raw slopes as per_second just in case plotting needs it
-         segments_list['slope_per_second'] = segments_list['slope']
-         segments_list['lower_ci_per_second'] = segments_list['lower_ci']
-         segments_list['upper_ci_per_second'] = segments_list['upper_ci']
-         segments_list['slope_units'] = "units per second" if is_datetime else "units per time"
+            breakpoints_final = breakpoints
+            if hybrid_model.breakpoint_cis_:
+                breakpoint_cis_final = hybrid_model.breakpoint_cis_
+            else:
+                breakpoint_cis_final = [(np.nan, np.nan)] * n_bp
+
+        # Format segments for output
+        segments_list = pd.DataFrame(hybrid_model.segments_)
+
+        # Apply Slope Scaling
+        if slope_scaling and not segments_list.empty:
+            if is_datetime:
+                try:
+                    factor = _get_slope_scaling_factor(slope_scaling)
+                    segments_list['slope_per_second'] = segments_list['slope']
+                    segments_list['lower_ci_per_second'] = segments_list['lower_ci']
+                    segments_list['upper_ci_per_second'] = segments_list['upper_ci']
+
+                    segments_list['slope'] *= factor
+                    segments_list['lower_ci'] *= factor
+                    segments_list['upper_ci'] *= factor
+                    segments_list['slope_units'] = f"units per {slope_scaling}"
+                except Exception as e:
+                    warnings.warn(f"Slope scaling failed: {e}", UserWarning)
+            else:
+                 warnings.warn("slope_scaling requires datetime inputs.", UserWarning)
+        elif not segments_list.empty:
+             # Store raw slopes as per_second just in case plotting needs it
+             segments_list['slope_per_second'] = segments_list['slope']
+             segments_list['lower_ci_per_second'] = segments_list['lower_ci']
+             segments_list['upper_ci_per_second'] = segments_list['upper_ci']
+             segments_list['slope_units'] = "units per second" if is_datetime else "units per time"
+
+        # Collect warnings
+        for w in w_log:
+            captured_warnings.append(str(w.message))
+
+    # Re-issue warnings if desired (optional, but polite since we suppressed them)
+    for w_str in captured_warnings:
+        warnings.warn(w_str, UserWarning)
 
     return SegmentedTrendResult(
         n_breakpoints=n_bp,
@@ -277,7 +319,9 @@ def segmented_trend_test(
         score=hybrid_model.bic_,
         selection_summary=hybrid_model.selection_summary_,
         bootstrap_samples=hybrid_model.bootstrap_samples_,
-        alpha=alpha
+        alpha=alpha,
+        warnings=captured_warnings,
+        computation_mode='hybrid'
     )
 
 

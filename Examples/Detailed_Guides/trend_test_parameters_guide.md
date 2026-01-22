@@ -79,10 +79,10 @@ These parameters control how the test handles censored data.
 -   **Limitations:** This is a simple substitution, not a statistical model like Regression on Order Statistics (ROS). The resulting slope is an estimate whose accuracy depends on how well the multiplier reflects the true underlying values. See **[Example 13](../13_Censored_Data_Multipliers/README.md)**.
 
 #### `sens_slope_method`
--   **Type:** `str`, **Default:** `'nan'`
+-   **Type:** `str`, **Default:** `'unbiased'`
 -   **Description:** Controls the method used for calculating the Sen's slope, particularly in the presence of censored data.
 -   **Usefulness:**
-    *   `'nan'` (Default): A slope between two incompatible censored values (e.g., `<5` and `<10`) is treated as ambiguous (`NaN`) and excluded from the median calculation. This is statistically neutral.
+    *   `'unbiased'` (Default): A slope between two incompatible censored values (e.g., `<5` and `<10`) is treated as ambiguous (`NaN`) and excluded from the median calculation. This is statistically neutral. (Formerly `'nan'`, which is still accepted for backward compatibility).
     *   `'ats'`: Uses the **Akritas-Theil-Sen (ATS)** estimator. This is a statistically robust method specifically designed for censored data. It calculates the slope by finding the value that zeroes the generalized Kendall's S statistic for the residuals. It handles mixed censoring types (left and right) and is the recommended method for rigorous analysis of censored datasets.
     *   `'lwp'`: Assigns a slope of `0` to ambiguous censored pairs. This mimics the behavior of the legacy LWP-TRENDS R script.
 -   **Limitations:** `'ats'` is computationally more intensive than the other methods and uses bootstrapping for confidence intervals. `'lwp'` can artificially bias the slope towards zero and is only recommended for backward compatibility. See **[Example 21](../21_Sens_Slope_Methods/README.md)**.

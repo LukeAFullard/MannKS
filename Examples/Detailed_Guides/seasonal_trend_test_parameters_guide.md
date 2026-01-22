@@ -107,10 +107,10 @@ Aggregation in a seasonal context is about ensuring that you have **one represen
 ### Censored Data Parameters
 
 #### `sens_slope_method`
--   **Type:** `str`, **Default:** `'nan'`
+-   **Type:** `str`, **Default:** `'unbiased'`
 -   **Description:** Controls the method used for calculating the Sen's slope.
 -   **Usefulness:**
-    *   `'nan'` (Default): Standard method. Ambiguous slopes (between two incompatible censored values) are treated as missing.
+    *   `'unbiased'` (Default): Standard method. Ambiguous slopes (between two incompatible censored values) are treated as missing. (Formerly `'nan'`, which is still accepted for backward compatibility).
     *   `'ats'`: Uses the **Seasonal Akritas-Theil-Sen** estimator. This calculates the overall slope by finding the value that zeroes the sum of the seasonal Kendall scores. It is the most robust method for seasonal censored data.
     *   `'lwp'`: Sets ambiguous slopes to 0 (legacy behavior).
 -   **Limitations:** `'ats'` is computationally intensive and does not currently support confidence intervals or probability outputs for the *seasonal* test (returns `NaN` for these fields).

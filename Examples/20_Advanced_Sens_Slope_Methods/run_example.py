@@ -30,7 +30,7 @@ print(df[['value', 'censored', 'cen_type']])
 
 # Method A: Robust (Standard) - 'nan'
 # Ambiguous slopes (e.g. <1 vs 10) are set to NaN and ignored.
-res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='nan')
+res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='unbiased')
 
 # Method B: LWP - 'lwp'
 # Ambiguous slopes are set to 0.

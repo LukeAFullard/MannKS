@@ -53,17 +53,6 @@ def test_get_sens_slope_analysis_note_no_indices():
 
 # --- _stats coverage ---
 
-def test_mk_score_and_var_censored_large_n_warning():
-    """Test memory warning for large n."""
-    n = 6000
-    x = np.arange(n)
-    t = np.arange(n)
-    censored = np.zeros(n, dtype=bool)
-    cen_type = np.full(n, 'not')
-
-    with pytest.warns(UserWarning, match="Large sample size"):
-        _mk_score_and_var_censored(x, t, censored, cen_type)
-
 def test_mk_score_and_var_censored_tie_break_methods():
     """Cover the 'lwp' branches for tie_break_method."""
     x = [1, 1, 2, 3]

@@ -27,7 +27,7 @@ import os
 
 # 1. Generate Synthetic Data
 # We create a dataset with censored values that create ambiguous slopes.
-# Ambiguous: Slope between a censored value and a real value where direction is uncertain?
+# Ambiguous: Slope between a censored value and a real value where direction is uncertain.
 # Actually, LWP defines ambiguous cases specifically.
 # Let's use a small dataset to trace it easily.
 x = [2, '<1', 5, 6, '<1', 8]
@@ -42,7 +42,7 @@ print(df[['value', 'censored', 'cen_type']])
 
 # Method A: Robust (Standard) - 'nan'
 # Ambiguous slopes (e.g. <1 vs 10) are set to NaN and ignored.
-res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='nan')
+res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='unbiased')
 
 # Method B: LWP - 'lwp'
 # Ambiguous slopes are set to 0.

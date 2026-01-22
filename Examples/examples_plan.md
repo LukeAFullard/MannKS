@@ -39,7 +39,7 @@ Each example will be self-contained in its own directory within `Examples/` and 
 
 #### Example 6: Deep Dive into Censored Data Options
 - **Goal:** Compare the `'robust'` vs. `'lwp'` methods for handling censored data to show their impact.
-- **Comparison:** `mk_test_method='robust'` vs. `'lwp'`, `sens_slope_method='nan'` vs. `'lwp'`.
+- **Comparison:** `mk_test_method='robust'` vs. `'lwp'`, `sens_slope_method='unbiased'` vs. `'lwp'`.
 
 #### Example 7: The High Censor Rule (`hicensor`)
 - **Goal:** Explain and demonstrate the `hicensor` rule for mitigating bias from changing detection limits.
@@ -103,7 +103,7 @@ Each example will be self-contained in its own directory within `Examples/` and 
 
 #### Example 20: Advanced Sen's Slope Methods (ATS vs. LWP)
 - **Goal:** Demonstrate the difference between the standard methods and the robust **Akritas-Theil-Sen (ATS)** estimator for censored data.
-- **Comparison:** `sens_slope_method='nan'` vs. `sens_slope_method='lwp'` vs. `sens_slope_method='ats'`.
+- **Comparison:** `sens_slope_method='unbiased'` vs. `sens_slope_method='lwp'` vs. `sens_slope_method='ats'`.
 
 ---
 

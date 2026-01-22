@@ -522,7 +522,7 @@ def main():
         mks_data['time'] = t
 
         res_std = mk.trend_test(mks_data, t,
-                                sens_slope_method='nan',
+                                sens_slope_method='unbiased',
                                 mk_test_method='robust',
                                 slope_scaling='year')
 
