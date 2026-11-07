@@ -1,0 +1,31 @@
+simple_trend             R=0.000000  MannKS=0.000000
+no_trend                 R=0.561592  MannKS=0.561592
+ties_annual              R=0.002313  MannKS=0.438059  <-- differs
+all_identical            R=nan  MannKS=nan
+n2                       R=nan  MannKS=0.841345  <-- differs
+n3                       R=nan  MannKS=0.300754  <-- differs
+n4                       R=nan  MannKS=0.087116  <-- differs
+n5                       R=0.025022  MannKS=0.025022
+exact_linear             R=0.000006  MannKS=0.000006
+lt_single_DL             R=0.000767  MannKS=0.003517  <-- differs
+lt_multi_DL              R=0.795890  MannKS=0.999613  <-- differs
+gt_multi_AL              R=0.066756  MannKS=0.115703  <-- differs
+mixed_cens               R=0.039104  MannKS=0.083213  <-- differs
+monthly_nonseasonal      R=0.000000  MannKS=0.000000
+monthly_seasonal         R=0.000000  MannKS=0.000000
+quarterly_seasonal       R=0.000000  MannKS=0.000000
+seasonal_missing_month   R=0.000000  MannKS=0.000000
+seasonal_sparse_month    R=nan  MannKS=0.000000  <-- differs
+unequal_annual           R=0.000192  MannKS=0.000192
+monthly_gaps             R=0.040884  MannKS=0.040884
+multi_per_month_mid      R=0.999774  MannKS=0.999763  <-- differs
+multi_per_month_median   R=0.999998  MannKS=0.999998
+multi_per_year_mid       R=0.000049  MannKS=0.000049
+multi_per_year_median    R=0.000016  MannKS=0.000016
+neg_and_zero             R=0.000291  MannKS=0.008098  <-- differs
+with_nan                 R=0.000015  MannKS=0.000015
+seasonal_lt              R=nan  MannKS=1.000000  <-- differs
+seasonal_gt              R=0.000001  MannKS=0.002390  <-- differs
+real_ex2                 R=0.915921  MannKS=0.985828  <-- differs
+real_ex3                 R=0.012751  MannKS=0.017763  <-- differs
+real_ex4                 R=0.998879  MannKS=0.999151  <-- differs

@@ -1,0 +1,5 @@
+simple_trend      alpha=0.05: MannKS CI=(0.437590,0.609212)   R CI=(0.454955,0.590985)
+simple_trend      alpha=0.10: MannKS CI=(0.454955,0.590985)   R CI=(0.454955,0.590985)
+monthly_seasonal  alpha=0.05: MannKS CI=(0.144787,0.256268)   R CI=(0.154123,0.244340)
+monthly_seasonal  alpha=0.10: MannKS CI=(0.154123,0.244340)   R CI=(0.154123,0.244340)
+validation-style LWP kwargs on multi_per_year_mid: S=118.0 (R 121.0), slope=0.084194 (R 0.090784), tau=0.6243 (R 0.6368)

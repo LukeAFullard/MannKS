@@ -1,0 +1,26 @@
+H0 iid normal n=10: P(p<0.05)                                          reps=2000  value=0.0495 KS_p=0.0 95% MC CI [0.040,0.060]
+H0 iid normal n=30: P(p<0.05)                                          reps=2000  value=0.042 KS_p=0.0058 95% MC CI [0.034,0.052]
+H0 iid normal n=100: P(p<0.05)                                         reps=2000  value=0.047 KS_p=0.8291 95% MC CI [0.038,0.057]
+H0 iid, heavy ties (values rounded to 5 levels) n=30: P(p<0.05)        reps=2000  value=0.027 KS_p=0.0 95% MC CI [0.020,0.035]
+H0 lognormal, ~30-40% left-censored, 2 DLs, n=40: P(p<0.05)            reps=1000  value=0.043 KS_p=0.7931 95% MC CI [0.031,0.057]
+  same, mk_test_method='lwp'                                           reps=1000  value=0.043 KS_p=0.7931 95% MC CI [0.031,0.057]
+Seasonal H0 (monthly, 10y, seasonal signal): P(p<0.05)                 reps=1000  value=0.052 KS_p=0.0084 95% MC CI [0.039,0.068]
+Sen slope, n=30, unequal spacing, true=0.1: mean bias (rel.)           reps=2000  value=-0.0028 KS_p= sd=0.0135
+  95% CI coverage (ci_method=direct)                                   reps=2000  value=0.952 KS_p= 95% MC CI [0.942,0.961]
+Sen slope, n=30, unequal spacing, true=0.1: mean bias (rel.)           reps=2000  value=-0.0028 KS_p= sd=0.0135
+  95% CI coverage (ci_method=lwp)                                      reps=2000  value=0.954 KS_p= 95% MC CI [0.944,0.963]
+Sen slope, n=100, unequal spacing, true=0.1: mean bias (rel.)          reps=2000  value=0.0037 KS_p= sd=0.0071
+  95% CI coverage (ci_method=direct)                                   reps=2000  value=0.9555 KS_p= 95% MC CI [0.946,0.964]
+CI coverage with heavy ties (x rounded to integers), n=40, true=0.05   reps=2000  value=0.938 KS_p= 95% MC CI [0.927,0.948]
+Censored (~35% <2) slope, true=0.05, method=unbiased: mean rel. bias   reps=1000  value=0.1497 KS_p= sd=0.0170
+Censored (~35% <2) slope, true=0.05, method=lwp: mean rel. bias        reps=1000  value=0.0217 KS_p= sd=0.0158
+Fast mode n=6000 (100k pairs): rel. bias of stochastic Sen vs exact    reps=50    value=0.0 KS_p= rel sd=0.0026; exact=0.00101473
+H0 AR(1) phi=0.0, n=60, autocorr_method=none: P(p<0.05)                reps=1000  value=0.053 KS_p= 95% MC CI [0.040,0.069]
+H0 AR(1) phi=0.0, n=60, autocorr_method=yue_wang: P(p<0.05)            reps=1000  value=0.114 KS_p= 95% MC CI [0.095,0.135]
+H0 AR(1) phi=0.0, n=60, autocorr_method=block_bootstrap: P(p<0.05)     reps=300   value=0.0733 KS_p= 95% MC CI [0.047,0.109]
+H0 AR(1) phi=0.6, n=60, autocorr_method=none: P(p<0.05)                reps=1000  value=0.295 KS_p= 95% MC CI [0.267,0.324]
+H0 AR(1) phi=0.6, n=60, autocorr_method=yue_wang: P(p<0.05)            reps=1000  value=0.09 KS_p= 95% MC CI [0.073,0.109]
+H0 AR(1) phi=0.6, n=60, autocorr_method=block_bootstrap: P(p<0.05)     reps=300   value=0.1533 KS_p= 95% MC CI [0.114,0.199]
+Power: iid noise + slope 0.02/step, n=60, autocorr_method=none         reps=1000  value=0.719 KS_p= 95% MC CI [0.690,0.747]
+Power: iid noise + slope 0.02/step, n=60, autocorr_method=yue_wang     reps=1000  value=0.19 KS_p= 95% MC CI [0.166,0.216]
+done in 240s

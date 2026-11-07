@@ -1,0 +1,13 @@
+DL,pct_censored,method,rel_bias_pct,rel_rmse_pct
+1.0,4.6,unbiased,1.76,27.99
+1.0,4.6,lwp,1.19,27.67
+1.0,4.6,ats,1.15,27.69
+1.0,4.6,oracle_uncensored,1.0,27.52
+2.0,20.6,unbiased,16.78,36.64
+2.0,20.6,lwp,3.48,30.39
+2.0,20.6,ats,1.98,29.21
+2.0,20.6,oracle_uncensored,1.0,27.52
+3.0,51.0,unbiased,69.41,78.59
+3.0,51.0,lwp,-55.02,73.43
+3.0,51.0,ats,4.06,37.14
+3.0,51.0,oracle_uncensored,1.0,27.52

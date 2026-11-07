@@ -1,0 +1,7 @@
+"case_id","KW","p","note"
+"monthly_seasonal",99.6143801652893,2.12905256628265e-16,"ok"
+"seasonal_missing_month",NA,NA,"< 3non-NA values in Season"
+"seasonal_sparse_month",NA,NA,"< 3non-NA values in Season"
+"seasonal_lt",NA,NA,"< 3 unique values in Season"
+"real_ex2",22.2869410708017,0.0222421596860478,"ok"
+"monthly_nonseasonal",8.65774607782539,0.653450574897475,"ok"

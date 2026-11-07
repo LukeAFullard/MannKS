@@ -1,0 +1,29 @@
+== 1. SeasonalityTest vs check_seasonality
+  monthly_seasonal         R: KW=99.6144 p=2.12905e-16 note='ok' | MannKS: H=99.6144 p=2.12905e-16 skipped=[]
+  seasonal_missing_month   R: KW=nan p=nan note='< 3non-NA values in Season' | MannKS: H=89.4253 p=6.96229e-15 skipped=[]
+  seasonal_sparse_month    R: KW=nan p=nan note='< 3non-NA values in Season' | MannKS: H=89.755 p=5.98984e-15 skipped=[3]
+  seasonal_lt              R: KW=nan p=nan note='< 3 unique values in Season' | MannKS: H=69.7706 p=1.68884e-11 skipped=[10, 11]
+  real_ex2                 R: KW=22.2869 p=0.0222422 note='ok' | MannKS: H=22.2869 p=0.0222422 skipped=[]
+  monthly_nonseasonal      R: KW=8.65775 p=0.653451 note='ok' | MannKS: H=8.65775 p=0.653451 skipped=[]
+
+== 2. ATS plateau (largest MannKS-vs-cenken differences)
+  case 48: MannKS=-0.06199 NADA=-0.05810 plateau=[-0.06558,-0.05288] mid=-0.05923
+  case 37: MannKS=0.05581 NADA=0.05228 plateau=[0.04228,0.06549] mid=0.05389
+  case 20: MannKS=0.00174 NADA=0.00187 plateau=[0.00174,0.00182] mid=0.00178
+  case 55: MannKS=-0.02678 NADA=-0.02496 plateau=[-0.02707,-0.02137] mid=-0.02422
+
+== 3. delx = min_diff/1000 vs /1e9 for large censored n (uses MANNKS_SRC copy if given)
+  n=200: rel diff 0.0e+00
+  n=1500: rel diff 0.0e+00
+  n=3000: rel diff 0.0e+00
+
+== 4. alpha check
+  simple_trend      alpha=0.05: MannKS CI=(0.437590,0.609212)  R=(0.454955,0.590985)
+  simple_trend      alpha=0.10: MannKS CI=(0.454955,0.590985)  R=(0.454955,0.590985)
+  monthly_seasonal  alpha=0.05: MannKS CI=(0.144787,0.256268)  R=(0.154123,0.244340)
+  monthly_seasonal  alpha=0.10: MannKS CI=(0.154123,0.244340)  R=(0.154123,0.244340)
+
+== 5. time-increment mid-points (2001): R MidTimeIncrList vs pandas period midpoint
+   1 incr/yr: max |R - Python| = 1.00 days
+   4 incr/yr: max |R - Python| = 0.62 days
+  12 incr/yr: max |R - Python| = 1.29 days
