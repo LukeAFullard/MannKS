@@ -13,12 +13,12 @@ The table below shows the detection rate (Power) for varying trend slopes.
 
 |   Slope |   Standard Power |   Bootstrap Power |
 |--------:|-----------------:|------------------:|
-|    0    |             0.22 |               0.1 |
-|    0.05 |             0.9  |               0.8 |
-|    0.1  |             1    |               1   |
-|    0.15 |             1    |               1   |
-|    0.2  |             1    |               1   |
-|    0.25 |             1    |               1   |
+|    0    |             0.2  |              0.14 |
+|    0.05 |             0.94 |              0.76 |
+|    0.1  |             1    |              1    |
+|    0.15 |             1    |              1    |
+|    0.2  |             1    |              1    |
+|    0.25 |             1    |              1    |
 
 ## Power Curve Plot
 ![Power Curve](power_curve.png)

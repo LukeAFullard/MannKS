@@ -69,7 +69,7 @@ def run_r_script(data, r_script_path):
                 df$myDate <- as.Date(df$myDate)
 
                 # Initialize LWP environment variables and columns
-                df <- GetMoreDateInfo(df)
+                df <- GetMoreDateInfo(df, FindDateShifts=FALSE)
 
                 # Set TimeIncr and Season for NonSeasonalTrendAnalysis
                 df$TimeIncr <- df$Month
@@ -160,7 +160,9 @@ def run_v32():
                     mk_test_method='lwp',
                     sens_slope_method='lwp',
                     ci_method='lwp',
-                    tau_method='b',
+                    tau_method='a',
+                    tie_break_method='lwp',
+                    alpha=0.10,
                     slope_scaling='year'
                 )
 

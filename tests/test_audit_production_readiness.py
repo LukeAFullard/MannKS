@@ -72,30 +72,17 @@ def test_audit_determinism():
 
 def test_audit_heavy_ties():
     """
-    Verify behavior with heavy ties.
-    The O(N log N) implementation warns if tied PAIRS > 50%.
-    Note: 50% tied values != 50% tied pairs.
-    Need ~71% tied values to get >50% tied pairs (0.71^2 approx 0.5).
-    Using 80% to be safe.
+    Heavy ties (80% identical values): the O(N log N) fast path must give
+    exactly the same S and Var(S) as the pairwise calculation.
     """
     n = 5500
     np.random.seed(42)
-    # 80% ties (Single value dominates) -> 0.8^2 = 0.64 > 0.5 tied pairs
-    x = np.random.choice([0, 1], size=n, p=[0.8, 0.2])
+    x = np.random.choice([0, 1], size=n, p=[0.8, 0.2]).astype(float)
     t = np.arange(n)
-
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        # Run in fast mode
-        res = trend_test(x, t, large_dataset_mode='fast')
-
-        # Check for the specific warning in captured warnings
-        tie_warnings = [str(warn.message) for warn in w if "Heavy ties detected" in str(warn.message)]
-
-        # Also check result object warnings
-        res_warnings = [str(rw) for rw in res.warnings if "Heavy ties detected" in str(rw)]
-
-        assert tie_warnings or res_warnings, "Did not detect heavy ties warning."
+    res = trend_test(x, t, large_dataset_mode='fast')
+    exact = trend_test(x, t, large_dataset_mode='fast', mk_test_method='lwp')  # pairwise path
+    assert res.s == exact.s
+    assert res.var_s == pytest.approx(exact.var_s)
 
 def test_audit_censored_fallback():
     """

@@ -4,6 +4,7 @@ the LWP-TRENDS R script.
 """
 import pandas as pd
 import numpy as np
+from typing import Optional
 import warnings
 from scipy.stats import norm
 from collections import namedtuple
@@ -16,7 +17,8 @@ def regional_test(
     value_col: str = 'value',
     time_col: str = 'time',
     s_col: str = 's',
-    c_col: str = 'C'
+    c_col: str = 'C',
+    agg_period: Optional[str] = 'month'
 ) -> namedtuple:
     """
     Performs a regional trend aggregation analysis on the results of
@@ -24,7 +26,7 @@ def regional_test(
 
     Args:
         trend_results (pd.DataFrame): A DataFrame containing the results from
-            running `original_test` or `seasonal_test` on multiple sites.
+            running `trend_test` or `seasonal_trend_test` on multiple sites.
             Must contain columns for the site identifier, the Mann-Kendall
             score `s`, and the confidence `C`.
         time_series_data (pd.DataFrame): A DataFrame containing the original
@@ -35,6 +37,14 @@ def regional_test(
         time_col (str): The name of the time column in `time_series_data`.
         s_col (str): The name of the Mann-Kendall score column in `trend_results`.
         c_col (str): The name of the confidence column in `trend_results`.
+        agg_period (str, optional): For datetime ``time_col``, each site's
+            series is reduced to one value per time increment ('year',
+            'quarter', 'month', 'week' or 'day'; the observation closest to
+            the increment mid-point, as LWP-TRENDS ``getTAU`` does) before
+            the inter-site correlations are computed, so sites sampled on
+            different days of the same increment are aligned.  Use the
+            analysis time increment of the site trends.  ``None`` correlates
+            on exact timestamps.  Ignored for numeric ``time_col``.
 
     Returns:
         namedtuple: A namedtuple `RegionalTrendResult` with the following fields:
@@ -44,8 +54,14 @@ def regional_test(
             - VarTAU (float): The uncorrected variance of TAU.
             - CorrectedVarTAU (float): The variance of TAU corrected for
                                        inter-site correlation.
-            - DT (str): The aggregate trend direction ('Increasing' or 'Decreasing').
-            - CT (float): The confidence in the aggregate trend direction.
+            - DT (str): The aggregate trend direction ('Increasing' or
+                        'Decreasing'; 'Increasing' when the sites are evenly
+                        split, as in LWP-TRENDS).
+            - CT (float): The confidence in the aggregate trend direction
+                          (0.5 to 1).
+            - warnings (list of str): Warnings raised during the calculation
+                          (e.g. site pairs whose correlation could not be
+                          computed and were omitted).
 
     Statistical Assumptions:
     ----------------------
@@ -113,11 +129,8 @@ def regional_test(
         s_signs = np.sign(results[s_col])
         modal_direction = np.sign(np.sum(s_signs) + np.sum(s_signs == 0) / 2)
         if modal_direction == 0:
-            # Collect warnings
-            for w in w_log:
-                captured_warnings.append(str(w.message))
-            return RegionalTrendResult(M, 0.5, np.nan, np.nan,
-                                    'No Clear Direction', np.nan, captured_warnings)
+            # Exactly balanced: LWP-TRENDS takes the increasing direction.
+            modal_direction = 1
 
         DT = 'Increasing' if modal_direction == 1 else 'Decreasing'
 
@@ -143,10 +156,28 @@ def regional_test(
             missing_sites = sites_in_trends - sites_in_ts
             raise ValueError(f"Sites in trend_results not found in time_series_data: {missing_sites}")
 
+        ts = time_series_data[[site_col, time_col, value_col]].dropna(subset=[value_col])
+        from ._datetime import _is_datetime_like
+        if agg_period is not None and _is_datetime_like(ts[time_col].to_numpy()):
+            from ._helpers import _value_for_time_increment
+            period_map = {'year': 'Y', 'quarter': 'Q', 'month': 'M', 'week': 'W', 'day': 'D'}
+            if agg_period not in period_map:
+                raise ValueError(f"`agg_period` must be one of {list(period_map)} or None.")
+            freq = period_map[agg_period]
+            times = pd.to_datetime(ts[time_col])
+            if getattr(times.dt, 'tz', None) is not None:
+                times = times.dt.tz_convert(None)
+            ts = ts.assign(t_original=times, _incr=times.dt.to_period(freq)).sort_values('t_original')
+            parts = []
+            for _, g in ts.groupby(site_col, sort=False):
+                parts.append(_value_for_time_increment(g, g['_incr'], freq))
+            ts = pd.concat(parts, ignore_index=True)
+            pivot_index = '_incr'
+        else:
+            pivot_index = time_col
+
         # Pivot the time series data to a wide format
-        ts_wide = time_series_data.pivot_table(index=time_col,
-                                            columns=site_col,
-                                            values=value_col)
+        ts_wide = ts.pivot_table(index=pivot_index, columns=site_col, values=value_col)
 
         # Align columns with trend_results
         sites_in_common = results[site_col].unique()
@@ -170,10 +201,15 @@ def regional_test(
         # Align the correlation matrix with the covariance matrix
         cor_matrix = cor_matrix.reindex(index=p_modal_series.index, columns=p_modal_series.index)
 
-        cov_term_matrix = cov_matrix * cor_matrix
+        cov_term_matrix = cov_matrix * cor_matrix.to_numpy()
 
-        # Sum the lower triangle of the covariance term matrix
-        sum_cov_term = np.sum(np.tril(cov_term_matrix, k=-1))
+        lower = np.tril(np.ones_like(cov_term_matrix, dtype=bool), k=-1)
+        if np.isnan(cov_term_matrix[lower]).any():
+            warnings.warn("Some inter-site correlations could not be computed (too few common "
+                          "time increments); those pairs are omitted from the correction, as in "
+                          "LWP-TRENDS.", UserWarning)
+        # Sum the lower triangle (NaN pairs omitted, as R's na.rm=TRUE)
+        sum_cov_term = np.nansum(cov_term_matrix[lower])
 
         # Calculate the corrected variance
         CorrectedVarTAU = (1 / M**2) * (sum_var_tau + 2 * sum_cov_term)
@@ -182,9 +218,12 @@ def regional_test(
         if CorrectedVarTAU > 0:
             z_score = (TAU - 0.5) / np.sqrt(CorrectedVarTAU)
             CT = norm.cdf(z_score)
+        elif CorrectedVarTAU < 0 or np.isnan(CorrectedVarTAU):
+            warnings.warn("Corrected variance of TAU is not positive; confidence is undefined.",
+                          UserWarning)
+            CT = np.nan
         else:
-            # If variance is zero, we are 100% confident in the direction indicated by TAU
-            # provided TAU is not 0.5.
+            # Zero variance: every site is certain of its direction.
             if TAU > 0.5:
                 CT = 1.0
             elif TAU < 0.5:

@@ -14,9 +14,9 @@ The table below shows the proportion of simulations where the calculated confide
 
 |   Rho (Autocorrelation) | Standard Coverage   | Bootstrap Coverage   |   Avg Width (Std) |   Avg Width (Boot) |
 |------------------------:|:--------------------|:---------------------|------------------:|-------------------:|
-|                     0   | 89.0%               | 94.0%                |            0.0412 |             0.0474 |
-|                     0.5 | 77.0%               | 94.0%                |            0.0465 |             0.0821 |
-|                     0.8 | 54.0%               | 87.0%                |            0.061  |             0.1581 |
+|                     0   | 98.0%               | 95.0%                |            0.0407 |             0.0419 |
+|                     0.5 | 77.0%               | 90.0%                |            0.0458 |             0.0738 |
+|                     0.8 | 50.0%               | 83.0%                |            0.06   |             0.1455 |
 
 ## Interpretation
 - **Ideal Outcome**: Coverage should be close to 95%.

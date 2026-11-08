@@ -96,7 +96,7 @@ def run_r_script_seasonal(data, r_script_path):
                 suppressMessages(library(NADA))
 
                 df$myDate <- as.Date(df$myDate)
-                df <- GetMoreDateInfo(df)
+                df <- GetMoreDateInfo(df, FindDateShifts=FALSE)
 
                 # Setup for SeasonalTrendAnalysis
                 # It requires Season column. Usually Season = Month for monthly data.
@@ -187,7 +187,8 @@ def run_v34():
             mk_test_method='lwp',
             sens_slope_method='lwp',
             ci_method='lwp',
-            tau_method='b',
+            tau_method='a',
+            tie_break_method='lwp',
             slope_scaling='year',
             alpha=0.1
         )

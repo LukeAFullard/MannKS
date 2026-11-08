@@ -9,3 +9,4 @@ Verifies the `check_seasonality` function using the Kruskal-Wallis test.
 | Strong Seasonality            | True       | True       | 3.40406e-08 |       56.9462  | PASS     |
 | No Seasonality                | False      | False      | 0.677147    |        8.39934 | PASS     |
 | Strong Seasonality (LWP Mode) | True       | True       | 3.40406e-08 |       56.9462  | PASS     |
+

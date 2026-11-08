@@ -91,11 +91,10 @@ def test_audit_seasonal_stratification():
     assert result.computation_mode == 'fast'
     assert result.pairs_used is not None
 
-    # Check that pairs used is roughly what we expect
-    # 24 seasons. Each has 100 points (stratified).
-    # Pairs per season = 100*99/2 = 4950
-    # Total pairs = 24 * 4950 = 118800
-    assert result.pairs_used == 118800
+    # 24 seasons x 100 points (stratified) = 24 * 4950 = 118,800 within-season
+    # pairs, more than the 100,000-pair budget, so pairs are sampled in
+    # proportion to each season's pairs (about 4,167 per season).
+    assert 0.99 * 100000 <= result.pairs_used <= 100000 + 24
 
     assert result.trend == 'increasing'
     assert result.p < 0.05

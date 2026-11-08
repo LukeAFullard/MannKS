@@ -58,9 +58,13 @@ def test_classify_custom_map():
 
 def test_classify_edge_cases():
     """Test edge cases, such as confidence values at the exact thresholds."""
-    # Exactly on the threshold
+    # Exactly on a threshold: classes are right-closed as in LWP-TRENDS
+    # AssignConfCat (cut(..., right=TRUE)), so 0.90 is still "Likely".
     result_exact = TrendResult(h=True, C=0.90, trend='increasing')
-    assert classify_trend(result_exact) == "Very Likely Increasing"
+    assert classify_trend(result_exact) == "Likely Increasing"
+    assert classify_trend(TrendResult(h=True, C=0.9001, trend='increasing')) == "Very Likely Increasing"
+    assert classify_trend(TrendResult(h=True, C=0.95, trend='increasing')) == "Very Likely Increasing"
+    assert classify_trend(TrendResult(h=True, C=0.67, trend='increasing')) == "As Likely as Not Increasing"
 
     # Just below a threshold
     result_below = TrendResult(h=True, C=0.89, trend='decreasing')

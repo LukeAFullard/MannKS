@@ -51,6 +51,7 @@ def run_scenario_1_aggregation():
         agg_method='median',
         agg_period='month',
         autocorr_method='block_bootstrap',
+        random_state=42,
         n_bootstrap=200,
         block_size='auto'
     )
@@ -93,6 +94,7 @@ def run_scenario_2_hicensor():
         df_prep, t,
         hicensor=True,
         autocorr_method='block_bootstrap',
+        random_state=42,
         n_bootstrap=200
     )
 
@@ -115,6 +117,7 @@ def run_scenario_3_seasonal():
         period=12,
         season_type='month',
         autocorr_method='block_bootstrap',
+        random_state=42,
         n_bootstrap=200,
         block_size='auto' # Should default to 1 year/cycle
     )
@@ -152,6 +155,7 @@ def run_scenario_4_ats():
         df, t,
         sens_slope_method='ats',
         autocorr_method='block_bootstrap',
+        random_state=42,
         n_bootstrap=200
     )
 

@@ -80,6 +80,7 @@ print("\\n--- Test 3: Block Bootstrap Mann-Kendall ---")
 result_boot = mk.trend_test(
     x, t,
     autocorr_method='block_bootstrap',
+    random_state=42,
     n_bootstrap=1000,
     slope_scaling='year',
     plot_path='plot_boot.png'
@@ -116,6 +117,7 @@ result_seas = mk.seasonal_trend_test(
     x_seas, dates_seas,
     period=12,
     autocorr_method='block_bootstrap',
+    random_state=42,
     slope_scaling='year',
     plot_path='plot_seas_boot.png'
 )

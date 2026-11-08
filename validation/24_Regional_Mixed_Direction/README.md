@@ -27,3 +27,4 @@ Verification of regional trend aggregation for sites with conflicting trend dire
 |                         | Direction (DT)   | Decreasing     | Decreasing | ✅        |
 |                         | Confidence (CT)  | 0.9211         | 0.9211     | ✅        |
 | ---                     | ---              | ---            | ---        | ---      |
+

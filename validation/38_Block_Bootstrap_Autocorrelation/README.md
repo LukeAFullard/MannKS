@@ -14,11 +14,11 @@ The table below compares the Type I error rates (rejection rates) of the standar
 
 | Method                |   Type I Error Rate |
 |:----------------------|--------------------:|
-| Standard Mann-Kendall |               0.598 |
-| Block Bootstrap MK    |               0.138 |
+| Standard Mann-Kendall |                0.64 |
+| Block Bootstrap MK    |                0.16 |
 
 ## Interpretation
-With $\rho=0.6$, the standard test rejects H0 approximately 59.8% of the time, which is significantly higher than the nominal 5.0%. The Block Bootstrap method corrects this, bringing the rejection rate down to 13.8%, much closer to the target level.
+With $\rho=0.6$, the standard test rejects H0 approximately 64.0% of the time, which is significantly higher than the nominal 5.0%. The Block Bootstrap method corrects this, bringing the rejection rate down to 16.0%, much closer to the target level.
 
 ## Sample Data Plot
 ![Sample AR(1) Process](sample_ar1.png)

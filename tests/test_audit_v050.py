@@ -77,9 +77,11 @@ def test_heavy_ties():
     x = np.random.normal(0, 1, n)
     x[:int(0.8*n)] = 0
 
-    # Expect warning about heavy ties
-    with pytest.warns(UserWarning, match="Heavy ties detected"):
-        result = trend_test(x, t)
+    # The O(N log N) path recovers S exactly from Tau-b even with heavy ties.
+    result = trend_test(x, t)
+    exact = trend_test(x, t, mk_test_method='lwp')  # forces the pairwise path
+    assert result.s == exact.s
+    assert result.var_s == pytest.approx(exact.var_s)
 
     assert result.computation_mode == 'fast'
     # Result should be valid

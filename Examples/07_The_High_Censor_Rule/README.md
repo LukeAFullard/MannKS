@@ -100,7 +100,7 @@ Interpretation: CORRECT. The robust method ignores ambiguous pairs, finding no t
 --- Test 3: High Censor Rule (hicensor=True) ---
 Trend: indeterminate
 Sen's Slope: nan
-Analysis Notes: ['< 3 unique values', 'Long run of single value']
+Analysis Notes: ['< 3 unique values', '< 3 unique values', 'ATS slope not identifiable (insufficient resolvable pairs)']
 Interpretation: CORRECT & CONSERVATIVE. By unifying the censoring level,
 we remove any doubt that the trend might be an artifact.
 

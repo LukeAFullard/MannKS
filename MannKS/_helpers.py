@@ -42,6 +42,11 @@ def _aggregate_censored_median(group, is_datetime):
         (i.e., `median_val <= max_censored_value`) is a heuristic method.
         It is designed to replicate the behavior of the LWP-TRENDS R script
         and may not be statistically robust in all scenarios.
+
+        The censoring *type* of a censored median is the most common type
+        among the censored observations.  LWP-TRENDS instead takes the most
+        common type among all observations in the increment, which can label
+        a censored median as 'not' censored; values and censored flags agree.
     """
     n = len(group)
     if n == 0:
@@ -137,52 +142,68 @@ def _prepare_data(x, t, hicensor):
     return data_filtered, is_datetime
 
 
+_INCREMENTS_PER_YEAR = {'Y': 1, 'A': 1, 'Q': 4, 'M': 12}
+
+
+def _lwp_period_midpoint(ts, period):
+    """
+    Mid-point of the time increment containing timestamp ``ts``.
+
+    For annual, quarterly and monthly increments this reproduces LWP-TRENDS
+    (``MidTimeIncrList``): with k increments per year the i-th increment's
+    mid-point is ``1 Jan + (365/k/2 + i*365/k - 1)`` days.  For other periods
+    the mid-point of the calendar period is used; with ``period=None`` the
+    caller should use the group's time range instead.
+    """
+    ts = pd.Timestamp(ts)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(None)
+    key = str(period).upper()[0] if period else None
+    if key in _INCREMENTS_PER_YEAR:
+        k = _INCREMENTS_PER_YEAR[key]
+        i = 0 if k == 1 else (ts.quarter - 1 if k == 4 else ts.month - 1)
+        offset = 365.0 / k / 2.0 + i * 365.0 / k - 1.0
+        return pd.Timestamp(year=ts.year, month=1, day=1) + pd.Timedelta(days=offset)
+    p = ts.to_period(period)
+    return p.start_time + (p.end_time - p.start_time) / 2
+
+
+def _closest_to_midpoint(group, period):
+    """Row label of the observation closest to the increment mid-point (first on ties)."""
+    times = pd.to_datetime(group['t_original'])
+    if getattr(times.dt, 'tz', None) is not None:
+        times = times.dt.tz_convert(None)
+    if period is None:
+        mid = times.min() + (times.max() - times.min()) / 2
+    else:
+        mid = _lwp_period_midpoint(times.iloc[0], period)
+    return (times - mid).abs().idxmin()
+
+
 def _value_for_time_increment(df: DataFrame, group_key: pd.Series, period: str) -> DataFrame:
     """
     Aggregates data to one observation per time increment using the LWP method.
 
-    This function replicates the `ValueForTimeIncr` logic from the LWP-TRENDS
-    R script. For each unique time increment (defined by `group_key`), it
-    selects the single observation that is closest in time to the theoretical
-    midpoint of that increment.
+    Replicates ``ValueForTimeIncr(UseMidObs=TRUE)`` from LWP-TRENDS: for each
+    time increment the observation closest in time to the increment's
+    mid-point is kept (the earliest one on ties).  ``df`` should be sorted by
+    time.
 
     Args:
         df (pd.DataFrame): The input data frame, must contain 't_original'.
-        group_key (pd.Series): A Series that defines the grouping for aggregation
-                               (e.g., year for annual, or a tuple of
-                               (year, month) for seasonal).
-        period (str): The pandas frequency string for the period ('Y', 'M', 'Q', etc.).
+        group_key (pd.Series): Grouping of rows into time increments.
+        period (str): Pandas frequency of the increment ('Y', 'Q', 'M', 'W',
+            'D', ...), or None to use each group's time range.
 
     Returns:
-        pd.DataFrame: An aggregated DataFrame with one row per unique group.
+        pd.DataFrame: One row per time increment.
     """
-    grouped = df.groupby(group_key)
-    aggregated_dfs = []
-
-    for name, group in grouped:
-        if len(group) == 1:
-            aggregated_dfs.append(group)
-            continue
-
-        # Convert to datetime if not already, to use period logic
-        if not pd.api.types.is_datetime64_any_dtype(group['t_original']):
-            group['t_original'] = pd.to_datetime(group['t_original'])
-
-        # Get the start and end of the period for the group's first timestamp
-        # This defines the theoretical window for the entire group
-        ref_date = group['t_original'].min()
-        period_start = ref_date.to_period(period).start_time
-        period_end = ref_date.to_period(period).end_time
-        midpoint = period_start + (period_end - period_start) / 2
-
-        # Find the observation closest to the midpoint
-        closest_idx = (group['t_original'] - midpoint).abs().idxmin()
-        aggregated_dfs.append(group.loc[[closest_idx]])
-
-    return pd.concat(aggregated_dfs).reset_index(drop=True)
+    keep = [g.index[0] if len(g) == 1 else _closest_to_midpoint(g, period)
+            for _, g in df.groupby(group_key, sort=False)]
+    return df.loc[keep].reset_index(drop=True)
 
 
-def _aggregate_by_group(group, agg_method, is_datetime):
+def _aggregate_by_group(group, agg_method, is_datetime, period=None):
     """
     Aggregates a group of data points using the specified method.
     """
@@ -220,11 +241,10 @@ def _aggregate_by_group(group, agg_method, is_datetime):
             closest_idx = np.argmin(np.abs(t_numeric_group - np.mean(t_numeric_group)))
             return group.iloc[[closest_idx]]
         else:
-            # Use theoretical midpoint for datetime
-            from ._datetime import _get_theoretical_midpoint
-            theoretical_mid = _get_theoretical_midpoint(group['t_original'])
-            closest_idx = np.argmin(np.abs(group['t_original'] - theoretical_mid))
-            return group.iloc[[closest_idx]]
+            # Observation closest to the mid-point of the time increment
+            # (LWP-TRENDS rule) when the increment is known; otherwise the
+            # mid-point of the group's time range.
+            return group.loc[[_closest_to_midpoint(group, period)]]
     return group
 
 

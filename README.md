@@ -15,7 +15,7 @@
 pip install mannks
 ```
 
-**Requirements:** Python 3.7+, NumPy, Pandas, SciPy, Matplotlib, Piecewise-Regression
+**Requirements:** Python 3.9+, NumPy, Pandas (≥ 2.2), SciPy, Matplotlib, Seaborn, Piecewise-Regression
 
 ---
 
@@ -31,6 +31,15 @@ Use this package when your data has:
 - **Seasonal patterns** you need to account for
 - **No normal distribution** (non-parametric methods don't require it)
 - **Small to large sample sizes** (Automatic support for n > 10,000)
+
+**NEW IN V0.6.0**: **Correctness release.** A pre-release audit against the LWP-TRENDS R code (run live) and independent references fixed several statistical defects, and the defaults changed. Results can differ from v0.5.x:
+*   **Var(S) now includes the tie and censoring corrections** (Kendall 1975; NADA/LWP-TRENDS). Previously ties were never detected, which inflated Var(S) and p-values for any tied or censored data.
+*   **The censored slope defaults to the Akritas–Theil–Sen estimator** (`sens_slope_method='ats'`, as in NADA::cenken), with a confidence interval from inverting the censored Kendall test. The former default, which drops ambiguous pairs, is biased away from zero (about +17% at 20% censoring and +70% at 50%). It remains available as `'drop_ambiguous'`; its old names `'unbiased'` and `'nan'` still work but are deprecated.
+*   **Results no longer depend on input row order**: data are sorted by time, and observations with equal times score 0 in S.
+*   **`large_dataset_mode='full'` is now exact.** Pair sampling, used only in fast mode, is reproducible by default.
+*   **Smaller fixes:** LWP-TRENDS mid-observation selection (`agg_method='lwp'`), data-sufficiency notes aligned with LWP-TRENDS, Yue–Wang and `'auto'` autocorrelation estimated on detrended data, a seeded circular block bootstrap with a `(b+1)/(B+1)` p-value, `regional_test` aligned to time increments (and never reporting CT = 1 from a missing correlation), `sen_probability` matching LWP-TRENDS, right-closed classification thresholds, and a direct test of slope change in `compare_periods`.
+
+See [validation/r_parity](./validation/r_parity) for the parity suite and the settings that reproduce LWP-TRENDS exactly. The full list of changes is in the [changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md).
 
 **NEW IN V0.5.0**: **Large Dataset Support**. MannKS now automatically handles datasets with 10,000+ observations (up to 50,000+) by switching to optimized stochastic algorithms ("Fast Mode") for Sen's slope and using stratified sampling for seasonal tests. This reduces computation time from minutes to seconds while preserving statistical validity. See [Example 35](./Examples/35_Large_Data_Trend) and the [Large Dataset Guide](./Examples/Detailed_Guides/large_dataset_guide.md).
 
@@ -54,15 +63,19 @@ See [Statistical Methodology: Bootstrap](./bootstrap.md) for a detailed explanat
 *   **Hypothesis Testing (P-values)**: Uses *Detrended Residual Block Bootstrap* to generate a null distribution while preserving autocorrelation.
 *   **Confidence Intervals (Sen's Slope)**: Uses *Pairs Block Bootstrap* to avoid bias when "reconstructing" censored data values from residuals.
 
-### Performance (v0.5.0)
+### Performance
 
-| Dataset Size | Mode | Time | Accuracy |
+Uncensored data, single core:
+
+| Dataset Size | Mode | Time | Slope accuracy |
 |--------------|------|------|----------|
-| 1,000 | Full | 0.1s | Exact |
-| 5,000 | Full | 2s | Exact |
-| 10,000 | Fast | 3s | ±0.5% |
-| 50,000 | Fast | 5s | ±0.5% |
-| 100,000 | Aggregate* | 10s | Depends** |
+| 1,000 | Full | 0.2s | Exact |
+| 5,000 | Full | ~6s | Exact |
+| 10,000 | Fast | < 1s | ±0.3% (1 s.d.) |
+| 50,000 | Fast | < 1s | ±0.3% (1 s.d.) |
+| 100,000 | Aggregate* | – | Depends** |
+
+The Mann-Kendall test (S, Var(S), p) is exact in every mode; only the slope is sampled in fast mode.
 
 \* Aggregate to ~1000 points first
 \** Accuracy depends on aggregation method and trend pattern
@@ -101,7 +114,7 @@ print(f"Confidence: {result.C:.2%}")
 ```
 Trend: Highly Likely Increasing
 Slope: 24.57 mg/L per year
-Confidence: 98.47%
+Confidence: 99.23%
 ```
 
 ![Trend Analysis Plot](https://raw.githubusercontent.com/LukeAFullard/MannKS/main/assets/quick_start_trend.png)
@@ -118,7 +131,7 @@ Confidence: 98.47%
 
 ### Data Handling
 - **Censored Data Support**: Native handling of detection limits (`<5`, `>100`)
-  - Three methods: Standard, LWP-compatible, Akritas-Theil-Sen (ATS)
+  - Slope estimators: Akritas-Theil-Sen (default), LWP-TRENDS-compatible, and drop-ambiguous-pairs
   - Handles left-censored, right-censored, and mixed censoring
 - **Unequal Spacing**: Uses actual time differences (not just rank order)
 - **Missing Data**: Automatically handles NaN values and missing seasons
@@ -128,7 +141,7 @@ Confidence: 98.47%
 ### Statistical Features
 - **Continuous Confidence**: Reports likelihood ("Highly Likely Increasing") not just p-values
 - **Data Quality Checks**: Automatic warnings for tied values, long runs, insufficient data
-- **Robust Methods**: ATS estimator for heavily censored data
+- **Robust Methods**: Akritas-Theil-Sen estimator for censored data (default)
 - **Flexible Testing**: Kendall's Tau-a or Tau-b, custom significance levels
 - **Rolling Trends** (New in v0.3.0): Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](./Examples/31_Rolling_Trend_Analysis).
 - **Segmented Trends** (New in v0.4.0): Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](./Examples/32_Segmented_Regression).
@@ -185,9 +198,9 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 ## ⚠️ Important Limitations
 
 ### Sample Size
-- **Recommended maximum: n = 50,000** (using default Fast Mode)
-- **Hard limit: n = 46,340** (if using `large_dataset_mode='full'`)
-- For larger datasets, use `large_dataset_mode='aggregate'` or `regional_test()`
+- **Fast mode** (default above n = 5,000) samples pairs for the slope and handles 50,000+ observations in about a second; the test itself stays exact.
+- **Exact slopes** (`large_dataset_mode='full'`) need all n(n-1)/2 pairs: practical up to about n = 10,000 on a typical machine (memory), hard limit n = 46,340.
+- For very large or high-frequency data, aggregate first with `agg_method`/`agg_period` (e.g. daily or monthly medians); `large_dataset_mode='aggregate'` only warns, it does not aggregate.
 
 ### Statistical Assumptions
 - **Independence**: Data points must be serially independent
@@ -218,12 +231,12 @@ The [Examples](./Examples/README.md) folder contains step-by-step tutorials from
 
 ## 🔬 Validation
 
-Extensively validated against:
-- **LWP-TRENDS R script** (34 test cases, 99%+ agreement)
-- **NADA2 R package** (censored data methods)
-- Edge cases: missing data, tied values, all-censored data, insufficient samples
+Validated against:
+- **LWP-TRENDS R script (v2502)**, run live via `Rscript`. With the LWP settings (`alpha=0.1`, `mk_test_method='lwp'`, `ci_method='lwp'`, `sens_slope_method='lwp'`, `tau_method='a'`, `tie_break_method='lwp'`, `agg_method='lwp'`), S, Var(S), Z, p, C, Cd, tau, the Sen slope and its confidence interval, and `sen_probability` agree to 1e-6 (relative). This holds on synthetic edge cases and on the LWP example data sets. The documented exceptions are cases where LWP-TRENDS declines to compute, and fast-mode sampling. Frozen R reference values are tested in `tests/test_lwp_parity.py`.
+- **NADA::cenken** (Akritas-Theil-Sen): agreement within NADA's own bisection tolerance (median 0.3%).
+- **Exact permutation distributions and Monte Carlo** (Type-I error, CI coverage, slope bias).
 
-See [validation/](./validation/) for detailed comparison reports.
+See [validation/r_parity](./validation/r_parity) for the scripts, and [validation/](./validation/) for the scenario studies.
 
 ---
 

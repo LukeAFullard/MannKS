@@ -33,7 +33,7 @@
 |               1 | -143.925 | -154.345 |  19.7217 | True        |
 |               2 | -139.243 | -154.874 |  18.8484 | True        |
 
-**Detected Breakpoint:** 51.18134361474203
+**Detected Breakpoint:** 51.181343614742026
 
 ![Plot](v45_02_plot.png)
 
@@ -66,3 +66,4 @@
 **Success:** True
 
 **Metric:** Probability: 100.00%
+

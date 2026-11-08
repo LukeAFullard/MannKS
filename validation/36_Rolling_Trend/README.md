@@ -15,8 +15,8 @@ PASS: min_size filtering correctly returned empty DataFrame.
 
 ## V-36e: Outlier Robustness
 Window with outlier (True slope ~0.5)
-- OLS Slope: 1.2202
-- Sen's Slope: 0.4726
+- OLS Slope: 1.2054
+- Sen's Slope: 0.4580
 PASS: Sen's slope is more robust to outlier than OLS.
 
 ![Outlier Robustness](outlier_robustness.png)

@@ -91,7 +91,7 @@ Raw Data:
 --- Running Test with Method: 'robust' (Default) ---
 Trend: increasing (Highly Likely Increasing)
 S-statistic: 18.0
-p-value: 0.0955
+p-value: 0.0929
 
 --- Running Test with Method: 'lwp' ---
 Trend: increasing (Highly Likely Increasing)
@@ -107,7 +107,7 @@ p-value: 0.0002
 *   **Robust Method (S = 18.0)**:
     *   The test sees the clear increase from 10 to 60.
     *   However, the transition involving censored values (like 80 to `>80`) is treated conservatively. In this implementation, standard rank comparisons for right-censored data can be ambiguous or even negatively ranked against uncensored values if the statistical assumptions (often designed for left-censoring) are not perfectly aligned with right-censored logic.
-    *   **Result**: The trend is barely significant (p=0.0955), effectively treating the "ceiling" data as noise or ambiguity rather than a clear continuation of the trend.
+    *   **Result**: The trend is barely significant (p=0.0929), effectively treating the "ceiling" data as noise or ambiguity rather than a clear continuation of the trend.
 
 *   **LWP Method (S = 42.0)**:
     *   The method converts all `>80` values to `80.1`.

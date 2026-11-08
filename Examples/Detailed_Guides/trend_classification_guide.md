@@ -1,71 +1,76 @@
 # A Comprehensive Guide to Trend Classification
 
-The `MannKS` package provides a sophisticated trend classification system to help you interpret the results of a trend analysis. This guide explains how the classification works, what the different categories mean, their uses and limitations, and how you can customize them.
+The `MannKS` package translates a trend test result into a short, human-readable label such as "Very Likely Increasing". This guide explains how the label is built, what the categories mean, their uses and limitations, and how to customise them.
 
-The classification is performed by the `classify_trend` function, which is automatically called by `trend_test` and `seasonal_trend_test`.
+The classification is performed by the `classify_trend` function, which is called automatically by `trend_test` and `seasonal_trend_test` (field `classification`).
 
 ---
 
-### How Classification Works: The Three Key Ingredients
+### How Classification Works
 
-The classification system is designed to translate complex statistical results into a simple, human-readable label. It does this using three key pieces of information from the trend test:
+Two pieces of information from the test are combined:
 
-1.  **P-value (`p`):**
-    -   **What it is:** In simple terms, the p-value is the probability of seeing your data, or something more extreme, *purely by random chance*, assuming that no real trend actually exists.
-    -   **How to think about it:** Imagine you see a trend in your data. A low p-value (e.g., `p < 0.05`) is like saying, "It's very unlikely we'd see a trend this strong just by accident." This gives us confidence that the trend is real. A high p-value suggests the observed pattern could easily be random noise.
+1.  **Direction** (`trend`): taken from the sign of the Mann-Kendall statistic (S, or equivalently Z): `'increasing'`, `'decreasing'`, or `'indeterminate'` when Z = 0.
 
-2.  **Sen's Slope (`slope`):**
-    -   **What it is:** This is the magnitude and direction of the trend. It is a robust estimate, calculated as the median of the slopes between all pairs of points in your data.
-    -   **How to think about it:** A positive slope means an increasing trend (e.g., "+2 units per year"), and a negative slope means a decreasing trend ("-5 units per year"). The classification system uses the sign of the slope to determine if a trend is "Increasing" or "Decreasing".
+2.  **Confidence in that direction** (`C`):
+    -   **What it is:** `C = 1 - p/2`, where `p` is the two-sided p-value of the Mann-Kendall test. It is the confidence that the trend goes in the reported direction, and ranges from 0.5 (no evidence either way) to 1. This is the "continuous confidence" measure of LWP-TRENDS (Fraser & Whitehead 2022).
+    -   **Related output:** `Cd` is the confidence that the trend is *decreasing* (`Cd = C` for a decreasing trend and `1 - C` for an increasing one).
 
-3.  **Confidence (`C`):**
-    -   **What it is:** This is a more intuitive measure of confidence in the trend's direction, calculated as `C = 1 - p/2` (for a two-sided test). It ranges from 0 to 1.
-    -   **How to think about it:** A p-value of `0.05` corresponds to a confidence of `0.975` in the standard formulation used here, though for classification thresholds we often map `p=0.05` to a simpler conceptual "95% confidence".
-
-The system uses the **Confidence (`C`)** to determine the *strength* category and the **Slope** to determine the *direction*.
+The strength word comes from `C` and the direction word from `trend`. The Sen's slope is not used.
 
 ---
 
 ### The Default Confidence Categories
 
-By default, the package uses a classification scheme inspired by the Intergovernmental Panel on Climate Change (IPCC) to provide a nuanced interpretation.
+The defaults follow the IPCC-style "Direction" categories of LWP-TRENDS (`AssignConfCat`). Classes are right-closed, exactly as in LWP-TRENDS: a value on a boundary belongs to the lower class.
 
-| Confidence (`C`) | Approximate P-value | Trend Category         | Interpretation |
-| :--------------- | :------------------ | :--------------------- | :--- |
-| `C >= 0.95`      | `p <= 0.10`         | **Highly Likely Increasing/Decreasing** | High confidence. The trend is statistically significant. (Note: The default `alpha=0.05` corresponds to `C=0.975`, ensuring this category is met for significant trends). |
-| `0.90 <= C < 0.95` | `0.10 < p <= 0.20` | **Very Likely Increasing/Decreasing** | Medium-high confidence. The trend is borderline significant. |
-| `0.67 <= C < 0.90` | `0.20 < p <= 0.66` | **Likely Increasing/Decreasing** | Medium-low confidence. Some evidence of a trend, but it is weak. |
-| `0.33 <= C < 0.67` | `0.66 < p`         | **As Likely as Not (No Clear Trend)**  | Ambiguous. We lack enough evidence to determine a trend direction. |
-| `C < 0.33`       | `High p-value`      | **Stable**             | High confidence that there is *no* meaningful trend. |
+| Confidence (`C`) | Equivalent p-value | Classification |
+| :--------------- | :----------------- | :------------- |
+| `C > 0.95`       | `p < 0.10`         | **Highly Likely** Increasing/Decreasing |
+| `0.90 < C <= 0.95` | `0.10 <= p < 0.20` | **Very Likely** Increasing/Decreasing |
+| `0.67 < C <= 0.90` | `0.20 <= p < 0.66` | **Likely** Increasing/Decreasing |
+| `C <= 0.67`      | `p >= 0.66`        | **As Likely as Not** Increasing/Decreasing |
 
-**Note:** The `alpha` parameter you provide to `trend_test` (default is `0.05`) directly affects the `h` (hypothesis) result. If `h` is True (trend is significant at alpha), the classification will simply be "Increasing" or "Decreasing", overriding the nuances above. If `continuous_confidence=True`, the nuanced categories are used when `h` is False or for more detailed reporting.
+A test that is significant at the default `alpha = 0.05` has `C > 0.975` and is therefore "Highly Likely".
 
-See **[Example 17: Interpreting the Full Output](./17_Interpreting_Output/README.md)** for a practical demonstration of these categories.
+With `continuous_confidence=False`, the classical behaviour is used instead: the result is "Increasing" or "Decreasing" only if the test is significant at `alpha`, and "No Trend" otherwise.
+
+See **[Example 16: Interpreting the Full Output](../16_Interpreting_Full_Output/README.md)** and **[Example 27](../27_Continuous_Confidence_Comparison/README.md)** for practical demonstrations.
 
 ### Usefulness and Limitations of Classification
 
--   **Usefulness:** Classification is extremely useful for **summarization**. If you are analyzing hundreds of sites, a table of trend categories gives you an immediate overview. It also provides a standardized vocabulary for reporting results.
--   **Limitations:** A category is a **simplification**. A p-value of `0.049` ("Increasing") and `0.051` ("Very Likely Increasing") are statistically almost identical, but they fall into different categories. **Never rely only on the category.** Always inspect the p-value and the Sen's slope magnitude to understand the full picture.
+-   **Usefulness:** Classification is very useful for **summarisation**. When you analyse hundreds of sites, a table of categories gives an immediate overview, and it provides a standard vocabulary for reporting.
+-   **Limitations:** A category is a **simplification**. A p-value of `0.099` ("Highly Likely") and `0.101` ("Very Likely") are statistically almost identical but fall into different categories. **Never rely only on the category**; also look at `C`, the p-value and the slope with its confidence interval.
 
 ---
 
-### Customizing the Classification
+### Customising the Classification
 
-You can define your own classification rules using the `category_map` parameter. This is a dictionary where keys are the category names and values are the **minimum confidence level (`C`)** required.
+Use the `category_map` parameter: a dictionary whose **keys are confidence thresholds** (floats) and whose **values are labels**. The direction word is appended automatically.
 
-For example, a simpler, stricter classification system could be:
+For example, a simpler three-level scheme:
 ```python
 my_map = {
-    0.975: "Significant", # Approx p <= 0.05
-    0.95: "Suggestive",   # Approx p <= 0.10
-    0.0: "Indeterminate"  # All other cases (the catch-all)
+    0.975: "Significant",   # C > 0.975, i.e. p < 0.05
+    0.95: "Suggestive",     # 0.95 < C <= 0.975
+    0.0: "Indeterminate",   # everything else (catch-all)
 }
+mk.trend_test(x, t, category_map=my_map)   # e.g. "Suggestive Increasing"
 ```
-You would pass this to the test function: `mk.trend_test(..., category_map=my_map)`
 
-**Key Rules for Custom Maps:**
-1.  **Values are Confidence Levels (`C`):** Use the confidence value `C` found in the result object (keys are floats).
-2.  **Highest Wins:** The function evaluates your map and assigns the category with the **highest** threshold that `C` exceeds or equals.
-3.  **Catch-All Required:** You **must** include a "zero" threshold (e.g., `0.0: "Indeterminate"`) to act as a fallback for results that don't meet any other criteria. If you omit this, low-confidence results might be unlabeled or cause an error.
+**Rules for custom maps:**
+1.  **Keys are confidence levels (`C`)**, between 0 and 1.
+2.  **Highest threshold exceeded wins.** A label applies when `C` is *strictly greater* than its threshold (as in LWP-TRENDS); the lowest threshold is inclusive.
+3.  **Include a catch-all** (e.g. `0.0: "Indeterminate"`), so that every result receives a label.
 
-See **[Example 19: Standalone Trend Classification](./19_Standalone_Classification/README.md)** for a hands-on guide to creating and using custom maps.
+#### Reproducing the LWP-TRENDS "Decrease" categories
+
+LWP-TRENDS can also report the confidence that a trend is decreasing, `Cd`, in five classes ("Very likely increasing" … "Very likely decreasing", with "Low confidence" in between). The same classes follow from `C` and the direction:
+
+```python
+lwp_like = {0.90: "Very Likely", 0.67: "Likely", 0.0: "Low confidence"}
+```
+
+("Low confidence Increasing/Decreasing" corresponds to LWP-TRENDS' "Low confidence". The classes agree except for values lying exactly on a class boundary.)
+
+See **[Example 18](../18_Interpreting_Confidence_and_Classification/README.md)** for a hands-on guide to creating and using custom maps.

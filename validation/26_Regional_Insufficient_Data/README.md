@@ -1,6 +1,6 @@
 # V-26: Regional Trend with Insufficient Site Data
 
-This test checks the robustness of the regional test when one site (SiteC) provides invalid or empty results (simulated as insufficient data).
+This test checks the robustness of the regional test when one site (SiteC) provides invalid or empty results (simulated as insufficient data). 
 
 The expected behavior is that the invalid site is excluded from the calculation, meaning the number of sites (M) should be 2, not 3. The regional statistics (TAU, etc.) should be calculated based only on the valid sites (A and B).
 
@@ -15,3 +15,4 @@ The expected behavior is that the invalid site is excluded from the calculation,
 |                        | Direction (DT)   | Increasing     | Increasing | ✅        |
 |                        | Confidence (CT)  | 1.0000         | 1.0000     | ✅        |
 | ---                    | ---              | ---            | ---        | ---      |
+

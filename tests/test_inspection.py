@@ -73,5 +73,22 @@ def test_inspect_trend_data_weekly_increment():
     dates = pd.to_datetime(pd.date_range(start='2018-01-01', end='2019-12-31', freq='W'))
     values = range(len(dates))
     data = pd.DataFrame({'t': dates, 'value': values})
-    inspected_data = inspect_trend_data(data)
+    inspected_data = inspect_trend_data(data, custom_increments={'weekly': 52, 'monthly': 12})
     assert (inspected_data['time_increment'] == inspected_data['t'].dt.isocalendar().week).all()
+
+
+def test_inspect_trend_data_default_increments_match_lwp():
+    """By default only the LWP-TRENDS increments (and annual) are considered,
+    so weekly data are analysed at the monthly increment."""
+    dates = pd.to_datetime(pd.date_range(start='2018-01-01', end='2019-12-31', freq='W'))
+    data = pd.DataFrame({'t': dates, 'value': range(len(dates))})
+    res = inspect_trend_data(data, return_summary=True)
+    assert list(res.summary['increment']) == ['monthly', 'bi-monthly', 'quarterly', 'bi-annually', 'annually']
+    assert (res.data['time_increment'] == res.data['t'].dt.month).all()
+
+
+def test_inspect_trend_data_includes_end_of_last_day():
+    dates = pd.to_datetime(['2019-01-01 00:00', '2019-06-01 00:00', '2019-12-31 15:30'])
+    data = pd.DataFrame({'t': dates, 'value': [1, 2, 3]})
+    out = inspect_trend_data(data)
+    assert len(out) == 3

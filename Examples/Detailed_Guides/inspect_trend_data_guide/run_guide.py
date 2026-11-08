@@ -81,11 +81,23 @@ def generate_guide():
 
     # --- 3. Parameter Reference ---
     param_text = """
+    ## Choosing the Time Increment
+
+    Besides plotting, `inspect_trend_data` follows LWP-TRENDS `InspectTrendData`: it trims the data to the trend period and selects the highest-frequency time increment with enough data. An increment is acceptable when at least `prop_year_tol` (default 0.9) of the years and at least `prop_incr_tol` (default 0.9) of the year-increment combinations contain an observation. The returned DataFrame gains a `time_increment` column (the month, bi-month, quarter, half-year or year of each row, or `'none'` if no increment qualifies). With `return_summary=True` you also get the data-availability table for every candidate increment.
+
+    By default the LWP-TRENDS candidates are used, from finest to coarsest: monthly, bi-monthly, quarterly, bi-annually, then annually. Weekly or daily increments can be requested with `custom_increments`, e.g. `custom_increments={'weekly': 52, 'monthly': 12}`.
+
+    ```python
+    res = inspect_trend_data(df_processed, time_col='t', return_summary=True)
+    print(res.summary[['increment', 'prop_year', 'prop_incr_year', 'data_ok']])
+    print(res.data['time_increment'].iloc[0])
+    ```
+
     ## Parameter Reference
 
     ### `data`
     -   **Type:** `pandas.DataFrame`
-    -   **Description:** The processed data frame. This **must** be the output from `prepare_censored_data`. It requires the columns `'value'`, `'censored'`, and `'cen_type'`.
+    -   **Description:** A data frame with a time column and a value column. For the plots, it must also contain the `'censored'` and `'cen_type'` columns produced by `prepare_censored_data`.
     -   **Important:** You must manually add your time column (e.g., `'t'`) to this DataFrame before passing it to the function, as `prepare_censored_data` only handles the value vector.
 
     ### `time_col`
@@ -106,7 +118,23 @@ def generate_guide():
 
     ### `end_year` (optional)
     -   **Type:** `int`
-    -   **Description:** The last year of the analysis period. Defaults to the maximum year in the data.
+    -   **Description:** The last year of the analysis period (all of 31 December is included). Defaults to the maximum year in the data.
+
+    ### `prop_year_tol`, `prop_incr_tol`
+    -   **Type:** `float`, **Defaults:** `0.9`, `0.9`
+    -   **Description:** Minimum proportions of years, and of year-increment combinations, that must contain data for an increment to be selected.
+
+    ### `return_summary`
+    -   **Type:** `bool`, **Default:** `False`
+    -   **Description:** If `True`, returns a namedtuple `(data, summary)` with the data-availability table.
+
+    ### `value_col`
+    -   **Type:** `str`, **Default:** `'value'`
+    -   **Description:** Name of the value column.
+
+    ### `custom_increments`
+    -   **Type:** `dict`, **Default:** `None`
+    -   **Description:** Candidate increments and their number per year, chosen from `'daily'`, `'weekly'`, `'monthly'`, `'bi-monthly'`, `'quarterly'`, `'bi-annually'`, `'annually'`.
 
     ## Understanding the Output Plots
 

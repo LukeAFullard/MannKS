@@ -1,4 +1,3 @@
-
 # A Comprehensive Guide to `regional_test`
 
 The `regional_test` function is a powerful tool for aggregating trend analysis results from multiple sites to determine if there is a consistent, region-wide trend. This guide explains its purpose, how to format your data, and how to interpret the results.
@@ -67,7 +66,11 @@ The `regional_test` function requires two pandas DataFrames as input:
 
 ### `c_col`
 -   **Type:** `str`, **Default:** `'C'`
--   **Description:** The name of the column in `trend_results` containing the trend confidence value (0 to 1).
+-   **Description:** The name of the column in `trend_results` containing the trend confidence value `C` (0.5 to 1).
+
+### `agg_period`
+-   **Type:** `str` or `None`, **Default:** `'month'`
+-   **Description:** For datetime time columns, each site's series is reduced to one value per time increment (`'year'`, `'quarter'`, `'month'`, `'week'` or `'day'`; the observation closest to the increment mid-point, as LWP-TRENDS `getTAU` does) before the inter-site correlations are computed. Sites sampled on different days of the same month are then still paired. Use the same time increment as the site trend analyses. `None` pairs observations only on identical timestamps. Ignored for numeric time columns, which are matched exactly.
 
 ## Output Fields
 
@@ -77,8 +80,11 @@ The function returns a `namedtuple` with the following fields:
 -   **`TAU`** (`float`): The aggregate trend strength, which is the proportion of sites trending in the modal (most common) direction.
 -   **`VarTAU`** (`float`): The uncorrected variance of `TAU`.
 -   **`CorrectedVarTAU`** (`float`): The variance of `TAU` corrected for inter-site correlation.
--   **`DT`** (`str`): The aggregate trend direction ('Increasing' or 'Decreasing').
--   **`CT`** (`float`): The confidence in the aggregate trend direction, ranging from 0 to 1. A higher value indicates greater confidence.
+-   **`DT`** (`str`): The aggregate trend direction ('Increasing' or 'Decreasing'). When the sites are evenly split, `DT` is 'Increasing' with `TAU = 0.5` and `CT = 0.5`, as in LWP-TRENDS.
+-   **`CT`** (`float`): The confidence in the aggregate trend direction, from 0.5 (no evidence) to 1.
+-   **`warnings`** (`list` of `str`): Warnings raised during the calculation. For example, a pair of sites with too few common time increments has no defined correlation; it is omitted from the correction and a warning is added.
+
+Each site's direction is the sign of its `S` (a site with `S = 0` counts as half a site in each direction), and the inter-site correlation is the Pearson correlation of the aligned series, as in LWP-TRENDS.
 
 ## Example Usage
 
@@ -109,7 +115,6 @@ for site in sites:
     all_trend_results.append({
         'site': site,
         's': result.s,
-        'var_s': result.var_s, # Note: var_s is needed for individual tests, but not for regional_test
         'C': result.C
     })
 

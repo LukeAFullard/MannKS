@@ -87,7 +87,7 @@ class ValidationUtils:
             r_df = self._prepare_r_dataframe(df)
             ro.globalenv['df_r'] = r_df
             ro.r('df_r$CenType <- as.factor(df_r$CenType)')
-            ro.r('df_r <- GetMoreDateInfo(df_r)')
+            ro.r('df_r <- GetMoreDateInfo(df_r, FindDateShifts=FALSE)')  # MannKS does not shift end-of-month samples
 
             is_annual = True
             ro.r('year_counts <- table(df_r$Year)')
@@ -239,10 +239,14 @@ class ValidationUtils:
              mk_std = mk.trend_test(x_std, t_std, **mk_kwargs)
 
         lwp_defaults = {
+            # LWP-TRENDS settings (see validation/r_parity/README.md)
             'mk_test_method': 'lwp',
             'ci_method': 'lwp',
             'sens_slope_method': 'lwp',
-            'agg_method': 'middle_lwp'
+            'agg_method': 'lwp',
+            'tau_method': 'a',
+            'tie_break_method': 'lwp',
+            'alpha': 0.10,  # LWP-TRENDS reports 90% confidence intervals
         }
         lwp_final_kwargs = {**lwp_defaults, **lwp_mode_kwargs}
 
@@ -264,6 +268,9 @@ class ValidationUtils:
              else:
                  mk_lwp = mk.trend_test(x_std, t_lwp, **lwp_final_kwargs)
         else:
+             # Period-based LWP aggregation needs datetimes; numeric time has one value per time.
+             if lwp_final_kwargs.get('agg_method') == 'lwp':
+                  lwp_final_kwargs['agg_method'] = 'none'
              if seasonal and 'agg_period' in lwp_final_kwargs:
                   del lwp_final_kwargs['agg_period']
              if seasonal:
@@ -326,13 +333,13 @@ class ValidationUtils:
         return result_row, mk_std
 
     def _append_to_csv(self, row: Dict):
+        """Insert or replace this test's row (keyed by test_id) in the master CSV."""
         df = pd.DataFrame([row])
         if os.path.exists(self.master_csv_path) and os.stat(self.master_csv_path).st_size > 0:
-             cols = pd.read_csv(self.master_csv_path, nrows=0).columns.tolist()
-             df = df[cols]
-             df.to_csv(self.master_csv_path, mode='a', header=False, index=False)
-        else:
-             df.to_csv(self.master_csv_path, mode='w', header=True, index=False)
+            existing = pd.read_csv(self.master_csv_path)
+            existing = existing[existing['test_id'] != row['test_id']]
+            df = pd.concat([existing, df.reindex(columns=existing.columns)], ignore_index=True)
+        df.to_csv(self.master_csv_path, index=False)
 
     def _get_decimal_year(self, df: pd.DataFrame) -> np.ndarray:
         if 'time' in df.columns:
@@ -522,7 +529,7 @@ def main():
         mks_data['time'] = t
 
         res_std = mk.trend_test(mks_data, t,
-                                sens_slope_method='unbiased',
+                                sens_slope_method='drop_ambiguous',
                                 mk_test_method='robust',
                                 slope_scaling='year')
 
@@ -538,6 +545,9 @@ def main():
                                 ci_method='lwp',
                                 agg_method='lwp',
                                 agg_period='month',
+                                tau_method='a',
+                                tie_break_method='lwp',
+                                alpha=0.10,  # LWP-TRENDS reports 90% confidence intervals
                                 slope_scaling='year')
 
         res_ats = mk.trend_test(mks_data, t,

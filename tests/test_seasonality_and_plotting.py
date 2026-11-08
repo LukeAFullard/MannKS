@@ -36,22 +36,14 @@ def test_check_seasonality_rejects_non_seasonal(non_seasonal_data):
     assert len(result.seasons_tested) == 12
     assert len(result.seasons_skipped) == 0
 
-def test_plot_seasonal_distribution(seasonal_data):
+def test_plot_seasonal_distribution(seasonal_data, tmp_path):
     x, t = seasonal_data
-    plot_path = "test_plot.png"
+    plot_path = str(tmp_path / "test_plot.png")
 
-    # Ensure the file does not exist before the test
-    if os.path.exists(plot_path):
-        os.remove(plot_path)
-
-    with pytest.warns(PendingDeprecationWarning, match="vert: bool"):
-        returned_path = plot_seasonal_distribution(x, t, plot_path=plot_path)
+    returned_path = plot_seasonal_distribution(x, t, plot_path=plot_path)
 
     assert returned_path == plot_path
     assert os.path.exists(plot_path)
-
-    # Clean up the created file
-    os.remove(plot_path)
 
 def test_trend_plotting():
     """

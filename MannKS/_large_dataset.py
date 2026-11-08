@@ -99,6 +99,25 @@ def detect_size_tier(n: int,
         }
 
 
+def _sample_pairs(n, max_pairs, random_state):
+    """Uniformly sample distinct index pairs (i < j).  A fixed default seed is
+    used when ``random_state`` is None so results are reproducible."""
+    rng = np.random.default_rng(0 if random_state is None else random_state)
+    n_pairs = n * (n - 1) // 2
+    if n_pairs <= 20 * max_pairs and n_pairs <= 20_000_000:
+        # Small pool: sample distinct pairs without replacement.
+        k = rng.choice(n_pairs, size=min(max_pairs, n_pairs), replace=False)
+        ii, jj = np.triu_indices(n, k=1)
+        return ii[np.sort(k)], jj[np.sort(k)]
+    i_idx = rng.integers(0, n, size=max_pairs)
+    j_idx = rng.integers(0, n, size=max_pairs)
+    lo = np.minimum(i_idx, j_idx)
+    hi = np.maximum(i_idx, j_idx)
+    pairs = np.unique(np.column_stack([lo, hi]), axis=0)
+    pairs = pairs[pairs[:, 0] < pairs[:, 1]]
+    return pairs[:, 0], pairs[:, 1]
+
+
 def fast_sens_slope(x: np.ndarray,
                     t: np.ndarray,
                     max_pairs: int = DEFAULT_MAX_PAIRS,
@@ -106,63 +125,34 @@ def fast_sens_slope(x: np.ndarray,
     """
     Estimate Sen's slope by sampling random pairs instead of all pairs.
 
-    Theory:
-        Sen's slope is the median of all pairwise slopes. For large n,
-        sampling K random pairs provides an unbiased estimate with
-        standard error ≈ IQR(slopes) / √K.
+    Sen's slope is the median of all pairwise slopes; the median of K
+    uniformly sampled pairwise slopes estimates it with standard error of
+    roughly IQR(slopes) / sqrt(K).
 
     Args:
         x: Data values
         t: Time values
-        max_pairs: Maximum number of pairs to sample
-        random_state: Seed for reproducibility
+        max_pairs: Maximum number of pairs to sample.  If there are no more
+            possible pairs than this, all pairs are used (exact).
+        random_state: Seed for reproducibility (default: a fixed seed).
 
     Returns:
-        Array of sampled slopes (length <= max_pairs)
-
-    Statistical Note:
-        With max_pairs=100,000:
-        - SE ≈ 0.5% of true slope (typical case)
-        - 95% CI covers true value in >99% of simulations
-        - Bias < 0.1% of true slope
+        Array of sampled slopes.  Pairs with equal times are returned as NaN
+        so that the fraction of usable pairs is preserved for rank scaling.
     """
-    # Audit: Verified for v0.5.0
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
     n = len(x)
-    n_possible_pairs = n * (n - 1) // 2
-
-    if n_possible_pairs <= max_pairs:
-        # Use exact calculation
+    if n * (n - 1) // 2 <= max_pairs:
         from ._stats import _sens_estimator_unequal_spacing
         return _sens_estimator_unequal_spacing(x, t)
 
-    # Sample random pairs
-    rng = np.random.default_rng(random_state)
-
-    # Generate random indices ensuring i < j
-    i_indices = rng.integers(0, n, size=max_pairs)
-    j_indices = rng.integers(0, n, size=max_pairs)
-
-    # Ensure i < j by swapping when needed
-    swap_mask = i_indices >= j_indices
-    i_indices[swap_mask], j_indices[swap_mask] = (
-        j_indices[swap_mask], i_indices[swap_mask]
-    )
-
-    # Remove duplicate pairs and same-index pairs
-    unique_pairs = np.unique(np.column_stack([i_indices, j_indices]), axis=0)
-    unique_pairs = unique_pairs[unique_pairs[:, 0] < unique_pairs[:, 1]]
-
-    i_final = unique_pairs[:, 0]
-    j_final = unique_pairs[:, 1]
-
-    # Calculate slopes
-    x_diff = x[j_final] - x[i_final]
-    t_diff = t[j_final] - t[i_final]
-
-    valid_mask = np.abs(t_diff) > 1e-10
-    slopes = x_diff[valid_mask] / t_diff[valid_mask]
-
-    return slopes # v0.5.0 Audit: Verified stochastic approximation
+    i, j = _sample_pairs(n, max_pairs, random_state)
+    dt = t[j] - t[i]
+    slopes = np.full(len(i), np.nan)
+    ok = np.abs(dt) > 1e-10
+    slopes[ok] = (x[j][ok] - x[i][ok]) / dt[ok]
+    return slopes
 
 
 def fast_sens_slope_censored(x: np.ndarray,
@@ -171,90 +161,28 @@ def fast_sens_slope_censored(x: np.ndarray,
                              max_pairs: int = DEFAULT_MAX_PAIRS,
                              lt_mult: float = 0.5,
                              gt_mult: float = 1.1,
-                             method: str = 'unbiased',
+                             method: str = 'drop_ambiguous',
                              random_state: Optional[int] = None) -> np.ndarray:
     """
-    Fast censored Sen's slope using pair sampling.
+    Censored Sen's slopes for a random sample of pairs.
 
-    Critical Difference from Uncensored:
-        We CANNOT simply sample pairs randomly because censoring rules
-        depend on the relationship between SPECIFIC pairs.
-
-        Strategy:
-        1. Sample pairs as in fast_sens_slope
-        2. Apply censoring rules to sampled pairs
-        3. This preserves the correct proportion of ambiguous/valid slopes
-
-    Args:
-        Similar to _sens_estimator_censored but with max_pairs
-
-    Returns:
-        Array of sampled slopes with censoring rules applied
+    The LWP-TRENDS censoring rules depend only on the two members of a pair,
+    so they are applied to each sampled pair exactly as in the full
+    calculation.  Pairs with equal times are returned as NaN.
     """
+    from ._stats import _sens_estimator_censored, _censor_codes, _censored_pair_slopes
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
     n = len(x)
-    n_possible_pairs = n * (n - 1) // 2
+    if n * (n - 1) // 2 <= max_pairs:
+        return _sens_estimator_censored(x, t, cen_type, lt_mult=lt_mult,
+                                        gt_mult=gt_mult, method=method)
 
-    if n_possible_pairs <= max_pairs:
-        # Use exact calculation
-        from ._stats import _sens_estimator_censored
-        return _sens_estimator_censored(
-            x, t, cen_type,
-            lt_mult=lt_mult,
-            gt_mult=gt_mult,
-            method=method
-        )
-
-    # Sample pairs (same as fast_sens_slope)
-    rng = np.random.default_rng(random_state)
-    i_indices = rng.integers(0, n, size=max_pairs)
-    j_indices = rng.integers(0, n, size=max_pairs)
-
-    swap_mask = i_indices >= j_indices
-    i_indices[swap_mask], j_indices[swap_mask] = (
-        j_indices[swap_mask], i_indices[swap_mask]
-    )
-
-    unique_pairs = np.unique(np.column_stack([i_indices, j_indices]), axis=0)
-    unique_pairs = unique_pairs[unique_pairs[:, 0] < unique_pairs[:, 1]]
-
-    i_final = unique_pairs[:, 0]
-    j_final = unique_pairs[:, 1]
-
-    # Calculate raw differences
-    x_diff_raw = x[j_final] - x[i_final]
-    t_diff = t[j_final] - t[i_final]
-    valid_t_mask = np.abs(t_diff) > 1e-10
-
-    # Apply valid_t_mask
-    i_final = i_final[valid_t_mask]
-    j_final = j_final[valid_t_mask]
-    x_diff_raw = x_diff_raw[valid_t_mask]
-    t_diff = t_diff[valid_t_mask]
-
-    slopes_raw = x_diff_raw / t_diff
-
-    # Modified values for slope calculation
-    x_mod = x.copy().astype(float)
-    x_mod[cen_type == 'lt'] *= lt_mult
-    x_mod[cen_type == 'gt'] *= gt_mult
-
-    x_diff_mod = x_mod[j_final] - x_mod[i_final]
-    slopes_mod = x_diff_mod / t_diff
-
-    # Apply censoring rules (same logic as _sens_estimator_censored)
-    cen_type_pairs = cen_type[j_final] + " " + cen_type[i_final]
-    slopes_final = slopes_mod.copy()
-
-    ambiguous_value = 0 if method == 'lwp' else np.nan
-
-    # Rules from _stats.py
-    slopes_final[(cen_type_pairs == 'gt gt') | (cen_type_pairs == 'lt lt')] = ambiguous_value
-    slopes_final[(slopes_raw > 0) & (cen_type_pairs == 'lt not')] = ambiguous_value
-    slopes_final[(slopes_raw < 0) & (cen_type_pairs == 'not lt')] = ambiguous_value
-    slopes_final[(slopes_raw > 0) & (cen_type_pairs == 'not gt')] = ambiguous_value
-    slopes_final[(slopes_raw < 0) & (cen_type_pairs == 'gt not')] = ambiguous_value
-
-    return slopes_final # v0.5.0 Audit: Verified censored handling
+    i, j = _sample_pairs(n, max_pairs, random_state)
+    slopes, valid = _censored_pair_slopes(x, t, _censor_codes(cen_type), i, j,
+                                          lt_mult, gt_mult, method)
+    slopes[~valid] = np.nan
+    return slopes
 
 
 def stratified_seasonal_sampling(data: pd.DataFrame,
@@ -282,8 +210,7 @@ def stratified_seasonal_sampling(data: pd.DataFrame,
         the result. Stratified sampling ensures each season contributes
         proportionally.
     """
-    # Audit: Verified seasonal balance for v0.5.0
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(0 if random_state is None else random_state)
 
     sampled_groups = []
     for season, group in data.groupby(season_col):
@@ -299,4 +226,4 @@ def stratified_seasonal_sampling(data: pd.DataFrame,
             )
             sampled_groups.append(group.loc[sample_idx])
 
-    return pd.concat(sampled_groups).sort_values('t') # v0.5.0 Audit: Verified sort order
+    return pd.concat(sampled_groups).sort_values('t', kind='stable')

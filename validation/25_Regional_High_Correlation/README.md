@@ -1,6 +1,6 @@
 # V-25: Regional Trend with High Inter-site Correlation
 
-This test verifies that the Regional Kendall Test correctly calculates the variance inflation factor when sites are highly correlated.
+This test verifies that the Regional Kendall Test correctly calculates the variance inflation factor when sites are highly correlated. 
 
 In the 'High Correlation' scenario, sites share the same underlying noise pattern, which should result in a much higher `CorrectedVarTAU` compared to the uncorrected `VarTAU`. In the 'Uncorrelated' scenario, the corrected and uncorrected variances should be similar.
 
@@ -22,3 +22,4 @@ In the 'High Correlation' scenario, sites share the same underlying noise patter
 |                        | Direction (DT)   | Increasing     | Increasing | ✅        |
 |                        | Confidence (CT)  | 1.0000         | 1.0000     | ✅        |
 | ---                    | ---              | ---            | ---        | ---      |
+

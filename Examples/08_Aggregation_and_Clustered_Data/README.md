@@ -33,9 +33,7 @@ import pandas as pd
 import MannKS as mk
 import matplotlib.pyplot as plt
 
-# Determine where to save the plots (current directory by default)
-# When running this as part of the repo structure, we might want to be specific.
-# For this example, we'll save to the current directory.
+# Configure the output directory.
 output_dir = '.'
 
 # 1. Generate Synthetic Data with Ties and Clusters
@@ -162,13 +160,13 @@ First 10 rows:
 9 2020-02-15  11.383717                11.38
 
 --- Test 1: No Aggregation (agg_method='none') ---
-Slope: 6.24070
+Slope: 6.17659
 P-value: 0.00000
 Analysis Notes: ['tied timestamps present without aggregation']
 Sample Size (effective): N/A
 
 --- Test 2: Median Aggregation (agg_method='median') ---
-Slope: 6.38199
+Slope: 6.26316
 P-value: 0.00000
 Analysis Notes: ["'median' aggregation used with censored data"]
 
@@ -178,8 +176,8 @@ P-value: 0.00001
 Analysis Notes: ["'median' aggregation used with censored data"]
 
 --- Test 4: LWP Aggregation (agg_method='lwp') ---
-Slope: 5.83502
-P-value: 0.00016
+Slope: 5.39090
+P-value: 0.00005
 Analysis Notes: []
 
 ```

@@ -1,152 +1,156 @@
 """
-This module provides functions for data quality checks inspired by the
-LWP-TRENDS R script. These checks generate "Analysis Notes" to warn
-the user about potential issues with their data that could affect
-trend analysis results.
+Data-quality "analysis notes", following the checks in the LWP-TRENDS R
+script (``GetAnalysisNote`` and the Sen-slope warnings in ``SenSlope``).
+
+Differences from LWP-TRENDS
+---------------------------
+* LWP-TRENDS does not compute a trend when a note other than "ok" is raised;
+  MannKS always computes and reports the note alongside the result.
+* The run-length checks are applied to the data in time order (LWP-TRENDS
+  applies the non-seasonal check to data ordered by its "Month-Year" label).
+* The "unique values per season" message states the threshold actually used
+  (2); LWP-TRENDS prints "< 3 unique values in Season" for the same check.
 """
 import numpy as np
 from ._stats import _rle_lengths
 
-# --- Module-level Constants for Data Quality Checks ---
+# --- Module-level Constants for Data Quality Checks (as in LWP-TRENDS) ---
 MIN_UNIQUE_VALUES = 3
 MIN_NON_CENSORED = 5
 MIN_UNIQUE_PER_SEASON = 2
-MAX_RUN_LENGTH_RATIO = 0.75  # Maximum ratio of identical values
+MAX_RUN_LENGTH_RATIO = 0.75          # seasonal run-length threshold
+MAX_RUN_LENGTH_RATIO_NONSEASONAL = 0.5
+
+
+def _long_run(values, threshold):
+    """
+    LWP-TRENDS run-length rule: the longest run of identical consecutive
+    *differences* (``rle(diff(x))``) relative to the number of values.
+    """
+    values = np.asarray(values, dtype=float)
+    if len(values) <= 1:
+        return False
+    lengths = _rle_lengths(np.diff(values))
+    return len(lengths) > 0 and lengths.max() / len(values) > threshold
+
+
+def _first_tier(data, values_col, censored_col):
+    if data[values_col].isnull().all():
+        return "Data all NA values"
+    censored = data[censored_col].astype(bool)
+    non_censored_values = data.loc[~censored & ~data[values_col].isnull(), values_col]
+    if len(non_censored_values.unique()) < MIN_UNIQUE_VALUES:
+        return f"< {MIN_UNIQUE_VALUES} unique values"
+    if len(non_censored_values) < MIN_NON_CENSORED:
+        return f"< {MIN_NON_CENSORED} Non-censored values"
+    return "ok"
+
 
 def get_analysis_note(data, values_col='value', censored_col='censored',
-                        is_seasonal=False, post_aggregation=False, season_col='season'):
+                      is_seasonal=False, post_aggregation=False, season_col='season',
+                      expected_seasons=None, time_col='t'):
     """
     Performs data quality checks and returns an analysis note.
 
     Args:
         data (pd.DataFrame): The input data.
-        values_col (str): The name of the column with data values.
-        censored_col (str): The name of the boolean column indicating censored data.
+        values_col (str): Column with data values.
+        censored_col (str): Boolean column indicating censored data.
         is_seasonal (bool): Whether to perform seasonal checks.
-        post_aggregation (bool): Whether the checks are for after data aggregation.
-        season_col (str): The name of the column with season identifiers.
+        post_aggregation (bool): Whether the checks are for data after
+            aggregation to one value per time increment.  As in LWP-TRENDS,
+            the basic checks are repeated, followed by run-length (and
+            seasonal) checks.
+        season_col (str): Column with season identifiers.
+        expected_seasons (iterable, optional): All seasons that should be
+            present (e.g. 1..12 for months).  A season with no data then fails
+            the "non-NA values in Season" check, as in LWP-TRENDS.
+        time_col (str): Column used to order the data for run-length checks.
 
     Returns:
         str: An analysis note string. "ok" if no issues are found.
     """
+    note = _first_tier(data, values_col, censored_col)
+    if note != "ok" or not post_aggregation:
+        return note
 
-    # --- First round of filtering (pre-aggregation) ---
-    if not post_aggregation:
-        if data[values_col].isnull().all():
-            return "Data all NA values"
+    if time_col in data.columns:
+        data = data.sort_values(time_col, kind='stable')
 
-        non_censored_values = data.loc[~data[censored_col] & ~data[values_col].isnull(), values_col]
+    if is_seasonal:
+        if season_col not in data.columns or data.empty:
+            return "ok"
+        valid = data[~data[values_col].isnull()]
+        counts = valid.groupby(season_col)[values_col].count()
+        if expected_seasons is not None:
+            counts = counts.reindex(list(expected_seasons), fill_value=0)
+        if not counts.empty and counts.min() < MIN_UNIQUE_VALUES:
+            return f"< {MIN_UNIQUE_VALUES} non-NA values in Season"
 
-        if len(non_censored_values.unique()) < MIN_UNIQUE_VALUES:
-            return f"< {MIN_UNIQUE_VALUES} unique values"
+        unique_counts = valid.groupby(season_col)[values_col].nunique()
+        if not unique_counts.empty and unique_counts.min() < MIN_UNIQUE_PER_SEASON:
+            return f"< {MIN_UNIQUE_PER_SEASON} unique values in Season"
 
-        if len(non_censored_values) < MIN_NON_CENSORED:
-            return f"< {MIN_NON_CENSORED} Non-censored values"
-
-        return "ok"
-
-    # --- Second round of filtering (post-aggregation) ---
-    if post_aggregation:
-        if is_seasonal:
-            if season_col not in data.columns or data.empty:
-                return "ok"
-
-            # Order of checks matters here, mirroring the R script's logic.
-            # 1. Check for sufficient non-NA values in each season
-            season_counts = data.groupby(season_col)[values_col].count()
-            if not season_counts.empty and season_counts.min() < MIN_UNIQUE_VALUES:
-                 return f"< {MIN_UNIQUE_VALUES} non-NA values in Season"
-
-            # 2. Check for sufficient unique values in each season
-            season_unique_counts = data.groupby(season_col)[values_col].nunique()
-            if not season_unique_counts.empty and season_unique_counts.min() < MIN_UNIQUE_PER_SEASON:
-                return f"< {MIN_UNIQUE_PER_SEASON} unique values in Season"
-
-            # 3. Check for long runs of identical values within each season
-            def check_run_length_seasonal(series):
-                series = series.dropna()
-                if len(series) <= 1:
-                    return False
-                rle_res = _rle_lengths(series.to_numpy())
-                if not rle_res.any(): return False
-                return rle_res.max() / len(series) > MAX_RUN_LENGTH_RATIO
-
-            long_run_in_season = data.groupby(season_col)[values_col].apply(check_run_length_seasonal).any()
-            if long_run_in_season:
-                return "Long run of single value in a Season"
-
-        else:  # Not seasonal
-            values = data[values_col].dropna().to_numpy()
-            if len(values) > 1:
-                rle_res = _rle_lengths(values)
-                if len(rle_res) > 0 and rle_res.max() / len(values) > 0.5:
-                    return "Long run of single value"
+        long_run = valid.groupby(season_col)[values_col].apply(
+            lambda s: _long_run(s.to_numpy(), MAX_RUN_LENGTH_RATIO)).any()
+        if long_run:
+            return "Long run of single value in a Season"
+    else:
+        values = data[values_col].dropna().to_numpy()
+        if _long_run(values, MAX_RUN_LENGTH_RATIO_NONSEASONAL):
+            return "Long run of single value"
 
     return "ok"
 
 
 def get_sens_slope_analysis_note(slopes, t, cen_type):
     """
-    Provides warnings about censored values used in the derivation of the Sen's Slope.
+    Warnings about censored values used in deriving the Sen's slope
+    (LWP-TRENDS ``SenSlope``).  The pairs whose slope is closest to the median
+    are inspected:
 
-    Args:
-        slopes (np.array): Array of calculated slopes.
-        t (np.array): Array of timestamps.
-        cen_type (np.array): Array of censor types ('lt', 'gt', 'not').
+    * all of them pairs of two censored values ->
+      "WARNING: Sen slope based on two censored values"
+    * any of them involving a censored value ->
+      "WARNING: Sen slope influenced by censored values"
+    * none censored and the slope is exactly zero ->
+      "WARNING: Sen slope based on tied non-censored values"
 
-    Returns:
-        str: An analysis note string. "ok" if no issues are found.
+    ``slopes`` must contain every pair (in ``np.triu_indices`` order, pairs
+    with equal times removed), as returned by the exact estimators.  For
+    sampled slopes the pairs cannot be identified and "ok" is returned.
     """
     if slopes is None or len(slopes) == 0:
         return "ok"
-
     median_slope = np.nanmedian(slopes)
     if np.isnan(median_slope):
         return "ok"
 
+    t = np.asarray(t, dtype=float)
     n = len(t)
     if n < 2:
         return "ok"
+    # Only exact (all-pair) slope sets can be matched to their pairs; check the
+    # count before materialising the pair indices.
+    _, counts = np.unique(t, return_counts=True)
+    expected = n * (n - 1) // 2 - int(np.sum(counts * (counts - 1) // 2))
+    if len(slopes) != expected:
+        return "ok"
     i, j = np.triu_indices(n, k=1)
-    t_diff = t[j] - t[i]
-    valid_mask = t_diff != 0
-    # Ensure slopes and cen_type_pairs align
-    if len(slopes) != np.sum(valid_mask):
-        # This case indicates a mismatch that shouldn't happen in normal operation
+    valid = np.abs(t[j] - t[i]) > 1e-10
+    if int(valid.sum()) != expected:
         return "ok"
+    i, j = i[valid], j[valid]
 
-    cen_type_pairs = (cen_type[i] + " " + cen_type[j])[valid_mask]
-
-    # Find the minimum absolute difference from the median
     abs_diffs = np.abs(slopes - median_slope)
-    min_abs_diff = np.nanmin(abs_diffs)
+    idx = np.where(abs_diffs == np.nanmin(abs_diffs))[0]
+    cen = np.isin(np.asarray(cen_type).astype(str), ['lt', 'gt'])
+    ci, cj = cen[i[idx]], cen[j[idx]]
 
-    # Find all slopes that are close to this minimum difference
-    indices_of_median = np.where(np.isclose(abs_diffs, min_abs_diff))[0]
-
-    if len(indices_of_median) == 0:
-        return "ok"
-
-    median_cen_labels = cen_type_pairs[indices_of_median]
-    unique_median_cen_labels = np.unique(median_cen_labels)
-
-    # Check for influence from censored data
-    is_fully_censored = all(label in ['lt lt', 'gt gt', 'lt gt', 'gt lt'] for label in unique_median_cen_labels)
-    has_lt = any('lt' in label for label in unique_median_cen_labels)
-    has_gt = any('gt' in label for label in unique_median_cen_labels)
-
-    if is_fully_censored:
-        return "CRITICAL: Sen slope is based on a pair of two censored values."
-
-    if has_lt and has_gt:
-        return "WARNING: Sen slope influenced by left- and right-censored values."
-    elif has_lt:
-        return "WARNING: Sen slope influenced by left-censored values."
-    elif has_gt:
-        return "WARNING: Sen slope influenced by right-censored values."
-
-    # Check for ties in non-censored data
-    elif np.isclose(median_slope, 0):
+    if np.any(ci | cj):
+        if np.all(ci & cj):
+            return "WARNING: Sen slope based on two censored values"
+        return "WARNING: Sen slope influenced by censored values"
+    if median_slope == 0:
         return "WARNING: Sen slope based on tied non-censored values"
-
     return "ok"

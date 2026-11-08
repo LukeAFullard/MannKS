@@ -27,3 +27,4 @@ Verification of regional trend aggregation for consistent site trends (Increasin
 |                   | Direction (DT)   | Increasing     | Increasing | ✅        |
 |                   | Confidence (CT)  | 0.7472         | 0.7472     | ✅        |
 | ---               | ---              | ---            | ---        | ---      |
+
