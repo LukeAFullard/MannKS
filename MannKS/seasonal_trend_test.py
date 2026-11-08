@@ -59,15 +59,23 @@ def _seasonal_slope(data, seasons, sens_slope_method, lt_mult, gt_mult,
                                   max_pairs=pair_cap, random_state=random_state,
                                   compute_intercept=False)['beta']
     method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
+    uniq = np.unique(seasons)
+    sizes = np.array([np.sum(seasons == s) for s in uniq])
+    total = int(np.sum(sizes * (sizes - 1) // 2))
     out = []
-    for s in np.unique(seasons):
+    for s, size in zip(uniq, sizes):
         m = seasons == s
-        if m.sum() < 2:
+        if size < 2:
             continue
+        # Fast mode: split the pair budget in proportion to each season's pairs.
+        cap = None
+        if pair_cap is not None and total > pair_cap:
+            cap = max(1, int(np.ceil(pair_cap * (size * (size - 1) // 2) / total)))
         if c[m].any():
-            out.append(_sens_estimator_censored_adaptive(x[m], t[m], ct[m], lt_mult, gt_mult, method))
+            out.append(_sens_estimator_censored_adaptive(x[m], t[m], ct[m], lt_mult, gt_mult, method,
+                                                         max_pairs=cap, random_state=random_state))
         else:
-            out.append(_sens_estimator_adaptive(x[m], t[m]))
+            out.append(_sens_estimator_adaptive(x[m], t[m], max_pairs=cap, random_state=random_state))
     if not out:
         return np.nan
     allv = np.concatenate(out)
@@ -140,6 +148,15 @@ def seasonal_trend_test(
         (pairs bootstrap) for the slope's percentile interval.
     tie_break_method : {'robust', 'lwp'}
         See ``trend_test``.
+    large_dataset_mode, max_pairs : see ``trend_test``.  The test (S,
+        Var(S), p) is always computed on all the data; in fast mode only the
+        slope uses a sample of pairs (split between seasons in proportion to
+        their number of pairs).
+    max_per_season : int, optional
+        If given, seasons with more observations are randomly subsampled to
+        this many (stratified sampling, seeded by ``random_state``) before
+        the test.  This reduces power and is rarely needed; by default all
+        observations are used.
 
     Returns
     -------
@@ -182,11 +199,6 @@ def seasonal_trend_test(
 
     with warnings.catch_warnings(record=True) as w_log:
         warnings.simplefilter("always")
-
-        n_raw = len(x_arr)
-        tier_info = detect_size_tier(n_raw, user_mode=large_dataset_mode, force_tier=None)
-        for w in tier_info['warnings']:
-            warnings.warn(w, UserWarning)
 
         data_filtered, is_datetime = _prepare_data(x, t, hicensor)
         data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
@@ -268,12 +280,10 @@ def seasonal_trend_test(
             expected_seasons = None
 
         n_filtered = len(data_filtered)
-        tier_info_filtered = detect_size_tier(n_filtered, user_mode=large_dataset_mode)
-
-        # Stratified subsampling for very large data sets
-        if tier_info_filtered['tier'] >= 2 and n_filtered > 10000:
+        # Optional stratified subsampling (opt-in via max_per_season)
+        if max_per_season is not None:
             from ._large_dataset import stratified_seasonal_sampling
-            max_per_season_val = max_per_season if max_per_season else 1000
+            max_per_season_val = int(max_per_season)
             if data_filtered['season'].value_counts().max() > max_per_season_val:
                 data_filtered = stratified_seasonal_sampling(
                     data_filtered, season_col='season',
@@ -282,6 +292,11 @@ def seasonal_trend_test(
                 analysis_notes.append(
                     f"Large seasonal dataset: Used stratified sampling (max {max_per_season_val} obs/season)")
                 n_filtered = len(data_filtered)
+
+        # Mode chosen on the data actually analysed (after aggregation).
+        tier_info_filtered = detect_size_tier(n_filtered, user_mode=large_dataset_mode)
+        for w in tier_info_filtered['warnings']:
+            warnings.warn(w, UserWarning)
 
         seasons = data_filtered['season'].to_numpy()
         analysis_notes.append(get_analysis_note(
@@ -386,6 +401,7 @@ def seasonal_trend_test(
         sen_prob, sen_prob_max, sen_prob_min = np.nan, np.nan, np.nan
         all_slopes_arr = np.array([])
         pairs_used = None
+        overall_ats = None
         has_censored = bool(data_filtered['censored'].any())
 
         if sens_slope_method == 'ats' and has_censored:
@@ -459,16 +475,17 @@ def seasonal_trend_test(
         computation_mode = tier_info_filtered['strategy']
         approximation_error = None
         if sampling and len(all_slopes_arr) > 0:
-            valid = all_slopes_arr[~np.isnan(all_slopes_arr)]
-            if len(valid):
-                iqr = np.percentile(valid, 75) - np.percentile(valid, 25)
-                approximation_error = 1.96 * iqr / np.sqrt(len(valid))
+            from ._large_dataset import sampled_median_error
+            approximation_error = sampled_median_error(all_slopes_arr)
+        elif sampling and overall_ats is not None:
+            approximation_error = overall_ats.get('approximation_error')
 
         # --- Slope scaling ---
         slope_per_second = slope
         lower_ci_per_second = lower_ci
         upper_ci_per_second = upper_ci
         scaled_slope = slope
+        slope_factor = 1.0
         scaled_lower_ci = lower_ci
         scaled_upper_ci = upper_ci
 
@@ -480,6 +497,7 @@ def seasonal_trend_test(
                     scaled_slope = slope * factor
                     scaled_lower_ci = lower_ci * factor if pd.notna(lower_ci) else lower_ci
                     scaled_upper_ci = upper_ci * factor if pd.notna(upper_ci) else upper_ci
+                    slope_factor = factor
                     slope_units = f"{x_unit} per {slope_scaling.lower()}"
                 except (ValueError, TypeError) as e:
                     warnings.warn(f"Slope scaling failed: {e}", UserWarning)
@@ -499,6 +517,9 @@ def seasonal_trend_test(
         for w in w_log:
             captured_warnings.append(str(w.message))
 
+    if approximation_error is not None:
+        approximation_error = approximation_error * slope_factor  # same units as `slope`
+
     results = res(trend, h, p, z, Tau, s, var_s, scaled_slope, intercept, scaled_lower_ci, scaled_upper_ci, C, Cd,
                   '', [], sen_prob, sen_prob_max, sen_prob_min,
                   prop_censored, prop_unique, n_censor_levels,
@@ -512,7 +533,7 @@ def seasonal_trend_test(
     else:
         classification = results.trend.title() if results.trend != 'no trend' else 'No Trend'
 
-    final_notes = [note for note in analysis_notes if note != 'ok']
+    final_notes = list(dict.fromkeys(note for note in analysis_notes if note != 'ok'))
     final_results = results._replace(classification=classification, analysis_notes=final_notes)
 
     for w_str in captured_warnings:

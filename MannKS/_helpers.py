@@ -1,8 +1,9 @@
+import warnings
 import datetime
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from ._datetime import _is_datetime_like
+from ._datetime import _is_datetime_like, _datetime_to_seconds, _raise_if_string_times
 
 
 def _preprocessing(x):
@@ -10,10 +11,9 @@ def _preprocessing(x):
 
     # Convert datetime objects to numeric timestamps if necessary
     if _is_datetime_like(x):
-        x = x.astype('datetime64[s]').astype(float)
-    elif x.dtype == 'O' and len(x) > 0:
-        if isinstance(x[0], datetime.datetime):
-            x = np.array([val.timestamp() for val in x])
+        x = _datetime_to_seconds(x)
+    else:
+        _raise_if_string_times(x)
 
     x = x.astype(float)
 
@@ -114,8 +114,15 @@ def _prepare_data(x, t, hicensor):
     data['t_original'] = t_raw
     data['t'] = t_numeric
 
-    # Handle missing values
-    mask = ~np.isnan(data['value'])
+    # Handle missing values.  NaN values are dropped silently (missing data);
+    # infinite values and missing times are dropped with a warning.
+    vals = data['value'].to_numpy(dtype=float)
+    times = data['t'].to_numpy(dtype=float)
+    bad = np.isinf(vals) | (np.isnan(times) & ~np.isnan(vals))
+    if bad.any():
+        warnings.warn(f"Removed {int(bad.sum())} observation(s) with an infinite value or a "
+                      f"missing time.", UserWarning)
+    mask = ~np.isnan(vals) & ~bad
     data_filtered = data[mask].copy()
 
     # Apply HiCensor rule if requested

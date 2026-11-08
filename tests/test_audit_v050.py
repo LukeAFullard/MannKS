@@ -29,39 +29,32 @@ def test_fast_mk_edge_case_n5001():
 
 def test_seasonal_stratification_n15000():
     """
-    Audit Recommendation: Seasonal with n=15,000 (verify stratification note).
+    Seasonal with n=15,000: by default the test uses every observation (it is
+    exact in O(n log n)); stratified subsampling only happens on request.
     """
     np.random.seed(42)
     n = 15000
     period = 12
     t = np.arange(n)
-
-    # Create seasonal pattern
-    # 15000 points, period 12 => ~1250 cycles
     seasonality = np.tile(np.arange(period), n // period + 1)[:n]
-
-    # x = trend + seasonality + noise
     x = 0.01 * t + seasonality * 10 + np.random.normal(0, 5, n)
 
-    # Must provide period for numeric time
     result = seasonal_trend_test(x, t, period=period)
-
-    # Should trigger stratification because n > 10000
-    # Note: result.computation_mode reflects the overall strategy ('fast' here)
     assert result.computation_mode == 'fast'
     assert result.trend == 'increasing'
+    assert not any("stratified sampling" in note.lower() for note in result.analysis_notes)
 
-    # Check if warnings/notes contain stratification info
-    # The code adds to analysis_notes: "Large seasonal dataset: Used stratified sampling..."
-    # Note: analysis_notes is a list of strings
+    # S is the sum of the within-season S over all the data.
+    from MannKS._stats import _mk_score_and_var_censored
+    season = t % period
+    s_full = sum(_mk_score_and_var_censored(x[season == k], t[season == k],
+                                            np.zeros((season == k).sum(), bool),
+                                            np.full((season == k).sum(), 'not'))[0]
+                 for k in range(period))
+    assert result.s == s_full
 
-    stratification_note_found = False
-    for note in result.analysis_notes:
-        if "stratified sampling" in note.lower():
-            stratification_note_found = True
-            break
-
-    assert stratification_note_found, f"Stratification note not found in: {result.analysis_notes}"
+    sub = seasonal_trend_test(x, t, period=period, max_per_season=500)
+    assert any("stratified sampling" in note.lower() for note in sub.analysis_notes)
 
 
 def test_heavy_ties():

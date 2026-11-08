@@ -26,8 +26,7 @@ dates = pd.date_range(start='2000-01-01', end='2020-01-01', freq='ME')
 
 # Convert dates to numeric seconds for precise linear trend generation.
 # This ensures the underlying true signal is perfectly linear before adding noise.
-t_sec = dates.astype(np.int64) // 10**9
-t_sec = t_sec - t_sec[0] # Start at 0
+t_sec = (dates - dates[0]).total_seconds().to_numpy()  # seconds since the start
 
 # True Breakpoint: June 2010 (Policy Reform)
 break_date = pd.Timestamp('2010-06-01')
@@ -282,7 +281,7 @@ We use `find_best_segmentation` to automatically select the optimal number of br
 
 ### Step 4: Visual Comparison (Bootstrap vs Standard OLS)
 
-To visualize the difference in uncertainty, here are the plots for the **Standard OLS** method (No Bagging). Notice how much narrower the confidence intervals for the breakpoints are compared to the Bootstrap method, especially for the censored data.
+For comparison, here are the plots for the **Standard OLS** method (no bagging). In this example both methods place the breakpoint within a few days of the true date (1 June 2010) and give intervals of similar width (about three to six weeks). The OLS interval comes from an asymptotic (Delta-method) approximation and is symmetric by construction; the bootstrap interval is taken from the resampled breakpoint locations and can be asymmetric.
 
 #### Censored Data (Standard OLS)
 ![Censored OLS Plot](segmented_plot_censored_ols.png)

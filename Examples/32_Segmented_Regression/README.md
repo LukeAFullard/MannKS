@@ -33,8 +33,7 @@ dates = pd.date_range(start='2000-01-01', end='2020-01-01', freq='ME')
 
 # Convert dates to numeric seconds for precise linear trend generation.
 # This ensures the underlying true signal is perfectly linear before adding noise.
-t_sec = dates.astype(np.int64) // 10**9
-t_sec = t_sec - t_sec[0] # Start at 0
+t_sec = (dates - dates[0]).total_seconds().to_numpy()  # seconds since the start
 
 # True Breakpoint: June 2010 (Policy Reform)
 break_date = pd.Timestamp('2010-06-01')
@@ -245,7 +244,38 @@ print(f"Censored: Probability change occurred in 2010: {prob_cens:.1%}")
 Running Model Selection (0-2 breakpoints) on Censored Data...
 
 Model Selection Summary (Censored):
-Error executing example: `Import tabulate` failed.  Use pip or conda to install the tabulate package.
+|   n_breakpoints |      bic |      aic |       sar | converged   |
+|----------------:|---------:|---------:|----------:|:------------|
+|               0 |  652.065 |  645.104 | 3469.98   | True        |
+|               1 |  280.711 |  266.788 |  705.511  | True        |
+|               2 | -421.626 | -442.51  |   36.1201 | True        |
+
+Best Model (Censored): 2 Breakpoints
+Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored.png
+
+--- SCENARIO B: Uncensored Data Analysis (Hypothetical) ---
+Running Model Selection (0-2 breakpoints) on Uncensored Data...
+
+Model Selection Summary (Uncensored):
+|   n_breakpoints |      bic |      aic |        sar | converged   |
+|----------------:|---------:|---------:|-----------:|:------------|
+|               0 |  940.669 |  933.708 | 11549.8    | True        |
+|               1 | -328.415 | -342.337 |    55.7513 | True        |
+|               2 | -322.515 | -343.398 |    54.5879 | True        |
+
+Best Model (Uncensored): 1 Breakpoints
+Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored.png
+
+--- CI Comparison: Bootstrap vs Standard OLS ---
+Censored (Bootstrap): 2010-05-25 22:14:02.896479845 (CI: 2010-05-03 12:09:42.807063818 to 2010-06-12 15:38:21.830445528)
+Censored (Standard OLS): 2010-05-25 01:55:24.474270582 (CI: 2010-05-03 16:04:51.965868235 to 2010-06-15 11:45:56.982672930)
+Standard OLS Censored Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored_ols.png
+
+Uncensored (Bootstrap): 2010-06-02 10:04:44.404549837 (CI: 2010-05-24 18:39:56.929932117 to 2010-06-16 17:12:08.454396486)
+Uncensored (Standard OLS): 2010-05-30 18:27:04.428439379 (CI: 2010-05-11 23:17:11.799437761 to 2010-06-18 13:36:57.057440996)
+Standard OLS Uncensored Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored_ols.png
+Uncensored: Probability change occurred in 2010: 100.0%
+Censored: Probability change occurred in 2010: 100.0%
 
 ```
 
@@ -259,7 +289,7 @@ Error executing example: `Import tabulate` failed.  Use pip or conda to install 
 
 ### Step 4: Visual Comparison (Bootstrap vs Standard OLS)
 
-To visualize the difference in uncertainty, here are the plots for the **Standard OLS** method (No Bagging). Notice how much narrower the confidence intervals for the breakpoints are compared to the Bootstrap method, especially for the censored data.
+For comparison, here are the plots for the **Standard OLS** method (no bagging). In this example both methods place the breakpoint within a few days of the true date (1 June 2010) and give intervals of similar width (about three to six weeks). The OLS interval comes from an asymptotic (Delta-method) approximation and is symmetric by construction; the bootstrap interval is taken from the resampled breakpoint locations and can be asymmetric.
 
 #### Censored Data (Standard OLS)
 ![Censored OLS Plot](segmented_plot_censored_ols.png)

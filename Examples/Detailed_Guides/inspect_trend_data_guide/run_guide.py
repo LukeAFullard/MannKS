@@ -42,6 +42,7 @@ def generate_guide():
 
     # 1. Create a synthetic dataset
     # We simulate data with a changing detection limit to show the tool's value
+    np.random.seed(42)  # reproducible example
     dates = pd.date_range(start='2010-01-01', end='2015-12-31', freq='ME')
     values = np.random.lognormal(mean=1, sigma=0.5, size=len(dates))
 

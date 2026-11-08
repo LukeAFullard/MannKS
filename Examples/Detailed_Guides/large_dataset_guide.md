@@ -1,175 +1,110 @@
 # Large Dataset Analysis Guide
 
-## Understanding the Three Modes
+MannKS handles large data sets (tested up to 1,000,000 observations) without running out of memory. This guide explains what changes as the data grow, what stays exact, and how to control the trade-off between speed and accuracy.
 
-### 1. Full Mode (Exact)
-**When:** n ≤ 5,000 (automatic) or `large_dataset_mode='full'`
+## What is exact and what is approximated
 
-**What it does:**
-- Calculates ALL n×(n-1)/2 pairwise slopes
-- Exact median, exact confidence intervals
-- No approximation error
+| Quantity | Small data (full mode) | Large data (fast mode) |
+| :--- | :--- | :--- |
+| Mann-Kendall test: `s`, `var_s`, `z`, `p`, `C`, `Tau` | Exact | **Exact**, also for censored data and in seasonal tests |
+| Slope: `slope`, `lower_ci`, `upper_ci`, `sen_probability` | Exact (all pairs) | Estimated from a random sample of pairs |
+| `approximation_error` | `None` | Approximate 95% half-width of the slope's sampling error |
 
-**Use when:**
-- Dataset is small enough
-- You need exact results for publication
-- Computational time is not a concern
+The test uses an exact O(n log n) algorithm, so its result never depends on the mode. Only the slope and its interval use pair sampling.
 
-### 2. Fast Mode (Hybrid Optimized)
-**When:** 5,000 < n ≤ 50,000 (automatic)
+## The three modes (`large_dataset_mode`)
 
-**What it does:**
-- **MK Score:** Uses an optimized $O(N \log N)$ algorithm for exact calculation (uncensored data only).
-- **Sen's Slope:** Samples random pairs (default: 100,000) to estimate the median slope.
-- Maintains statistical validity with massive performance gains.
+| Mode | Chosen automatically when | What it does |
+| :--- | :--- | :--- |
+| `'full'` | n ≤ 5,000 | Uses every pair: exact slope and interval. |
+| `'fast'` | 5,000 < n ≤ 50,000 | Samples `max_pairs` pairs (default 100,000) for the slope. |
+| `'aggregate'` | n > 50,000 | Same calculation as `'fast'`, plus a warning recommending temporal aggregation. It does **not** aggregate by itself. |
 
-**Accuracy:**
-- **MK test (S, Var(S), p):** Exact (no approximation), for censored data too.
-- **Slope:** With 100,000 sampled pairs the relative standard deviation of the
-  estimate around the exact value was about 0.3% in simulations (n = 6000), with
-  no detectable bias.
-- Pair sampling uses a fixed seed by default, so results are reproducible; pass
-  `random_state` to vary it.
+The mode is chosen from the number of observations **after** any aggregation (`agg_method`/`agg_period`). Hourly data aggregated to daily medians, for example, is analysed in full mode if few enough days remain.
 
-**Use when:**
-- Dataset is medium-large
-- You need fast results
-- Small approximation error is acceptable
+You can force a mode. `'full'` needs memory for all n(n−1)/2 slopes, so it is refused above n = 46,340 (more than 8 GB). MannKS then uses fast mode and says so in a warning.
 
-### 3. Aggregate Mode (Recommended for Very Large Data)
-**When:** n > 50,000 (automatic) or `large_dataset_mode='aggregate'`
+## Performance
 
-**What it does:**
-- The calculations are the same as in fast mode; MannKS issues a warning
-  recommending temporal aggregation.
-- Aggregation is **not** applied automatically: aggregate yourself with
-  `agg_method` and `agg_period` (see below), which reduces the data before
-  the full or fast calculations are applied.
+Measured on a single core (hourly datetime data, default settings):
 
-**Use when:**
-- Dataset is very large
-- High-frequency data with long-term trend
-- Reducing noise is beneficial
+| n | Mode | Uncensored | 30% censored (ATS) | Peak memory |
+| ---: | :--- | ---: | ---: | ---: |
+| 5,000 | full (exact) | 1.2 s | 1.5 s | 0.6–0.9 GB |
+| 10,000 | `'full'` forced | 4 s | 6 s | 1.7–2.5 GB |
+| 10,000 | fast (default) | 0.1 s | 0.1 s | 0.2 GB |
+| 50,000 | fast | 0.13 s | 0.2 s | 0.2 GB |
+| 1,000,000 | aggregate | 1.0 s | 1.2 s | 0.5 GB |
 
-## Statistical Theory
+`seasonal_trend_test` has similar timings (1.3 s for 1,000,000 hourly values with monthly seasons). Some options are slower at large n:
 
-### Why Random Pair Sampling Works
+* **Block bootstrap** (`autocorr_method='block_bootstrap'`, or `'auto'` when autocorrelation is detected) recomputes the test and the slope for every resample: about 0.05 s per resample at n = 50,000, i.e. about a minute for the default 1,000 resamples. Reduce `n_bootstrap` for exploration.
+* **`segmented_trend_test`**: the breakpoint search (`piecewise-regression`) scales with n and takes about 20 s at n = 10,000 and over a minute at n = 30,000. A warning is issued above 20,000 observations; aggregate first.
 
-Sen's slope is the **median** of all pairwise slopes. By the Central Limit Theorem:
+## Accuracy of fast mode
 
-- The sample median of K uniformly sampled pairwise slopes estimates the median of
-  all pairwise slopes, with standard error of order IQR / √K
-- K = number of sampled pairs (100,000 by default)
-- In simulation (n = 6,000) the relative standard deviation was about 0.3%, with
-  no detectable bias
+In simulations with n = 6,000–8,000:
 
-### Seasonal Data Special Handling
+* **Slope.** The sampled slope differed from the exact one by less than about 0.2 of the exact confidence interval's half-width in most scenarios (normal, skewed, heavily tied, tied times, censored with ATS). The largest error was about 0.5 half-widths, for `sens_slope_method='lwp'` at 50% censoring: that method sets ambiguous slopes to exactly 0, and the median can sit next to that block of zeros.
+* **Confidence interval.** The fast-mode intervals contained the true slope 94.7–96.3% of the time (nominal 95%), for uncensored and censored (30%, 60%) data. The bias was below 0.3% of the slope.
+* **Test.** With no trend, the rejection rate at p < 0.05 was 5.0%.
 
-Seasonal tests require **stratified sampling**:
+`result.approximation_error` is a distribution-free 95% half-width for the slope's sampling error: half the distance between the sampled slopes ranked K/2 ∓ 0.98√K, where K is the number of sampled pairs. With ATS for censored data it is the range of slopes over which the sampled score stays within its 95% sampling band. In the simulations it covered the actual error 90–97% of the time.
 
-1. Group observations by season
-2. For very large data (n > 10,000 in fast mode), sample up to `max_per_season` observations from each season
-3. When the slope is estimated from sampled pairs, each season's share of the `max_pairs` budget is proportional to its number of within-season pairs, so the pooled slopes weight seasons exactly as the full calculation does (S = Σ Sᵢ is always computed exactly on the data used)
+Pair sampling uses a fixed seed by default, so results are reproducible. Pass `random_state` to vary it.
 
-## Practical Guidelines
+### Choosing `max_pairs`
 
-### Choosing max_pairs
+The sampling error shrinks like 1/√`max_pairs`:
 
-The sampling error of the slope shrinks like 1/√max_pairs. Indicative relative
-standard deviations (measured at 100,000 pairs for n = 6,000 and scaled; the exact
-value depends on the spread of the pairwise slopes):
+| `max_pairs` | Relative speed | Typical relative s.d. of the slope | Use case |
+| :--- | :--- | :--- | :--- |
+| 50,000 | fastest | ~0.4% | Exploratory analysis |
+| 100,000 | fast | ~0.3% | **Default** |
+| 500,000 | moderate | ~0.1% | High accuracy |
+| all pairs (`'full'`) | slowest | exact | When memory allows (n up to ~20,000) |
 
-| max_pairs | Speed | Typical relative s.d. | Use Case |
-|-----------|-------|----------|----------|
-| 50,000 | Very Fast | ~0.4% | Exploratory analysis |
-| 100,000 | Fast | ~0.3% | **Default, balanced** |
-| 500,000 | Medium | ~0.1% | High accuracy needs |
-| all pairs (`large_dataset_mode='full'`) | Slowest | exact | Publication-quality, if memory allows |
+## Seasonal data
 
-`result.approximation_error` reports an approximate 95% half-width for the sampled
-slope (1.96 × IQR(slopes) / √pairs).
+The seasonal test always uses every observation: S and Var(S) are summed over the seasons and computed exactly. When the slope is estimated from sampled pairs, each season's share of the `max_pairs` budget is proportional to its number of within-season pairs, so seasons are weighted as in the full calculation.
 
-### Aggregation Strategies
+`max_per_season` (optional) randomly subsamples seasons with more observations than this. It reduces the power of the test and is rarely needed; it is off by default.
 
-For n > 50,000:
+## Aggregation strategies
 
-**High-frequency data (e.g., hourly):**
+For high-frequency data, aggregating to the time scale of interest is usually better than analysing every value: it reduces serial correlation and noise, and makes the analysis exact.
+
 ```python
-# Aggregate to daily
-result = trend_test(
-    hourly_data, timestamps,
-    agg_method='median',
-    agg_period='day'
-)
-```
+# Hourly -> daily medians
+result = trend_test(hourly_values, timestamps, agg_method='median', agg_period='day')
 
-**Daily data:**
-```python
-# Aggregate to monthly
-result = trend_test(
-    daily_data, dates,
-    agg_method='robust_median',  # Better for censored data
-    agg_period='month'
-)
+# Daily -> monthly, censored data
+result = trend_test(daily_values, dates, agg_method='robust_median', agg_period='month')
 ```
 
 ## Examples
 
-### Example 1: Hourly Sensor Data (87,600 points/year)
+### Hourly sensor data
 ```python
 import pandas as pd
 from MannKS import trend_test
 
-# 10 years of hourly data = 876,000 points
-dates = pd.date_range('2010-01-01', '2020-01-01', freq='h')
-measurements = generate_sensor_data()  # Your data here
-
-# Aggregate to daily first (reduces to ~3650 points)
-result = trend_test(
-    measurements, dates,
-    agg_method='median',
-    agg_period='day',
-    slope_scaling='year',
-    x_unit='μg/m³'
-)
-
-print(f"Trend: {result.slope:.2f} {result.slope_units}")
-print(f"Mode: {result.computation_mode}")
+dates = pd.date_range('2010-01-01', '2020-01-01', freq='h')   # ~88,000 points
+result = trend_test(measurements, dates, agg_method='median', agg_period='day',
+                    slope_scaling='year', x_unit='µg/m³')
+print(result.slope, result.slope_units, result.computation_mode)   # ~3,650 daily values: 'full'
 ```
 
-### Example 2: Medium Dataset with Fast Mode
+### Fast mode with more pairs
 ```python
-# 20,000 daily measurements
-result = trend_test(
-    data_20k, dates_20k,
-    large_dataset_mode='fast',
-    max_pairs=200000,  # Higher accuracy
-    random_state=42,    # Reproducible
-    slope_scaling='year'
-)
-
-print(f"Used {result.pairs_used:,} pairs")
-print(f"Approx error: ±{result.approximation_error:.4f}")
-```
-
-### Example 3: Comparing Modes
-```python
-# Same dataset, different modes
-result_full = trend_test(data, dates, large_dataset_mode='full')
-result_fast = trend_test(data, dates, large_dataset_mode='fast', random_state=42)
-
-print(f"Full slope: {result_full.slope:.6f}")
-print(f"Fast slope: {result_fast.slope:.6f}")
-print(f"Difference: {abs(result_full.slope - result_fast.slope):.6f}")
+result = trend_test(values, dates, large_dataset_mode='fast', max_pairs=500_000,
+                    slope_scaling='year')
+print(f"{result.slope:.4f} ± {result.approximation_error:.4f} (sampling) "
+      f"from {result.pairs_used:,} pairs")
 ```
 
 ## Validation
 
-- The fast O(N log N) Mann-Kendall path is tested to give exactly the same S and
-  Var(S) as the pairwise calculation, including heavy ties and tied times
-  (`tests/test_audit_v050.py`, `tests/test_regressions_v060.py`).
-- `large_dataset_mode='full'` is tested to return the exact Sen's slope.
-- Seasonal pair sampling is tested to weight seasons like the full calculation.
-- The bias and spread of the sampled slope were measured by simulation
-  (`validation/r_parity/monte_carlo.py`): no detectable bias, relative s.d. ≈ 0.26%
-  with 100,000 pairs (n = 6,000).
+* The O(n log n) censored Mann-Kendall algorithm is tested against the pairwise LWP-TRENDS rules on thousands of random data sets (ties, several detection limits, right and mixed censoring, tied times): S, Var(S) and Tau agree exactly (`tests/test_large_data_robustness.py`).
+* The memory-saving order-statistic, ATS and analysis-note code is tested against straightforward reference implementations, with bit-for-bit identical results.
+* Fast-mode accuracy, interval coverage and the error estimate were measured by simulation, as summarised above.

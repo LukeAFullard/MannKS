@@ -172,7 +172,7 @@ Defaults are recommended for most users.
 
 #### `large_dataset_mode`
 -   **Type:** `str`, **Default:** `'auto'`
--   **Description:** `'full'` computes every pair (exact); `'fast'` estimates the slope from a random sample of `max_pairs` pairs; `'auto'` uses `'full'` up to n = 5,000 and `'fast'` above. The Mann-Kendall test itself (S, variance, p-value) is always exact. See the **[Large Dataset Guide](./large_dataset_guide.md)**.
+-   **Description:** `'full'` computes every pair (exact); `'fast'` estimates the slope from a random sample of `max_pairs` pairs; `'auto'` uses `'full'` up to n = 5,000 and `'fast'` above (n counted after any aggregation). `'full'` is refused above n = 46,340 (memory) and fast mode is used instead, with a warning. The Mann-Kendall test itself (S, variance, p-value) is always exact. See the **[Large Dataset Guide](./large_dataset_guide.md)**.
 
 #### `max_pairs`
 -   **Type:** `int` (optional), **Default:** `None` (100,000 in fast mode)

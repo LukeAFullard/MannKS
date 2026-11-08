@@ -4,10 +4,12 @@ Large dataset optimizations for MannKS.
 Implements fast approximations of O(n²) operations while preserving
 statistical validity.
 
-Features (v0.5.0):
-- Fast Mode: Stochastic Sen's slope and O(N log N) Mann-Kendall score.
-- Aggregate Mode: Automatic temporal aggregation for massive datasets.
-- Stratified Sampling: Preserves seasonal structure in large seasonal data.
+- Fast mode: Sen's slope from a random sample of pairs.  The Mann-Kendall
+  test itself (S, Var(S), p) is always exact, in O(n log n).
+- 'aggregate' tier (n > 50,000): as fast mode, with a warning recommending
+  temporal aggregation; it does not aggregate.
+- Stratified sampling: caps observations per season in very large seasonal
+  data sets.
 """
 
 import numpy as np
@@ -19,6 +21,10 @@ from typing import Tuple, Optional, Union, Dict
 SIZE_TIER_FULL = 5000      # Use full algorithms
 SIZE_TIER_FAST = 50000     # Use fast approximations
 SIZE_TIER_AGGREGATE = 200000  # Force aggregation
+
+# Largest n for exact pairwise slopes: n(n-1)/2 slopes at 8 bytes each
+# already need ~8.6 GB at this size.
+MAX_EXACT_N = 46340
 
 # Default sampling parameters
 DEFAULT_MAX_PAIRS = 100000  # For Sen's slope
@@ -72,6 +78,13 @@ def detect_size_tier(n: int,
                 f"Results are approximations. See documentation for details."
             )
 
+    if tier == 1 and n > MAX_EXACT_N:
+        tier = 2
+        warnings_list.append(
+            f"large_dataset_mode='full' is not possible for n={n} (exact slopes need "
+            f"all {n * (n - 1) // 2:,} pairs, over 8 GB of memory); using fast mode."
+        )
+
     # Configure based on tier
     if tier == 1:
         return {
@@ -111,11 +124,31 @@ def _sample_pairs(n, max_pairs, random_state):
         return ii[np.sort(k)], jj[np.sort(k)]
     i_idx = rng.integers(0, n, size=max_pairs)
     j_idx = rng.integers(0, n, size=max_pairs)
-    lo = np.minimum(i_idx, j_idx)
-    hi = np.maximum(i_idx, j_idx)
-    pairs = np.unique(np.column_stack([lo, hi]), axis=0)
-    pairs = pairs[pairs[:, 0] < pairs[:, 1]]
-    return pairs[:, 0], pairs[:, 1]
+    lo = np.minimum(i_idx, j_idx).astype(np.int64)
+    hi = np.maximum(i_idx, j_idx).astype(np.int64)
+    keep = lo < hi
+    # Distinct pairs in (lo, hi) lexicographic order, via a 1-D key.
+    key = np.unique(lo[keep] * np.int64(n) + hi[keep])
+    return key // n, key % n
+
+
+def sampled_median_error(slopes, z: float = 1.959964) -> Optional[float]:
+    """
+    Approximate 95% half-width of the sampling error of a median computed
+    from K sampled slopes: half the distance between the order statistics at
+    ranks K/2 -/+ z*sqrt(K)/2 (distribution-free binomial interval for the
+    median; valid with tied or clumped slopes).
+    """
+    v = np.asarray(slopes, dtype=float)
+    v = v[~np.isnan(v)]
+    k = len(v)
+    if k < 2:
+        return None
+    half = z * np.sqrt(k) / 2.0
+    lo = int(np.clip(np.floor(k / 2.0 - half), 0, k - 1))
+    hi = int(np.clip(np.ceil(k / 2.0 + half), 0, k - 1))
+    v.partition([lo, hi] if lo != hi else [lo])
+    return float((v[hi] - v[lo]) / 2.0)
 
 
 def fast_sens_slope(x: np.ndarray,

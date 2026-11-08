@@ -60,6 +60,9 @@ Pass the DataFrame from `prepare_censored_data` as `x`.
 *   **Segment slopes:** segments containing censored values use the Akritas-Theil-Sen estimator by default (no substitution). Pass `sens_slope_method='lwp'` or `'drop_ambiguous'` to use the pairwise estimators instead.
 *   **`hicensor`**: (bool or float, default=False) applies the high-censor rule exactly as in `trend_test` before any analysis.
 
+### Large Data Sets
+The segment slopes use the same large-data handling as `trend_test` (`large_dataset_mode`, `max_pairs`). The breakpoint search (`piecewise-regression`, which refits the model from many starting points) scales with n: roughly 20 s at n = 10,000 and over a minute at n = 30,000 for a search over 0–3 breakpoints. Above 20,000 observations a warning suggests aggregating first (e.g. daily or monthly medians), which is also usually a better basis for locating breakpoints.
+
 ## Interpreting the Results
 
 The function returns a `SegmentedTrendResult` object containing:

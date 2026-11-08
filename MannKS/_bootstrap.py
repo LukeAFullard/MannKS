@@ -14,8 +14,8 @@ autocorrelation of the *detrended* series falls below 0.1, bounded to
 selector.
 """
 import numpy as np
-from ._stats import (_mk_score_and_var_censored, _sens_estimator_unequal_spacing,
-                     _sens_estimator_censored)
+from ._stats import (_mk_score_and_var_censored, _sens_estimator_adaptive,
+                     _sens_estimator_censored_adaptive)
 
 
 def _rng(random_state):
@@ -69,8 +69,10 @@ def moving_block_bootstrap(x, block_size, random_state=None):
     return np.asarray(x)[indices]
 
 
-def _slope(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1):
-    """Point estimate of the trend slope with the requested estimator."""
+def _slope(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1,
+           max_pairs=None, random_state=None):
+    """Point estimate of the trend slope with the requested estimator.
+    ``max_pairs`` (fast mode) samples pairs instead of using all of them."""
     x = np.asarray(x, dtype=float)
     t = np.asarray(t, dtype=float)
     censored = np.asarray(censored, dtype=bool)
@@ -78,22 +80,31 @@ def _slope(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1):
         if method == 'ats':
             from ._ats import ats_slope
             return ats_slope(t, x, censored, cen_type=cen_type, var_s=0.0,
+                             max_pairs=max_pairs, random_state=random_state,
                              compute_intercept=False)['beta']
         m = 'drop_ambiguous' if method in ('unbiased', 'nan') else method
-        slopes = _sens_estimator_censored(x, t, np.asarray(cen_type), lt_mult, gt_mult, m)
+        slopes = _sens_estimator_censored_adaptive(x, t, np.asarray(cen_type), lt_mult, gt_mult, m,
+                                                   max_pairs=max_pairs, random_state=random_state)
     else:
-        slopes = _sens_estimator_unequal_spacing(x, t)
-    if len(slopes) == 0:
+        slopes = _sens_estimator_adaptive(x, t, max_pairs=max_pairs, random_state=random_state)
+    if len(slopes) == 0 or not np.any(~np.isnan(slopes)):
         return np.nan
     return np.nanmedian(slopes)
 
 
-def detrended_block_size(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1):
+def _resample_seed(random_state, k):
+    """Seed for pair sampling in bootstrap resample k (deterministic)."""
+    base = random_state if isinstance(random_state, (int, np.integer)) else 0
+    return int(base) + 1 + k
+
+
+def detrended_block_size(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1,
+                         max_pairs=None, random_state=None):
     """Block length chosen from the ACF of the detrended series."""
     from ._autocorr import estimate_acf
     x = np.asarray(x, dtype=float)
     t = np.asarray(t, dtype=float)
-    b = _slope(x, t, censored, cen_type, method, lt_mult, gt_mult)
+    b = _slope(x, t, censored, cen_type, method, lt_mult, gt_mult, max_pairs, random_state)
     if not np.isfinite(b):
         b = 0.0
     acf, _ = estimate_acf(x - b * (t - np.median(t)))
@@ -104,7 +115,8 @@ def block_bootstrap_mann_kendall(x, t, censored, cen_type,
                                  block_size='auto', n_bootstrap=1000,
                                  tau_method='b', mk_test_method='robust',
                                  tie_break_method='robust', random_state=None,
-                                 sens_slope_method='ats', lt_mult=0.5, gt_mult=1.1):
+                                 sens_slope_method='ats', lt_mult=0.5, gt_mult=1.1,
+                                 max_pairs=None):
     """
     Block bootstrap Mann-Kendall test for autocorrelated data.
 
@@ -133,7 +145,8 @@ def block_bootstrap_mann_kendall(x, t, censored, cen_type,
         x, t, censored, cen_type, tau_method=tau_method,
         mk_test_method=mk_test_method, tie_break_method=tie_break_method)
 
-    b = _slope(x, t, censored, cen_type, sens_slope_method, lt_mult, gt_mult)
+    b = _slope(x, t, censored, cen_type, sens_slope_method, lt_mult, gt_mult,
+               max_pairs, random_state if isinstance(random_state, (int, np.integer)) else None)
     if not np.isfinite(b):
         b = 0.0
     x_detrended = x - b * (t - np.median(t))
@@ -157,7 +170,8 @@ def block_bootstrap_mann_kendall(x, t, censored, cen_type,
 def block_bootstrap_confidence_intervals(x, t, censored, cen_type,
                                          block_size='auto', n_bootstrap=1000,
                                          alpha=0.05, random_state=None,
-                                         method='ats', lt_mult=0.5, gt_mult=1.1):
+                                         method='ats', lt_mult=0.5, gt_mult=1.1,
+                                         max_pairs=None):
     """
     Percentile confidence interval for the trend slope by circular block
     bootstrap of (time, value, censoring) triples.
@@ -180,15 +194,18 @@ def block_bootstrap_confidence_intervals(x, t, censored, cen_type,
     cen_type = np.asarray(cen_type)
     n = len(x)
 
-    slope_obs = _slope(x, t, censored, cen_type, method, lt_mult, gt_mult)
+    seed0 = random_state if isinstance(random_state, (int, np.integer)) else None
+    slope_obs = _slope(x, t, censored, cen_type, method, lt_mult, gt_mult, max_pairs, seed0)
 
     if block_size == 'auto':
-        block_size = detrended_block_size(x, t, censored, cen_type, method, lt_mult, gt_mult)
+        block_size = detrended_block_size(x, t, censored, cen_type, method, lt_mult, gt_mult,
+                                          max_pairs, seed0)
 
     boot_slopes = np.full(n_bootstrap, np.nan)
     for k in range(n_bootstrap):
         idx = np.sort(_moving_block_bootstrap_indices(n, block_size, rng))
-        boot_slopes[k] = _slope(x[idx], t[idx], censored[idx], cen_type[idx], method, lt_mult, gt_mult)
+        boot_slopes[k] = _slope(x[idx], t[idx], censored[idx], cen_type[idx], method, lt_mult, gt_mult,
+                                max_pairs, _resample_seed(random_state, k) if max_pairs else None)
 
     ok = boot_slopes[np.isfinite(boot_slopes)]
     if len(ok) == 0:

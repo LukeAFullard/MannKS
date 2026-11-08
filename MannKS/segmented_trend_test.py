@@ -186,6 +186,12 @@ def segmented_trend_test(
         censored = data_filtered['censored'].to_numpy()
         cen_type = data_filtered['cen_type'].to_numpy()
 
+        if len(x_val) > 20000:
+            warnings.warn(
+                f"Breakpoint search on n={len(x_val)} observations can take several minutes "
+                f"(the piecewise-regression fit scales with n). Aggregating first (e.g. "
+                f"daily or monthly medians) is much faster.", UserWarning)
+
         if len(x_val) < 2:
             warnings.warn("Insufficient data for segmented analysis.", UserWarning)
             # Collect warnings (including the one we just issued)

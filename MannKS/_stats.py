@@ -6,6 +6,8 @@ from scipy.stats import norm, rankdata, kendalltau
 DEFAULT_LT_MULTIPLIER = 0.5  # Half detection limit for left-censored
 DEFAULT_GT_MULTIPLIER = 1.1  # 110% detection limit for right-censored
 EPSILON = 1e-10
+# Above this n, the censored Mann-Kendall S uses the exact O(n log n) path.
+_FAST_S_MIN_N = 2000
 
 def _rle_lengths(a):
     """
@@ -48,6 +50,91 @@ def _tie_break_delta(min_diff, n, method):
     if method == 'lwp':
         return min_diff / 1000.0
     return min_diff / (2.0 * (n + 1))
+
+
+
+def _tie_pairs(a):
+    """Number of pairs with equal values in ``a``."""
+    if len(a) < 2:
+        return 0
+    _, c = np.unique(a, return_counts=True)
+    return int(np.sum(c * (c - 1)) // 2)
+
+
+def _iter_triu_blocks(n, max_pairs_per_block=2_000_000):
+    """Yield (i, j) index arrays for all pairs i < j, in ``np.triu_indices``
+    order, a block of rows at a time so memory stays bounded."""
+    lens = np.arange(n - 1, -1, -1, dtype=np.int64)   # pairs in each row
+    row = 0
+    while row < n - 1:
+        cum = np.cumsum(lens[row:])
+        stop = row + max(1, int(np.searchsorted(cum, max_pairs_per_block, side='right')))
+        stop = min(stop, n - 1)
+        rows = np.arange(row, stop, dtype=np.int64)
+        rl = lens[row:stop]
+        i = np.repeat(rows, rl)
+        starts = np.repeat(np.cumsum(rl) - rl, rl)
+        j = np.arange(len(i), dtype=np.int64) - starts + i + 1
+        yield i, j
+        row = stop
+
+
+def _kendall_s(x, y):
+    """Exact Kendall S = sum over pairs of sign(dx) * sign(dy), in
+    O(n log n), recovered from scipy's tau-b:
+    S = tau_b * sqrt((n0 - n1) * (n0 - n2))."""
+    n = len(x)
+    if n < 2:
+        return 0
+    tau_b = kendalltau(x, y).statistic
+    if np.isnan(tau_b):  # x or y constant: every pair is tied
+        return 0
+    n0 = n * (n - 1) // 2
+    denom = np.sqrt(float(n0 - _tie_pairs(x))) * np.sqrt(float(n0 - _tie_pairs(y)))
+    return int(round(tau_b * denom))
+
+
+def _censored_s_and_ties(dupx, dupy, cx):
+    """S and the Tau-b tie counts (tt, uu) of the censored Kendall statistic
+    in O(n log n).  Gives exactly the pairwise rules of the O(n^2) path:
+
+    * uncensored-uncensored pairs score sign(dx) * sign(dy);
+    * a censored-uncensored pair scores sign(y_u - y_c) when the censored
+      value lies below the uncensored one, and 0 (ambiguous) otherwise;
+    * censored-censored pairs score 0.
+
+    The censored-uncensored sum over pairs with x_u > x_c equals (T + K) / 2,
+    where T = sum of sign(y_u - y_c) and K = sum of sign(x_u - x_c) *
+    sign(y_u - y_c) over all censored-uncensored pairs, and K is the S of the
+    whole sample minus the S of each group.  ``dupy`` (time) is never
+    censored.  Returns None if a censored and an uncensored value are exactly
+    equal after the tie-break shift (the identity needs x_u != x_c); the
+    caller then uses the pairwise path.
+    """
+    cx = np.asarray(cx, dtype=bool)
+    xu, yu = dupx[~cx], dupy[~cx]
+    xc, yc = dupx[cx], dupy[cx]
+    nu, nc = len(xu), len(xc)
+    if nu and nc and np.intersect1d(xu, xc).size:
+        return None
+
+    s_u = _kendall_s(xu, yu)
+    kenS = s_u
+    cix_count = 0
+    if nu and nc:
+        k = _kendall_s(dupx, dupy) - _kendall_s(xc, yc) - s_u
+        ys = np.sort(yu)
+        above = nu - np.searchsorted(ys, yc, side='right')
+        below = np.searchsorted(ys, yc, side='left')
+        t_sum = int(np.sum(above) - np.sum(below))
+        kenS = s_u + (t_sum + k) // 2
+        # Ambiguous pairs: censored value above the uncensored one.
+        cix_count = int(np.sum(np.searchsorted(np.sort(xu), xc, side='left')))
+
+    tplus = nc * (nc - 1) // 2 - _tie_pairs(xc)
+    tt = _tie_pairs(dupx) + cix_count + tplus
+    uu = _tie_pairs(dupy)
+    return float(kenS), float(tt), float(uu)
 
 
 def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test_method='robust', tie_break_method='robust'):
@@ -95,31 +182,20 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     dupx = xx - delx * cx
     dupy = yy - dely * cy
 
-    # 4. S-statistic calculation using chunking for large n
-    chunk_size = 2000 # Tunable parameter
+    # 4. S-statistic.  Large samples use an exact O(n log n) algorithm;
+    # small ones (and the rare case it does not cover) the pairwise rules.
     kenS = 0
     tt = 0
     uu = 0
 
-    use_fast_path = (n > 5000 and not np.any(cx) and mk_test_method != 'lwp')
-    use_chunking = n > 2000 and not use_fast_path
+    fast = _censored_s_and_ties(dupx, dupy, cx) if n > _FAST_S_MIN_N else None
+    use_fast_path = fast is not None
+    use_chunking = n > _FAST_S_MIN_N and not use_fast_path
+    # Rows per chunk, so that each (rows x n) temporary stays ~16 MB.
+    chunk_size = max(1, min(2000, 2_000_000 // n))
 
     if use_fast_path:
-        # FAST PATH: uncensored data, O(N log N).  scipy's Tau-b handles ties
-        # in both x and t, and S is recovered exactly from Tau-b:
-        #   S = tau_b * sqrt((n0 - n1) * (n0 - n2))
-        res = kendalltau(xx, yy)
-        tau_b = res.statistic
-        if np.isnan(tau_b):
-            tau_b = 0.0
-
-        _, c_x = np.unique(xx, return_counts=True)
-        _, c_y = np.unique(yy, return_counts=True)
-        tt = int(np.sum(c_x * (c_x - 1)) // 2)
-        uu = int(np.sum(c_y * (c_y - 1)) // 2)
-        n_pairs = n * (n - 1) // 2
-        denom_b = np.sqrt(float(n_pairs - tt) * float(n_pairs - uu))
-        kenS = int(round(tau_b * denom_b))
+        kenS, tt, uu = fast
 
     elif use_chunking:
         # Loop over chunks of i (rows)
@@ -417,49 +493,32 @@ def _sens_estimator_unequal_spacing(x, t):
     """
     n = len(x)
 
-    # Add a hard limit to prevent integer overflow on large n*n arrays
-    MAX_SAFE_N = 46340
-    if n > MAX_SAFE_N:
-        # Relaxed check as we handle fast estimation elsewhere, but exact Sen's slope
-        # using this function is still O(n^2) and will likely crash if called directly.
-        # trend_test calls fast_sens_slope for large N, avoiding this.
+    from ._large_dataset import MAX_EXACT_N
+    if n > MAX_EXACT_N:
+        # All n(n-1)/2 slopes would need > 8 GB.  trend_test switches to
+        # fast mode before reaching this point.
         warnings.warn(
-            f"Sample size n={n} exceeds maximum safe size of {MAX_SAFE_N}. "
-            f"This would cause an integer overflow during pairwise calculations. "
-            f"Consider using the regional_test() function for aggregation or subsampling your data.",
+            f"Sample size n={n} exceeds the maximum of {MAX_EXACT_N} for exact "
+            f"pairwise slopes (memory). Use large_dataset_mode='fast'.",
             UserWarning
         )
         return np.array([])
-
-    if n > 5000:
-        mem_gb = (n**2 * 8 / 1e9)
-        warnings.warn(
-            f"Large sample size (n={n}) requires ~{mem_gb:.1f} GB memory "
-            f"for pairwise calculations. Maximum safe n is {MAX_SAFE_N}. "
-            f"Using `regional_test()` for aggregating multiple smaller sites is recommended.",
-            UserWarning
-        )
 
     if n < 2:
         return np.array([])
 
     x = np.asarray(x, dtype=float)
     t = np.asarray(t, dtype=float)
-    if n <= 2000:
-        i, j = np.triu_indices(n, k=1)
-        x_diff = x[j] - x[i]
-        t_diff = t[j] - t[i]
-        # Pairs with (numerically) equal times have no defined slope.
-        valid_mask = np.abs(t_diff) > 1e-10
-        return x_diff[valid_mask] / t_diff[valid_mask]
-
-    # Row-wise construction keeps peak memory at ~one copy of the slopes.
-    out = []
-    for i in range(n - 1):
-        dt = t[i + 1:] - t[i]
-        m = np.abs(dt) > 1e-10
-        out.append((x[i + 1:][m] - x[i]) / dt[m])
-    return np.concatenate(out)
+    # Fill a preallocated array block by block: peak memory ~ one slope array.
+    out = np.empty(n * (n - 1) // 2)
+    k = 0
+    for i, j in _iter_triu_blocks(n):
+        dt = t[j] - t[i]
+        m = np.abs(dt) > 1e-10   # equal times: no defined slope
+        v = (x[j][m] - x[i][m]) / dt[m]
+        out[k:k + len(v)] = v
+        k += len(v)
+    return out[:k]
 
 
 def _total_pairs_if_sampled(n, max_pairs):
@@ -541,17 +600,14 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
     if n < 2:
         return np.array([])
     code = _censor_codes(cen_type)
-    if n <= 2000:
-        i, j = np.triu_indices(n, k=1)
+    out = np.empty(n * (n - 1) // 2)
+    k = 0
+    for i, j in _iter_triu_blocks(n):
         slopes, valid = _censored_pair_slopes(x, t, code, i, j, lt_mult, gt_mult, method)
-        return slopes[valid]
-    out = []
-    for i0 in range(n - 1):
-        j = np.arange(i0 + 1, n)
-        i = np.full(len(j), i0)
-        slopes, valid = _censored_pair_slopes(x, t, code, i, j, lt_mult, gt_mult, method)
-        out.append(slopes[valid])
-    return np.concatenate(out)
+        v = slopes[valid]
+        out[k:k + len(v)] = v
+        k += len(v)
+    return out[:k]
 
 
 def _censor_codes(cen_type):
@@ -648,7 +704,7 @@ def _confidence_intervals(slopes, var_s, alpha, method='direct', total_pairs=Non
         total_pairs: Number of possible pairs when ``slopes`` is a random
             sample; None when ``slopes`` holds every pair.
     """
-    valid_slopes = slopes[~np.isnan(slopes)]
+    valid_slopes = np.array(slopes[~np.isnan(slopes)], dtype=float)  # copy
     n_sample = len(valid_slopes)
 
     if n_sample == 0 or var_s < EPSILON:
@@ -665,18 +721,28 @@ def _confidence_intervals(slopes, var_s, alpha, method='direct', total_pairs=Non
     rank1 = M1 / n_pop * n_sample
     rank2 = M2 / n_pop * n_sample
 
-    sorted_slopes = np.sort(valid_slopes)
-
     if method == 'lwp':
         # LWP-TRENDS: approx() over ranks 1..N; outside the range R returns NA
-        # and falls back to min/max, which np.interp's clamping reproduces.
-        ranks = np.arange(1, n_sample + 1)
-        lower_ci, upper_ci = np.interp([rank1, rank2], ranks, sorted_slopes)
+        # and falls back to min/max (np.interp's clamping).  Only the order
+        # statistics either side of each rank are needed.
+        def bracket(r):
+            r = min(max(r, 1.0), float(n_sample))
+            f = int(np.floor(r))
+            return r, f - 1, min(f, n_sample - 1)
+        (r1, a1, b1), (r2, a2, b2) = bracket(rank1), bracket(rank2)
+        valid_slopes.partition(sorted({a1, b1, a2, b2}))
+        def interp(r, a, b):
+            lo_v, hi_v = valid_slopes[a], valid_slopes[b]
+            if a == b or r == a + 1:
+                return lo_v
+            return (hi_v - lo_v) * (r - (a + 1)) + lo_v
+        lower_ci, upper_ci = interp(r1, a1, b1), interp(r2, a2, b2)
     else:
         lower_idx = int(np.clip(np.round(rank1 - 1), 0, n_sample - 1))
         upper_idx = int(np.clip(np.round(rank2 - 1), 0, n_sample - 1))
-        lower_ci = sorted_slopes[lower_idx]
-        upper_ci = sorted_slopes[upper_idx]
+        valid_slopes.partition(sorted({lower_idx, upper_idx}))
+        lower_ci = valid_slopes[lower_idx]
+        upper_ci = valid_slopes[upper_idx]
 
     return lower_ci, upper_ci
 
@@ -703,6 +769,34 @@ def _rank_of_zero(sorted_slopes, ties):
     return float(np.interp(0.0, vals, r))
 
 
+def _zero_ranks(values):
+    """
+    (median, max, min)-ties ranks of 0 among ``values`` (no NaN), exactly as
+    ``_rank_of_zero`` on the sorted values, in O(n) without sorting: only the
+    values adjacent to 0 matter for the interpolation.
+    """
+    vmin, vmax = values.min(), values.max()
+    if vmin > 0 or vmax < 0:
+        return np.nan, np.nan, np.nan
+    lo = int(np.count_nonzero(values < 0))
+    hi = int(np.count_nonzero(values <= 0))
+    if hi > lo:  # 0 is one of the values
+        return (lo + 1 + hi) / 2.0, float(hi), float(lo + 1)
+    va = values[values < 0].max()
+    vb = values[values > 0].min()
+    ca = int(np.count_nonzero(values == va))
+    cb = int(np.count_nonzero(values == vb))
+    ra = {'min': lo - ca + 1.0, 'max': float(lo)}
+    rb = {'min': lo + 1.0, 'max': float(lo + cb)}
+    ra['median'] = (ra['min'] + ra['max']) / 2.0
+    rb['median'] = (rb['min'] + rb['max']) / 2.0
+    out = []
+    for k in ('median', 'max', 'min'):
+        slope = (rb[k] - ra[k]) / (vb - va)
+        out.append(float(slope * (0.0 - va) + ra[k]))
+    return tuple(out)
+
+
 def _sen_probability(slopes, var_s, total_pairs=None):
     """
     Probability that the true slope is *less than zero*, from the rank of
@@ -720,13 +814,10 @@ def _sen_probability(slopes, var_s, total_pairs=None):
     if n_sample == 0 or var_s < EPSILON:
         return np.nan, np.nan, np.nan
 
-    sorted_slopes = np.sort(valid_slopes)
-    R0_median = _rank_of_zero(sorted_slopes, 'median')
-    R0_max = _rank_of_zero(sorted_slopes, 'max')
-    R0_min = _rank_of_zero(sorted_slopes, 'min')
-    if np.all(valid_slopes < 0):
+    R0_median, R0_max, R0_min = _zero_ranks(valid_slopes)
+    if valid_slopes.max() < 0:
         R0_median = float(n_sample)
-    elif np.all(valid_slopes > 0):
+    elif valid_slopes.min() > 0:
         R0_median = 1.0
 
     scaling = _valid_pair_count(slopes, total_pairs) / n_sample

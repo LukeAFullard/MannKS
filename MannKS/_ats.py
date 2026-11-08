@@ -33,7 +33,7 @@ import numpy as np
 from typing import Optional
 from scipy.stats import norm
 
-from ._stats import _mk_score_and_var_censored, _get_min_positive_diff
+from ._stats import _mk_score_and_var_censored, _get_min_positive_diff, _iter_triu_blocks
 
 
 # ---------- interval representation ----------
@@ -121,18 +121,20 @@ class _ATSScore:
                 from ._large_dataset import _sample_pairs
                 k = int(np.ceil(max_pairs * npairs / self.total_pairs))
                 ii, jj = _sample_pairs(len(ix), k, rng)
-                i, j = ix[ii], ix[jj]
+                blocks = [(ii, jj)]
             else:
-                ii, jj = np.triu_indices(len(ix), k=1)
+                blocks = _iter_triu_blocks(len(ix))
+            for ii, jj in blocks:
                 i, j = ix[ii], ix[jj]
-            used += len(i)
-            a, b = _pair_thresholds(x, lower, upper, i, j)
-            A.append(a)
-            B.append(b)
+                used += len(i)
+                a, b = _pair_thresholds(x, lower, upper, i, j)
+                A.append(a)
+                B.append(b)
         self.A = np.sort(np.concatenate(A)) if A else np.array([])
         self.B = np.sort(np.concatenate(B)) if B else np.array([])
         # Factor converting population-scale levels to sample-scale levels.
         self.scale = used / self.total_pairs if (sample and self.total_pairs) else 1.0
+        self._P = None
 
     def S(self, beta):
         beta = np.asarray(beta, dtype=float)
@@ -146,30 +148,66 @@ class _ATSScore:
         ``level`` is on the population scale.
         """
         level = level * self.scale
-        P = np.unique(np.concatenate([self.A, self.B]))
-        P = P[np.isfinite(P)]
+        P = self._candidates()
         if len(P) == 0:
             return np.nan
         span = max(1.0, np.abs(P).max())
-        gaps = (P[:-1] + P[1:]) / 2.0
-        # Locations in increasing order: left tail, P0, gap0, P1, ..., P_last, right tail
-        locs_val = np.empty(2 * len(P) + 1)
-        locs_val[0] = P[0] - span
-        locs_val[1::2] = P
-        locs_val[2:-1:2] = gaps
-        locs_val[-1] = P[-1] + span
-        Svals = self.S(locs_val)
-        le = np.where(Svals <= level)[0]
-        ge = np.where(Svals >= level)[0]
-        if len(le) == 0 or len(ge) == 0:
+        m = len(P)
+        n_locs = 2 * m + 1
+
+        # Locations in increasing order: left tail, P0, gap0, P1, ...,
+        # P_last, right tail.  S is non-increasing in beta, so S at the
+        # locations is non-increasing in k and both crossings are found by
+        # bisection.
+        def loc(k):
+            if k == 0:
+                return P[0] - span
+            if k == n_locs - 1:
+                return P[-1] + span
+            if k % 2 == 1:
+                return P[(k - 1) // 2]
+            return (P[k // 2 - 1] + P[k // 2]) / 2.0
+
+        def s_at(k):
+            return int(self.S(loc(k)))
+
+        # k_lo: first k with S <= level.
+        lo_k, hi_k = 0, n_locs
+        while lo_k < hi_k:
+            mid = (lo_k + hi_k) // 2
+            if s_at(mid) <= level:
+                hi_k = mid
+            else:
+                lo_k = mid + 1
+        k_lo = lo_k
+        # k_hi: last k with S >= level.
+        lo_k, hi_k = -1, n_locs - 1
+        while lo_k < hi_k:
+            mid = (lo_k + hi_k + 1) // 2
+            if s_at(mid) >= level:
+                lo_k = mid
+            else:
+                hi_k = mid - 1
+        k_hi = lo_k
+        if k_lo >= n_locs or k_hi < 0:
             return np.nan
-        k_lo, k_hi = le[0], ge[-1]
-        if k_lo == 0 or k_hi == len(locs_val) - 1:
+        if k_lo == 0 or k_hi == n_locs - 1:
             return np.nan  # crossing in an unbounded tail: not identifiable
         # Point locations are odd indices (P[(k-1)//2]); gaps are even indices.
         lo = P[(k_lo - 1) // 2] if k_lo % 2 == 1 else P[k_lo // 2 - 1]
         hi = P[(k_hi - 1) // 2] if k_hi % 2 == 1 else P[k_hi // 2]
         return 0.5 * (lo + hi)
+
+    def _candidates(self):
+        """Sorted distinct finite thresholds (computed once, reused)."""
+        if self._P is None:
+            P = np.concatenate([self.A, self.B])
+            P = P[np.isfinite(P)]
+            P.sort(kind='stable')   # two sorted runs: merged in linear time
+            if len(P):
+                P = P[np.concatenate(([True], P[1:] != P[:-1]))]
+            self._P = P
+        return self._P
 
 
 # ---------- intercept ----------
@@ -248,6 +286,18 @@ def _ats_core(x, y, censored, cen_type, lod, groups, var_s, ci_alpha, max_pairs,
     if compute_intercept:
         result['intercept'] = estimate_intercept_turnbull(lower - beta * (x - x_min),
                                                           upper - beta * (x - x_min)) - beta * x_min
+
+    if score.scale != 1.0 and len(score.A):
+        # Sampling error of the estimate: the sampled score at beta has
+        # standard deviation ~ total * sqrt(mean(score^2) / K); the estimate
+        # moves by about the beta-range where the score stays within
+        # +/- 1.96 of those standard deviations.
+        k = len(score.A)
+        nonzero = (k - np.searchsorted(score.A, beta, side='right')) \
+            + np.searchsorted(score.B, beta, side='left')
+        sd = score.total_pairs * np.sqrt(max(nonzero, 1) / k / k)
+        c_s = 1.959964 * sd
+        result['approximation_error'] = float((score.solve(-c_s) - score.solve(c_s)) / 2.0)
 
     if var_s is None:
         g = np.zeros(len(x), dtype=int) if groups is None else np.asarray(groups)

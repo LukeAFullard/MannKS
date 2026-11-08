@@ -4,6 +4,8 @@ Welcome to the user guide for the `MannKS` Python package. This collection of ex
 
 Each example is a self-contained "chapter" that includes the full Python code, the exact output, and a detailed interpretation of the results.
 
+To run the examples yourself, install the package and `tabulate` (used to print tables): `pip install mannks tabulate`.
+
 ## Table of Contents
 
 ### Part 1: Core Concepts & Basic Workflow

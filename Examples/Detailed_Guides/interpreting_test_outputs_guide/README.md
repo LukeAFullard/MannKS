@@ -50,4 +50,4 @@ These refer to the data **before** any aggregation, as in LWP-TRENDS.
 
 -   **`computation_mode`** (`str`): `'full'`, `'fast'`, `'aggregate'` or `'insufficient'`.
 -   **`pairs_used`** (`int` or `None`): Number of pairs used for the slope in fast/aggregate mode.
--   **`approximation_error`** (`float` or `None`): Approximate 95% half-width of the sampling error of the slope when pairs were sampled.
+-   **`approximation_error`** (`float` or `None`): Approximate 95% half-width of the sampling error of the slope when pairs were sampled (fast mode), in the same units as `slope`.

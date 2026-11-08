@@ -78,13 +78,14 @@ def inspect_trend_data(
 
     df = data.copy()
     df[time_col] = pd.to_datetime(df[time_col])
+    df = df[df[time_col].notna()]   # rows without a time cannot be placed
 
     # --- 1. Filter by Trend Period ---
     if end_year is None:
-        end_year = df[time_col].dt.year.max()
+        end_year = int(df[time_col].dt.year.max())
 
     if trend_period is None:
-        trend_period = end_year - df[time_col].dt.year.min() + 1
+        trend_period = end_year - int(df[time_col].dt.year.min()) + 1
 
     start_year = end_year - trend_period + 1
     start_date = pd.to_datetime(f'{start_year}-01-01')
