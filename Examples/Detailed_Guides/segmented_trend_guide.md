@@ -11,7 +11,7 @@ Unlike a standard trend test which assumes a monotonic trend across the entire d
 ### The Hybrid Approach
 The method combines two powerful statistical techniques:
 1.  **Piecewise Regression (OLS):** Used to identify the *location* of the breakpoints. It can automatically select the optimal number of breakpoints using Information Criteria (BIC or AIC).
-2.  **Mann-Kendall / Sen's Slope:** Once the segments are defined, these robust non-parametric methods are applied to each segment individually to estimate the slope and significance. This ensures the trend estimates are robust to outliers and non-normality, which pure OLS is not.
+2.  **Sen's Slope / Akritas-Theil-Sen:** Once the segments are defined, a robust non-parametric slope (Sen's slope; Akritas-Theil-Sen for segments containing censored values) and its confidence interval are estimated within each segment. These estimates are robust to outliers and non-normality, which pure OLS is not.
 
 ## Basic Usage
 
@@ -55,10 +55,10 @@ plot_segmented_trend(result, x_data=data, t_data=dates, save_path='segmented_plo
 *   **`n_bootstrap`**: (int, default=100) Number of iterations for bagging. Higher = more stable but slower.
 
 ### Censored Data
-*   **`hicensor`**: (bool, default=False)
-    *   **The Problem:** Standard OLS (used for breakpoint detection) cannot handle `<5` strings.
-    *   **The Solution:** If `True`, the function applies a "High Censor" rule (treating values below the max detection limit as censored) and substitutes them with a fixed value (e.g., 0.5 * limit) specifically for the *breakpoint detection* phase.
-    *   **Note:** The subsequent slope estimation (Mann-Kendall) still uses the fully robust censored methods (ATS, etc.) on the identified segments.
+Pass the DataFrame from `prepare_censored_data` as `x`.
+*   **Breakpoint detection:** OLS cannot use censored values directly, so for this phase only, censored values are replaced by `lt_mult × limit` (default 0.5) or `gt_mult × limit` (default 1.1).
+*   **Segment slopes:** segments containing censored values use the Akritas-Theil-Sen estimator by default (no substitution). Pass `sens_slope_method='lwp'` or `'drop_ambiguous'` to use the pairwise estimators instead.
+*   **`hicensor`**: (bool or float, default=False) applies the high-censor rule exactly as in `trend_test` before any analysis.
 
 ## Interpreting the Results
 
@@ -69,10 +69,12 @@ A list of timestamps (or numeric values) where the structural changes occur.
 
 ### `segments`
 A pandas DataFrame, with one row for each period between breakpoints. Columns include:
-*   `slope`: Sen's slope for that segment.
-*   `intercept`: The intercept for the line equation $y = mx + c$.
-*   `lower_ci`, `upper_ci`: Confidence bounds for the slope.
+*   `slope`: Sen's slope (Akritas-Theil-Sen for censored segments) for that segment.
+*   `intercept`: The intercept for the line equation $y = mx + c$, on the unscaled time axis (seconds since 1970 for datetime `t`).
+*   `lower_ci`, `upper_ci`: (1 - `alpha`) confidence bounds for the slope. They are **conditional on the estimated breakpoints**: the uncertainty in the breakpoint locations is not included.
 *   `n`: Number of samples in the segment.
+
+An observation exactly at a breakpoint belongs to the later segment.
 
 ### `predict(t)`
 A method to generate the fitted trend line for any time vector `t`. Useful for plotting.
@@ -87,7 +89,7 @@ y_fitted = result.predict(dates)
 The result always includes **Confidence Intervals for the Breakpoints** (`result.breakpoint_cis`), but their source depends on the method used:
 
 1.  **Standard OLS (`use_bagging=False`)**: The CIs are derived from the standard error of the Piecewise Regression model. These assume normality and are typically symmetric.
-2.  **Bootstrap Bagging (`use_bagging=True`)**: The CIs are derived non-parametrically from the bootstrap distribution of the breakpoints. These are more robust to noise and can handle asymmetric uncertainty (e.g., "the change happened *at least* by 2010, but possibly much earlier").
+2.  **Bootstrap Bagging (`use_bagging=True`)**: The CIs are percentile intervals (level 1 - `alpha`) of the bootstrap distribution of the breakpoints, after removing outlying bootstrap fits. These are more robust to noise and can handle asymmetric uncertainty (e.g., "the change happened *at least* by 2010, but possibly much earlier").
 
 *   A wide CI (e.g., "2010 to 2014") indicates the exact timing of the change is uncertain, often due to a gradual transition or high noise.
 *   A narrow CI (e.g., "May 2010 to June 2010") indicates a sharp, sudden change.

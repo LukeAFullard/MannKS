@@ -92,6 +92,7 @@ print("\n--- Test 3: Block Bootstrap Mann-Kendall ---")
 result_boot = mk.trend_test(
     x, t,
     autocorr_method='block_bootstrap',
+    random_state=42,
     n_bootstrap=1000,
     slope_scaling='year',
     plot_path='plot_boot.png'
@@ -128,6 +129,7 @@ result_seas = mk.seasonal_trend_test(
     x_seas, dates_seas,
     period=12,
     autocorr_method='block_bootstrap',
+    random_state=42,
     slope_scaling='year',
     plot_path='plot_seas_boot.png'
 )
@@ -162,19 +164,19 @@ Effective Sample Size: 50.0 (vs 100 original)
 
 --- Test 3: Block Bootstrap Mann-Kendall ---
 Trend: increasing
-p-value: 0.1508
+p-value: 0.1648
 Significant? False
 Slope: 0.2300 units per year
-Confidence Interval (95%): [-0.1787, 0.6796]
+Confidence Interval (95%): [-0.1428, 0.7034]
 Autocorrelation (ACF1): 0.772
 Block Size Used: 10
 
 --- Test 4: Seasonal Block Bootstrap ---
 Seasonal Trend: decreasing
-p-value: 0.7792
+p-value: 0.8212
 Significant? False
 Slope: -0.0111 units per year
-Confidence Interval (95%): [-0.1083, 0.0909]
+Confidence Interval (95%): [-0.1041, 0.0929]
 Block Size Used: 3 (cycles)
 
 ```

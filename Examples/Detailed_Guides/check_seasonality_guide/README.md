@@ -85,9 +85,9 @@ The key takeaway is the **process**. The first check confirms seasonality in the
 -   **Usefulness:** If the p-value is below this threshold, `is_seasonal` returns `True`. Adjust this if you need stricter (0.01) or looser (0.10) evidence of seasonality.
 
 #### `period`
--   **Type:** `int`, **Default:** `12`
+-   **Type:** `int`, **Default:** `None`
 -   **Description:** The number of seasons in a full cycle.
--   **Usefulness:** Essential for numeric time data. For example, if `t` is in years, `period=4` implies quarterly data. Ignored if `season_type` is used with datetime data (except for 'month' where it defaults to 12).
+-   **Usefulness:** For datetime `t` it is inferred from `season_type` (12 for `'month'`, 4 for `'quarter'`, 7 for `'day_of_week'`, ...); if you give it, it must agree with `season_type`. For numeric `t` it defaults to 12, and `t` must be in **season units** (season = `floor(t - min(t)) % period`): e.g. a month index with `period=12`, not decimal years. A warning is issued when `t` does not look like season units.
 
 #### `season_type`
 -   **Type:** `str`, **Default:** `'month'`
@@ -98,14 +98,22 @@ The key takeaway is the **process**. The first check confirms seasonality in the
 -   **Type:** `str`, **Default:** `'none'`
 -   **Description:** The method for temporal aggregation.
 -   **Benefits:** Ensures consistency with your trend test. If you plan to run `seasonal_trend_test(..., agg_method='median')`, you **must** set this to `'median'` here as well.
--   **Options:** `'none'`, `'median'`, `'robust_median'`, `'lwp'`, `'middle'`, `'middle_lwp'`.
+-   **Options:** `'none'`, `'median'`, `'robust_median'`, `'middle'`, and `'lwp'`/`'middle_lwp'` (the observation closest to the LWP-TRENDS mid-point of each `agg_period` increment).
 
 #### `agg_period`
 -   **Type:** `str`, **Default:** `None`
--   **Description:** The time window for aggregation (e.g., `'year'`, `'month'`).
+-   **Description:** The time window for aggregation (`'year'`, `'quarter'`, `'month'`, `'week'` or `'day'`; for numeric `t`, a width in units of `t`).
 -   **Limitations:** This is **required** if `agg_method` is not `'none'`. It tells the function how to group the data (e.g., "group by month") before calculating the aggregate value (e.g., "median").
 
 #### `hicensor`
 -   **Type:** `bool` or `float`, **Default:** `False`
 -   **Description:** Activates the high-censor rule.
 -   **Usefulness:** If your data has varying detection limits, this ensures the seasonality check isn't biased by artifacts of the detection method. Consistent use across all your tests is key.
+
+### Seasons with little data
+
+Seasons with fewer than 3 values, or with fewer than 2 distinct values, are skipped (with a warning) and listed in `seasons_skipped`; the test uses the remaining seasons. LWP-TRENDS' `SeasonalityTest` instead returns no result when any season fails these checks. When at least one season is skipped, check whether a coarser season definition (e.g. quarters) is more appropriate.
+
+### Returned fields
+
+`h_statistic`, `p_value`, `is_seasonal` (`p_value < alpha`), `seasons_tested` and `seasons_skipped`.

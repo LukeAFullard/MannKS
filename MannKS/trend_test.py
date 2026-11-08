@@ -10,7 +10,7 @@ from scipy.stats import norm
 from ._stats import (_z_score, _p_value, _confidence_intervals, _mk_probability,
                      _mk_score_and_var_censored, _sen_probability,
                      _sens_estimator_adaptive, _sens_estimator_censored_adaptive,
-                     _total_pairs_if_sampled)
+                     _total_pairs_if_sampled, _normalize_sens_slope_method)
 from ._ats import ats_slope
 from ._helpers import (_prepare_data, _aggregate_by_group, _value_for_time_increment)
 from ._large_dataset import detect_size_tier
@@ -89,7 +89,7 @@ def trend_test(
         High-censor rule (LWP-TRENDS ``ApplyHiCensor``): values below the
         highest left-censoring limit (or below ``min(that limit, hicensor)``
         when numeric) are set censored at that limit.
-    sens_slope_method : {'ats', 'lwp', 'unbiased', 'nan'}, default 'ats'
+    sens_slope_method : {'ats', 'lwp', 'drop_ambiguous'}, default 'ats'
         Slope estimator for censored data (uncensored data always use the
         exact Sen's slope).
 
@@ -98,8 +98,9 @@ def trend_test(
           Recommended.
         - ``'lwp'``: LWP-TRENDS pairwise slopes with ambiguous censored pairs
           set to 0 (biased towards zero as censoring increases).
-        - ``'unbiased'`` / ``'nan'``: pairwise slopes with ambiguous pairs
-          dropped.  The name is historical: this is biased *away* from zero.
+        - ``'drop_ambiguous'``: pairwise slopes with ambiguous pairs dropped
+          (biased *away* from zero as censoring increases).  The former names
+          ``'unbiased'`` and ``'nan'`` are deprecated aliases.
     tau_method : {'b', 'a'}
         Kendall's tau variant reported (LWP-TRENDS reports tau-a).
     agg_method, agg_period
@@ -128,8 +129,11 @@ def trend_test(
         bootstrap when the detrended lag-1 autocorrelation is significant.
     large_dataset_mode : {'auto', 'full', 'fast', 'aggregate'}
         'full' always computes every pair (exact).  'fast' (automatic for
-        n > 5000) samples ``max_pairs`` pairs for the slope; the Mann-Kendall
-        test itself is always exact.
+        5000 < n <= 50000) samples ``max_pairs`` pairs for the slope; the
+        Mann-Kendall test itself is always exact.  'aggregate' (automatic
+        above 50000) computes as 'fast' and warns that the data should be
+        aggregated (with ``agg_method``/``agg_period``); it does not
+        aggregate by itself.
     max_pairs : int, optional
         Number of pairs sampled for the slope in fast mode (default 100,000).
     random_state : int, optional
@@ -159,9 +163,7 @@ def trend_test(
 
     res = namedtuple('Mann_Kendall_Test', _RESULT_FIELDS)
 
-    valid_sens_slope_methods = ['ats', 'unbiased', 'nan', 'lwp']
-    if sens_slope_method not in valid_sens_slope_methods:
-        raise ValueError(f"Invalid `sens_slope_method`. Must be one of {valid_sens_slope_methods}.")
+    sens_slope_method = _normalize_sens_slope_method(sens_slope_method)
     valid_tau_methods = ['a', 'b']
     if tau_method not in valid_tau_methods:
         raise ValueError(f"Invalid `tau_method`. Must be one of {valid_tau_methods}.")
@@ -375,7 +377,7 @@ def trend_test(
             if pair_cap is not None:
                 pairs_used = ats_results['pairs_used']
         else:
-            pair_method = 'lwp' if sens_slope_method == 'lwp' else 'unbiased'
+            pair_method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
             if has_censored:
                 slopes = _sens_estimator_censored_adaptive(
                     x_filtered, t_filtered, cen_type_filtered,
@@ -406,7 +408,7 @@ def trend_test(
                 x_filtered, t_filtered, censored_filtered, cen_type_filtered,
                 block_size=block_size_used, n_bootstrap=n_bootstrap, alpha=alpha,
                 random_state=random_state,
-                method=sens_slope_method if has_censored else 'unbiased',
+                method=sens_slope_method if has_censored else 'drop_ambiguous',
                 lt_mult=lt_mult, gt_mult=gt_mult
             )
 

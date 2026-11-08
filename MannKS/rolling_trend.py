@@ -65,7 +65,7 @@ def rolling_trend_test(
             - 'auto': Automatic based on sample size (recommended)
             - 'full': Force exact calculations (may be slow/crash for large n)
             - 'fast': Force fast approximations
-            - 'aggregate': Force aggregation workflow
+            - 'aggregate': As 'fast', with a warning recommending aggregation
         max_pairs : int, optional
             Maximum number of pairs to sample in fast mode.
         random_state : int, optional

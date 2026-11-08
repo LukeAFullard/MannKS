@@ -10,12 +10,12 @@ import warnings
 from ._datetime import _get_season_func, _is_datetime_like, _get_agg_func
 from ._helpers import _prepare_data, _aggregate_by_group
 
-from typing import Union
+from typing import Union, Optional
 
 def check_seasonality(
     x: np.ndarray,
     t: np.ndarray,
-    period: int = 12,
+    period: Optional[int] = None,
     alpha: float = 0.05,
     season_type: str = 'month',
     agg_method: str = 'none',
@@ -39,8 +39,11 @@ def check_seasonality(
             DataFrame from `prepare_censored_data`.
         t (np.ndarray): A vector of corresponding timestamps, which can be
             numeric or datetime-like.
-        period (int, optional): The number of seasons in a full cycle.
-            Defaults to 12.
+        period (int, optional): The number of seasons in a full cycle.  For
+            datetime ``t`` it is inferred from ``season_type`` (e.g. 12 for
+            'month', 4 for 'quarter').  For numeric ``t`` it defaults to 12,
+            and ``t`` must be expressed in season units (season =
+            floor(t - min(t)) % period).
         alpha (float, optional): The significance level for the test.
             Defaults to 0.05.
         season_type (str, optional): The type of seasonality for datetime inputs
@@ -52,8 +55,8 @@ def check_seasonality(
                 - 'median': Aggregates to the median value within each period.
                 - 'robust_median': A more robust median for censored data.
                 - 'middle': Selects the observation closest to the time mean.
-                - 'middle_lwp': Selects the observation closest to the theoretical
-                  midpoint of the time period.
+                - 'lwp' / 'middle_lwp': Selects the observation closest to the
+                  mid-point of the `agg_period` increment (LWP-TRENDS rule).
         agg_period (str, optional): The time period for aggregation (e.g.,
             'year', 'month', 'week'). Required if `agg_method` is not 'none'.
         hicensor (Union[bool, int, float], optional): The high-censor threshold.
@@ -93,20 +96,36 @@ def check_seasonality(
 
     data, is_datetime = _prepare_data(x, t, hicensor)
 
+    valid_agg = ['none', 'median', 'robust_median', 'middle', 'middle_lwp', 'lwp']
+    if agg_method not in valid_agg:
+        raise ValueError(f"Invalid `agg_method`. Must be one of {valid_agg}.")
+
+    if period is None:
+        if is_datetime:
+            from ._datetime import _infer_period
+            period = _infer_period(season_type)
+        else:
+            period = 12
+
     if agg_method != 'none':
+        method = 'middle_lwp' if agg_method == 'lwp' else agg_method
+        freq = None
         if is_datetime:
             if agg_period is None:
                 raise ValueError("`agg_period` must be specified for datetime aggregation.")
             agg_func = _get_agg_func(agg_period)
             agg_col = agg_func(pd.to_datetime(data['t_original']))
+            freq = {'year': 'Y', 'quarter': 'Q', 'month': 'M', 'week': 'W', 'day': 'D'}.get(agg_period.lower())
         else:
             if agg_period is None:
                  raise ValueError("`agg_period` must be specified for numeric aggregation.")
             agg_col = np.floor(data['t'] / agg_period)
 
-        data = data.groupby(agg_col).apply(
-            lambda grp: _aggregate_by_group(grp, agg_method, is_datetime)
-        ).reset_index(drop=True)
+        data = data.assign(_agg_key=np.asarray(agg_col)).sort_values('t', kind='stable')
+        data = pd.concat(
+            [_aggregate_by_group(grp.drop(columns='_agg_key'), method, is_datetime, period=freq)
+             for _, grp in data.groupby('_agg_key', sort=True)],
+            ignore_index=True)
 
     if len(data) < 2:
         return res(np.nan, np.nan, False, [], [])

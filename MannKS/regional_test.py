@@ -26,7 +26,7 @@ def regional_test(
 
     Args:
         trend_results (pd.DataFrame): A DataFrame containing the results from
-            running `original_test` or `seasonal_test` on multiple sites.
+            running `trend_test` or `seasonal_trend_test` on multiple sites.
             Must contain columns for the site identifier, the Mann-Kendall
             score `s`, and the confidence `C`.
         time_series_data (pd.DataFrame): A DataFrame containing the original
@@ -54,8 +54,14 @@ def regional_test(
             - VarTAU (float): The uncorrected variance of TAU.
             - CorrectedVarTAU (float): The variance of TAU corrected for
                                        inter-site correlation.
-            - DT (str): The aggregate trend direction ('Increasing' or 'Decreasing').
-            - CT (float): The confidence in the aggregate trend direction.
+            - DT (str): The aggregate trend direction ('Increasing' or
+                        'Decreasing'; 'Increasing' when the sites are evenly
+                        split, as in LWP-TRENDS).
+            - CT (float): The confidence in the aggregate trend direction
+                          (0.5 to 1).
+            - warnings (list of str): Warnings raised during the calculation
+                          (e.g. site pairs whose correlation could not be
+                          computed and were omitted).
 
     Statistical Assumptions:
     ----------------------

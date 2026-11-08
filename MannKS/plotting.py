@@ -171,7 +171,7 @@ def plot_trend(data, results, save_path, alpha, seasonal_coloring=False):
     Input:
         data (pd.DataFrame): The DataFrame containing the data, including 'value',
                              'censored', 't', and optionally 't_original'.
-        results (namedtuple): The results from original_test or seasonal_test.
+        results (namedtuple): The results from trend_test or seasonal_trend_test.
         save_path (str): The file path to save the plot.
         alpha (float): The significance level for the confidence intervals.
         seasonal_coloring (bool): If True and 'season' is in data, points are

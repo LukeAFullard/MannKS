@@ -379,6 +379,27 @@ def _mk_probability(p, s):
     Cd = C if s <= 0 else p_scalar / 2
     return float(C), float(Cd)
 
+SENS_SLOPE_METHODS = ('ats', 'lwp', 'drop_ambiguous')
+_DEPRECATED_SENS_SLOPE_METHODS = ('unbiased', 'nan')
+
+
+def _normalize_sens_slope_method(method, stacklevel=3):
+    """
+    Map deprecated names of the drop-ambiguous-pairs estimator ('unbiased',
+    'nan') to 'drop_ambiguous' with a FutureWarning; validate the name.
+    """
+    if method in _DEPRECATED_SENS_SLOPE_METHODS:
+        warnings.warn(
+            f"sens_slope_method='{method}' is deprecated and will be removed in a future "
+            "release; use 'drop_ambiguous' (same estimator). Note that it is biased away "
+            "from zero for censored data; the default 'ats' is recommended.",
+            FutureWarning, stacklevel=stacklevel)
+        return 'drop_ambiguous'
+    if method not in SENS_SLOPE_METHODS:
+        raise ValueError(f"Invalid `sens_slope_method`. Must be one of {list(SENS_SLOPE_METHODS)}.")
+    return method
+
+
 def _sens_estimator_unequal_spacing(x, t):
     """
     Computes Sen's slope for unequally spaced data using a vectorized approach.
@@ -465,7 +486,7 @@ def _sens_estimator_adaptive(x, t, max_pairs=None, random_state=None):
     return fast_sens_slope(x, t, max_pairs=max_pairs, random_state=random_state)
 
 
-def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_mult=DEFAULT_GT_MULTIPLIER, method='unbiased'):
+def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_mult=DEFAULT_GT_MULTIPLIER, method='drop_ambiguous'):
     """
     Computes Sen's slope for censored, unequally spaced data.
 
@@ -483,12 +504,11 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
         method (str): The method to use for handling ambiguous slopes.
             - 'lwp': Sets ambiguous slopes to 0, mimicking the
               LWP-TRENDS R script.
-            - 'unbiased' (alias 'nan'): Drops ambiguous slopes (sets them
-              to np.nan).  Despite the historical name this is *not*
-              unbiased: with a trend, the dropped pairs are mostly those of
-              the opposite sign, so the median is pushed away from zero
-              (roughly +15% at 20% censoring and +70% at 50% censoring in
-              simulations).
+            - 'drop_ambiguous' (formerly 'unbiased'/'nan'): Drops ambiguous
+              slopes (sets them to np.nan).  With a trend, the dropped pairs
+              are mostly those of the opposite sign, so the median is pushed
+              away from zero (roughly +17% at 20% censoring and +70% at 50%
+              censoring in simulations).
 
     Returns:
         np.array: An array of calculated slopes.
@@ -510,8 +530,8 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
         is ambiguous. The `method` parameter determines how these are handled:
         -   `'lwp'`: Sets ambiguous slopes to 0 (LWP-TRENDS behaviour).  This
             biases the median towards zero as censoring increases.
-        -   `'unbiased'` (or `'nan'`): Sets ambiguous slopes to NaN, removing
-            them from the median.  This biases the median *away* from zero.
+        -   `'drop_ambiguous'`: Sets ambiguous slopes to NaN, removing them
+            from the median.  This biases the median *away* from zero.
         Both are heuristics; the Akritas-Theil-Sen estimator (`_ats.py`) is
         the recommended estimator for censored data.
     """
@@ -541,7 +561,7 @@ def _censor_codes(cen_type):
 
 
 def _censored_pair_slopes(x, t, code, i, j, lt_mult=DEFAULT_LT_MULTIPLIER,
-                          gt_mult=DEFAULT_GT_MULTIPLIER, method='unbiased'):
+                          gt_mult=DEFAULT_GT_MULTIPLIER, method='drop_ambiguous'):
     """
     Censored pairwise slopes for index pairs (i, j), following LWP-TRENDS
     ``GetInterObservationSlopes``.  Each pair is oriented by time (later minus
@@ -577,7 +597,7 @@ def _censored_pair_slopes(x, t, code, i, j, lt_mult=DEFAULT_LT_MULTIPLIER,
 
 def _sens_estimator_censored_adaptive(x, t, cen_type,
                                       lt_mult=DEFAULT_LT_MULTIPLIER, gt_mult=DEFAULT_GT_MULTIPLIER,
-                                      method='unbiased',
+                                      method='drop_ambiguous',
                                       max_pairs=None,
                                       random_state=None):
     """Censored Sen's slopes, exact (max_pairs=None) or sampled."""

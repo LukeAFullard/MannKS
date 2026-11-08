@@ -161,7 +161,7 @@ def fast_sens_slope_censored(x: np.ndarray,
                              max_pairs: int = DEFAULT_MAX_PAIRS,
                              lt_mult: float = 0.5,
                              gt_mult: float = 1.1,
-                             method: str = 'unbiased',
+                             method: str = 'drop_ambiguous',
                              random_state: Optional[int] = None) -> np.ndarray:
     """
     Censored Sen's slopes for a random sample of pairs.

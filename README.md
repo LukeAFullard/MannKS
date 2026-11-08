@@ -34,7 +34,7 @@ Use this package when your data has:
 
 **NEW IN V0.6.0**: **Correctness release.** A pre-release audit against the LWP-TRENDS R code (run live) and independent references fixed several statistical defects, and the defaults changed. Results can differ from v0.5.x:
 *   **Var(S) now includes the tie and censoring corrections** (Kendall 1975; NADA/LWP-TRENDS). Previously ties were never detected, which inflated Var(S) and p-values for any tied or censored data.
-*   **The censored slope defaults to the Akritas–Theil–Sen estimator** (`sens_slope_method='ats'`, as in NADA::cenken), with a confidence interval from inverting the censored Kendall test. The former default (`'unbiased'`, which drops ambiguous pairs) is biased away from zero (about +17% at 20% censoring and +70% at 50%); it remains available.
+*   **The censored slope defaults to the Akritas–Theil–Sen estimator** (`sens_slope_method='ats'`, as in NADA::cenken), with a confidence interval from inverting the censored Kendall test. The former default, which drops ambiguous pairs, is biased away from zero (about +17% at 20% censoring and +70% at 50%). It remains available as `'drop_ambiguous'`; its old names `'unbiased'` and `'nan'` still work but are deprecated.
 *   **Results no longer depend on input row order**: data are sorted by time, and observations with equal times score 0 in S.
 *   **`large_dataset_mode='full'` is now exact.** Pair sampling, used only in fast mode, is reproducible by default.
 *   **Smaller fixes:** LWP-TRENDS mid-observation selection (`agg_method='lwp'`), data-sufficiency notes aligned with LWP-TRENDS, Yue–Wang and `'auto'` autocorrelation estimated on detrended data, a seeded circular block bootstrap with a `(b+1)/(B+1)` p-value, `regional_test` aligned to time increments (and never reporting CT = 1 from a missing correlation), `sen_probability` matching LWP-TRENDS, right-closed classification thresholds, and a direct test of slope change in `compare_periods`.
@@ -198,9 +198,9 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 ## ⚠️ Important Limitations
 
 ### Sample Size
-- **Recommended maximum: n = 50,000** (using default Fast Mode)
-- **Hard limit: n = 46,340** (if using `large_dataset_mode='full'`)
-- For larger datasets, use `large_dataset_mode='aggregate'` or `regional_test()`
+- **Fast mode** (default above n = 5,000) samples pairs for the slope and handles 50,000+ observations in about a second; the test itself stays exact.
+- **Exact slopes** (`large_dataset_mode='full'`) need all n(n-1)/2 pairs: practical up to about n = 10,000 on a typical machine (memory), hard limit n = 46,340.
+- For very large or high-frequency data, aggregate first with `agg_method`/`agg_period` (e.g. daily or monthly medians); `large_dataset_mode='aggregate'` only warns, it does not aggregate.
 
 ### Statistical Assumptions
 - **Independence**: Data points must be serially independent

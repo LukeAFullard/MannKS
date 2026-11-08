@@ -38,14 +38,14 @@ print(df.sort_values("rel_diff").tail(4).round(5).to_string(index=False))
 print("\nCensored slope bias (true slope 0.05, n=40, normal noise sd=1, single DL), 400 reps")
 out = []
 for dl in (1.0, 2.0, 3.0):
-    est = {m: [] for m in ("unbiased", "lwp", "ats", "oracle_uncensored")}
+    est = {m: [] for m in ("drop_ambiguous", "lwp", "ats", "oracle_uncensored")}
     pc = []
     for r in range(400):
         g = np.random.default_rng(70_000 + r)
         n = 40; t = np.arange(n, dtype=float); v = 2 + 0.05 * t + g.normal(0, 1, n)
         pc.append((v < dl).mean())
         X = mk.prepare_censored_data(["<%g" % dl if a < dl else a for a in v])
-        for m in ("unbiased", "lwp"):
+        for m in ("drop_ambiguous", "lwp"):
             est[m].append(mk.trend_test(X, t, sens_slope_method=m).slope)
         cen = X.censored.to_numpy()
         est["ats"].append(ats_slope(t, X.value.to_numpy(), cen, cen_type=X.cen_type.to_numpy(),

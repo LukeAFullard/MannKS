@@ -153,7 +153,7 @@ def segmented_trend_test(
         max_pairs: Max pairs for fast slope estimation.
         **kwargs: Additional arguments for trend estimation (lt_mult, gt_mult,
             sens_slope_method: 'ats' (default for censored segments), 'lwp'
-            or 'unbiased').
+            or 'drop_ambiguous').
 
     Note:
         Segment slopes and confidence intervals are conditional on the
@@ -169,6 +169,9 @@ def segmented_trend_test(
         and unscaled slope (units per second). If you wish to reconstruct the line using
         the scaled slope, you must adjust the time variable accordingly.
     """
+    from ._stats import _normalize_sens_slope_method
+    kwargs['sens_slope_method'] = _normalize_sens_slope_method(kwargs.get('sens_slope_method', 'ats'))
+
     # Capture warnings
     captured_warnings = []
 
@@ -218,7 +221,7 @@ def segmented_trend_test(
         # Extract kwargs relevant for estimation
         lt_mult = kwargs.get('lt_mult', 0.5)
         gt_mult = kwargs.get('gt_mult', 1.1)
-        sens_slope_method = kwargs.get('sens_slope_method', 'ats')
+        sens_slope_method = kwargs['sens_slope_method']
 
         hybrid_model.fit(
             t_numeric, x_val, censored, cen_type, lt_mult, gt_mult,

@@ -165,7 +165,7 @@ The code above generates this plot, illustrating what "bad" data often looks lik
 *   **Action:** Check your data. Is the instrument stuck? Is this a detection limit artifact (e.g., many "0"s that should be censored)? If it's real data (e.g., a regulated level that rarely changes), be cautious about interpreting "No Trend."
 
 ### 2. "WARNING: Sen slope influenced by censored values"
-*   **Trigger:** With the pairwise slope estimators (`sens_slope_method='lwp'` or `'unbiased'`), the Sen's Slope is the *median* of all possible slopes between pairs of points. If the median pair involves a censored value (e.g., `<1` vs `5`), the slope calculation requires substituting a number for `<1`. (The default Akritas-Theil-Sen estimator does not substitute values, so it does not produce this note.)
+*   **Trigger:** With the pairwise slope estimators (`sens_slope_method='lwp'` or `'drop_ambiguous'`), the Sen's Slope is the *median* of all possible slopes between pairs of points. If the median pair involves a censored value (e.g., `<1` vs `5`), the slope calculation requires substituting a number for `<1`. (The default Akritas-Theil-Sen estimator does not substitute values, so it does not produce this note.)
 *   **Implication:** The package substitutes censored values using a multiplier (default `0.5 * limit`). This means your calculated slope magnitude (e.g., "0.3 units/year") is directly dependent on that arbitrary multiplier.
 *   **Action:** The *direction* (increasing/decreasing) is usually robust, but treat the exact *magnitude* of the slope with caution. Try changing the `lt_mult` parameter (see Example 12) to see if the slope changes significantly.
 

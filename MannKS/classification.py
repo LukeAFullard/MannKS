@@ -17,8 +17,8 @@ def classify_trend(result: NamedTuple, category_map: Optional[Dict[float, str]] 
     """
     Classifies a trend result into a descriptive category.
 
-    This function takes the namedtuple result from `original_test` or
-    `seasonal_test` and classifies the trend based on its statistical
+    This function takes the namedtuple result from `trend_test` or
+    `seasonal_trend_test` and classifies the trend based on its statistical
     significance and confidence. It uses a default, IPCC-style mapping for
     confidence levels, but a custom mapping can be provided.
 

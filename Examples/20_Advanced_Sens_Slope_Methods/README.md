@@ -13,7 +13,7 @@ Standard methods often just substitute a value (like 0.5), but this can be biase
 
 The package offers three methods for calculating the slope (`sens_slope_method`):
 1.  **`'ats'` (Akritas-Theil-Sen, Default)**: The slope at which Kendall's S between time and the residuals is zero, treating censored values as intervals (as `NADA::cenken`). No values are substituted.
-2.  **`'unbiased'` / `'nan'`**: Pairwise slopes with substituted censored values; ambiguous pairs (e.g. Left-Censored vs. Left-Censored) are dropped (set to NaN). Despite its name this pushes the slope *away* from zero, because the dropped pairs mostly oppose the trend.
+2.  **`'drop_ambiguous'`** (formerly `'unbiased'`/`'nan'`): Pairwise slopes with substituted censored values; ambiguous pairs (e.g. Left-Censored vs. Left-Censored) are dropped (set to NaN). This pushes the slope *away* from zero, because the dropped pairs mostly oppose the trend.
 3.  **`'lwp'` (LWP-TRENDS)**: Ambiguous slopes are forced to **0**. This "dilutes" the trend, making the slope smaller (closer to zero). This mimics the specific behavior of the LWP-TRENDS R script.
 
 ## The "How": Comparison
@@ -42,7 +42,7 @@ print(df[['value', 'censored', 'cen_type']])
 
 # Method A: Robust (Standard) - 'nan'
 # Ambiguous slopes (e.g. <1 vs 10) are set to NaN and ignored.
-res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='unbiased')
+res_robust = mk.trend_test(df, t, mk_test_method='robust', sens_slope_method='drop_ambiguous')
 
 # Method B: LWP - 'lwp'
 # Ambiguous slopes are set to 0.
@@ -135,7 +135,7 @@ Plot saved to 'slope_comparison.png'
 ## Interpreting the Results
 
 ### 1. The Numbers
-*   **Drop-ambiguous (`'unbiased'`)**: Calculates the median of only the "sure" slopes. It tends to give the steepest trend because the pairs it ignores are mostly those that oppose the trend.
+*   **Drop-ambiguous (`'drop_ambiguous'`)**: Calculates the median of only the "sure" slopes. It tends to give the steepest trend because the pairs it ignores are mostly those that oppose the trend.
 *   **LWP (`'lwp'`)**: Returns a smaller slope. Why? Because it took all those "I'm not sure" pairs and called them "0 slope". If you have many censored values, this method will strongly bias your trend magnitude towards zero.
 *   **ATS (`'ats'`)**: The standard estimator for censored trends (Helsel 2012). It uses only the information the censored values actually carry (that they lie below their limit) instead of substituting a single number.
 
@@ -151,4 +151,4 @@ In this dataset the LWP method yields a lower slope because it treats the ambigu
 ## Recommendation
 *   Use **`'ats'`** (default) for censored data.
 *   Use **`'lwp'`** only if you need to match the LWP-TRENDS R script.
-*   `'unbiased'` is kept for backward compatibility; it is not recommended.
+*   `'drop_ambiguous'` is kept for comparison and backward compatibility; it is not recommended.

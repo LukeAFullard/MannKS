@@ -9,7 +9,8 @@ import warnings
 from scipy.stats import norm
 from ._stats import (_z_score, _p_value, _confidence_intervals, _mk_probability,
                      _mk_score_and_var_censored, _sen_probability,
-                     _sens_estimator_adaptive, _sens_estimator_censored_adaptive)
+                     _sens_estimator_adaptive, _sens_estimator_censored_adaptive,
+                     _normalize_sens_slope_method)
 from ._ats import seasonal_ats_slope
 from ._datetime import (_get_season_func, _get_cycle_identifier, _infer_period)
 from ._helpers import (_prepare_data, _aggregate_by_group, _value_for_time_increment)
@@ -57,7 +58,7 @@ def _seasonal_slope(data, seasons, sens_slope_method, lt_mult, gt_mult,
         return seasonal_ats_slope(t, x, c, seasons, cen_type=ct, var_s=0.0,
                                   max_pairs=pair_cap, random_state=random_state,
                                   compute_intercept=False)['beta']
-    method = 'lwp' if sens_slope_method == 'lwp' else 'unbiased'
+    method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
     out = []
     for s in np.unique(seasons):
         m = seasons == s
@@ -123,12 +124,15 @@ def seasonal_trend_test(
     season_type : str
         For datetime ``t``: 'month', 'quarter', 'day_of_week', 'week_of_year',
         'biweekly', 'day_of_year', 'hour', 'minute', 'second' or 'year'.
+    agg_period : str, optional
+        Not used: aggregation always groups by season and cycle (as defined
+        by ``season_type``/``period``).  Kept for backward compatibility.
     agg_method : str
         One value per season and cycle: 'lwp' (observation closest to the
         mid-point of the increment, LWP-TRENDS ``UseMidObs=TRUE``), 'median'
         / 'lwp_median', 'robust_median' / 'lwp_robust_median', 'middle',
         'middle_lwp', or 'none'.
-    sens_slope_method : {'ats', 'lwp', 'unbiased', 'nan'}, default 'ats'
+    sens_slope_method : {'ats', 'lwp', 'drop_ambiguous'}, default 'ats'
         Slope estimator for censored data; see ``trend_test``.
     autocorr_method : {'none', 'block_bootstrap'}
         'block_bootstrap' resamples whole cycles (e.g. years) in circular
@@ -157,9 +161,7 @@ def seasonal_trend_test(
     if agg_method not in valid_agg_methods:
         raise ValueError(f"Invalid `agg_method`. Must be one of {valid_agg_methods}.")
     agg_method = agg_aliases.get(agg_method, agg_method)
-    valid_sens_slope_methods = ['ats', 'unbiased', 'nan', 'lwp']
-    if sens_slope_method not in valid_sens_slope_methods:
-        raise ValueError(f"Invalid `sens_slope_method`. Must be one of {valid_sens_slope_methods}.")
+    sens_slope_method = _normalize_sens_slope_method(sens_slope_method)
     if tau_method not in ['a', 'b']:
         raise ValueError("Invalid `tau_method`. Must be one of ['a', 'b'].")
     if mk_test_method not in ['robust', 'lwp']:
@@ -401,7 +403,7 @@ def seasonal_trend_test(
             if pair_cap is not None:
                 pairs_used = overall_ats['pairs_used']
         else:
-            pair_method = 'lwp' if sens_slope_method == 'lwp' else 'unbiased'
+            pair_method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
             all_slopes = []
             for i in season_range:
                 sd = data_filtered[data_filtered['season'] == i]

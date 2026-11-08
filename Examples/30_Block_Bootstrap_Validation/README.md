@@ -45,8 +45,8 @@ Trend: increasing
 
 --- Scenario 4: ATS Slope + Bootstrap P-value ---
 Slope (ATS): 0.0124
-CI (ATS): [-0.0488, 0.0544]
-P-value (Bootstrap): 0.4776
+CI (ATS): [-0.0387, 0.0504]
+P-value (Bootstrap): 0.4826
 ```
 
 ## Conclusion

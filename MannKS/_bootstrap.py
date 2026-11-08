@@ -79,7 +79,7 @@ def _slope(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1):
             from ._ats import ats_slope
             return ats_slope(t, x, censored, cen_type=cen_type, var_s=0.0,
                              compute_intercept=False)['beta']
-        m = 'unbiased' if method == 'nan' else method
+        m = 'drop_ambiguous' if method in ('unbiased', 'nan') else method
         slopes = _sens_estimator_censored(x, t, np.asarray(cen_type), lt_mult, gt_mult, m)
     else:
         slopes = _sens_estimator_unequal_spacing(x, t)
@@ -168,7 +168,7 @@ def block_bootstrap_confidence_intervals(x, t, censored, cen_type,
     by the slope estimators.
 
     Args:
-        method: slope estimator ('ats', 'lwp', 'unbiased'/'nan').
+        method: slope estimator ('ats', 'lwp', 'drop_ambiguous').
 
     Returns:
         slope, lower_ci, upper_ci, boot_slopes

@@ -37,11 +37,14 @@
 - Small approximation error is acceptable
 
 ### 3. Aggregate Mode (Recommended for Very Large Data)
-**When:** n > 50,000
+**When:** n > 50,000 (automatic) or `large_dataset_mode='aggregate'`
 
 **What it does:**
-- First aggregate to coarser time resolution
-- Then apply full or fast mode on aggregated data
+- The calculations are the same as in fast mode; MannKS issues a warning
+  recommending temporal aggregation.
+- Aggregation is **not** applied automatically: aggregate yourself with
+  `agg_method` and `agg_period` (see below), which reduces the data before
+  the full or fast calculations are applied.
 
 **Use when:**
 - Dataset is very large
@@ -54,11 +57,11 @@
 
 Sen's slope is the **median** of all pairwise slopes. By the Central Limit Theorem:
 
-- Median estimator has SE ≈ IQR / √K
-- K = number of samples (e.g., 100,000 pairs)
-- For K = 100,000: SE ≈ 0.5% of slope magnitude
-
-**Bias:** Negligible (< 0.1%) with uniform random sampling
+- The sample median of K uniformly sampled pairwise slopes estimates the median of
+  all pairwise slopes, with standard error of order IQR / √K
+- K = number of sampled pairs (100,000 by default)
+- In simulation (n = 6,000) the relative standard deviation was about 0.3%, with
+  no detectable bias
 
 ### Seasonal Data Special Handling
 
@@ -72,12 +75,19 @@ Seasonal tests require **stratified sampling**:
 
 ### Choosing max_pairs
 
-| max_pairs | Speed | Accuracy | Use Case |
+The sampling error of the slope shrinks like 1/√max_pairs. Indicative relative
+standard deviations (measured at 100,000 pairs for n = 6,000 and scaled; the exact
+value depends on the spread of the pairwise slopes):
+
+| max_pairs | Speed | Typical relative s.d. | Use Case |
 |-----------|-------|----------|----------|
-| 50,000 | Very Fast | ±1% | Exploratory analysis |
-| 100,000 | Fast | ±0.5% | **Default, balanced** |
-| 500,000 | Medium | ±0.2% | High accuracy needs |
-| 1,000,000+ | Slow | ±0.1% | Publication-quality |
+| 50,000 | Very Fast | ~0.4% | Exploratory analysis |
+| 100,000 | Fast | ~0.3% | **Default, balanced** |
+| 500,000 | Medium | ~0.1% | High accuracy needs |
+| all pairs (`large_dataset_mode='full'`) | Slowest | exact | Publication-quality, if memory allows |
+
+`result.approximation_error` reports an approximate 95% half-width for the sampled
+slope (1.96 × IQR(slopes) / √pairs).
 
 ### Aggregation Strategies
 
@@ -155,9 +165,11 @@ print(f"Difference: {abs(result_full.slope - result_fast.slope):.6f}")
 
 ## Validation
 
-All fast mode results are validated against exact calculations in the test suite:
-- 1000+ test cases across different data patterns
-- Error bounds verified empirically
-- Seasonal stratification tested for balance
-
-See `tests/test_large_dataset.py` for details.
+- The fast O(N log N) Mann-Kendall path is tested to give exactly the same S and
+  Var(S) as the pairwise calculation, including heavy ties and tied times
+  (`tests/test_audit_v050.py`, `tests/test_regressions_v060.py`).
+- `large_dataset_mode='full'` is tested to return the exact Sen's slope.
+- Seasonal pair sampling is tested to weight seasons like the full calculation.
+- The bias and spread of the sampled slope were measured by simulation
+  (`validation/r_parity/monte_carlo.py`): no detectable bias, relative s.d. ≈ 0.26%
+  with 100,000 pairs (n = 6,000).

@@ -98,7 +98,7 @@ def test_ats_score_matches_reference_and_respects_time():
     assert S_of_beta(-0.05, -t, lo, hi) == -S_of_beta(0.05, t, lo, hi)
 
 
-@pytest.mark.parametrize('method', ['ats', 'lwp', 'unbiased'])
+@pytest.mark.parametrize('method', ['ats', 'lwp', 'drop_ambiguous'])
 def test_trend_test_invariant_to_row_order(method):
     X, t, _ = _censored_series(n=30, seed=3)
     perm = np.random.default_rng(0).permutation(len(t))
@@ -348,3 +348,32 @@ def test_compare_periods_reports_slope_difference_test():
     res = mk.compare_periods(x, t, breakpoint=50)
     assert res['p_value_difference'] < 0.05
     assert res['significant_change']
+
+
+@pytest.mark.parametrize('old_name', ['unbiased', 'nan'])
+def test_deprecated_slope_method_names_still_work(old_name):
+    X, t, _ = _censored_series(n=30, seed=3)
+    with pytest.warns(FutureWarning, match="drop_ambiguous"):
+        old = mk.trend_test(X, t, sens_slope_method=old_name)
+    new = mk.trend_test(X, t, sens_slope_method='drop_ambiguous')
+    assert old.slope == new.slope
+    with pytest.raises(ValueError):
+        mk.trend_test(X, t, sens_slope_method='bogus')
+
+
+def test_check_seasonality_infers_period_from_season_type():
+    d = pd.date_range('2000-01-01', periods=120, freq='MS')
+    x = np.sin(np.arange(120) / 12 * 2 * np.pi) + np.random.default_rng(0).normal(0, .3, 120)
+    r = mk.check_seasonality(x, d, season_type='quarter')
+    assert r.p_value < 0.01 and len(r.seasons_tested) == 4
+
+
+def test_check_seasonality_lwp_aggregation_reduces_to_one_value_per_period():
+    d = pd.date_range('2000-01-01', periods=900, freq='D')
+    x = np.random.default_rng(1).normal(size=900)
+    raw = mk.check_seasonality(x, d)
+    agg = mk.check_seasonality(x, d, agg_method='lwp', agg_period='month')
+    assert agg.h_statistic != raw.h_statistic
+    assert agg.h_statistic == mk.check_seasonality(x, d, agg_method='middle_lwp', agg_period='month').h_statistic
+    with pytest.raises(ValueError):
+        mk.check_seasonality(x, d, agg_method='bogus', agg_period='month')

@@ -113,7 +113,7 @@ record("CI coverage with heavy ties (x rounded to integers), n=40, true=0.05", c
        binom_ci(int(cover), R), R)
 
 # ---------------- 6. Censored slope estimators: bias ----------------
-for method in ("ats", "unbiased", "lwp"):
+for method in ("ats", "drop_ambiguous", "lwp"):
     reps = R // 2
     est = []
     for r in range(reps):

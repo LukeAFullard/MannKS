@@ -28,8 +28,8 @@ values[120:] += np.linspace(0, 10, 120)
 results = rolling_trend_test(
     x=values,
     t=dates,
-    window='10Y',        # 10-year moving window
-    step='1Y',           # Advance 1 year at a time
+    window='10YE',       # 10-year moving window (pandas offset; '3650D' gives a fixed length)
+    step='1YE',          # Advance 1 year at a time
     min_size=20,         # Require at least 20 points
     slope_scaling='year' # Scale slope to units/year
 )
@@ -77,14 +77,21 @@ comparison = compare_periods(
 
 print(f"Slope Before: {comparison['before'].slope:.3f}")
 print(f"Slope After:  {comparison['after'].slope:.3f}")
+print(f"p-value for a change in slope: {comparison['p_value_difference']:.3f}")
 print(f"Significant Change? {comparison['significant_change']}")
 ```
+
+`significant_change` is based on an approximate z-test of the difference in slopes, with
+each slope's standard error derived from its confidence interval. It assumes the two
+periods are independent. `ci_overlap` is also reported, but non-overlap of the two
+intervals is a much stricter criterion than the chosen `alpha`.
 
 ## Best Practices
 
 1.  **Window Size:** Choose a window large enough to be statistically meaningful (usually $\ge$ 10 points) but small enough to capture the changes you are interested in. For annual environmental data, 10-15 year windows are common.
 2.  **Continuous Confidence:** For rolling plots, tracking the continuous confidence (`C`) or the classification is often more informative than looking for binary p-value significance, which can jump erratically near the threshold.
 3.  **Data Gaps:** The function handles missing data by checking `min_size`. Windows with insufficient data are skipped.
+4.  **Dependence between windows:** Overlapping windows share data, so neighbouring results are strongly correlated and should be read as a descriptive time series, not as independent tests.
 
 ## Edge Handling
 

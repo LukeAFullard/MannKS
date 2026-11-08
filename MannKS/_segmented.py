@@ -181,7 +181,7 @@ class HybridSegmentedTrend:
         """
         Fit breakpoints (OLS, piecewise-regression) and then estimate each
         segment's slope robustly (Sen's slope; Akritas-Theil-Sen for censored
-        segments unless ``sens_slope_method`` is 'lwp'/'unbiased').
+        segments unless ``sens_slope_method`` is 'lwp'/'drop_ambiguous').
 
         Segment confidence intervals are conditional on the estimated
         breakpoints: they do not include breakpoint-location uncertainty.
@@ -427,7 +427,7 @@ class HybridSegmentedTrend:
                 lower_ci, upper_ci = ats['ci_lower'], ats['ci_upper']
             else:
                 if cen_seg.any():
-                    method = 'lwp' if sens_slope_method == 'lwp' else 'unbiased'
+                    method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
                     slopes = _sens_estimator_censored_adaptive(
                         x_seg, t_seg, cen_type_seg, lt_mult, gt_mult, method=method,
                         max_pairs=max_pairs, random_state=self.random_state)

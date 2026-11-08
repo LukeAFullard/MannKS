@@ -40,13 +40,18 @@ These parameters tell the function which columns in your DataFrames correspond t
 -   **Description:** The name of the column in `time_series_data` containing the timestamps.
 -   **Usefulness:** Used to align data across sites to calculate pairwise correlations.
 
+#### `agg_period`
+-   **Type:** `str` or `None`, **Default:** `'month'`
+-   **Description:** For datetime `time_col`, each site's series is first reduced to one value per time increment (`'year'`, `'quarter'`, `'month'`, `'week'` or `'day'`; the observation closest to the increment mid-point), and the sites are aligned on these increments before the correlations are computed, as LWP-TRENDS `getTAU` does.
+-   **Usefulness:** Sites are rarely sampled at exactly the same times. Aligning by increment lets sites sampled on different days of the same month be correlated. Use the time increment of your site trend analyses (e.g. `'year'` for annual data). `None` correlates on exact timestamps. Ignored for numeric `time_col`.
+
 #### `s_col`
 -   **Type:** `str`, **Default:** `'s'`
 -   **Description:** The name of the column in `trend_results` containing the Mann-Kendall S-statistic.
 
 #### `c_col`
 -   **Type:** `str`, **Default:** `'C'`
--   **Description:** The name of the column in `trend_results` containing the trend confidence value (0 to 1).
+-   **Description:** The name of the column in `trend_results` containing the trend confidence value `C` (0.5 to 1).
 
 ---
 
@@ -57,6 +62,7 @@ The function returns a `namedtuple` with the following fields:
 -   **`M`**: The total number of sites included in the analysis.
 -   **`TAU`**: The aggregate trend strength. It represents the consistency of the trend across the region.
 -   **`VarTAU`**: The variance of TAU, assuming sites are independent.
--   **`CorrectedVarTAU`**: The variance of TAU, **corrected for inter-site correlation**. This is the value used for the final significance test.
--   **`DT`**: The aggregate trend direction ('Increasing', 'Decreasing', or 'No Clear Direction').
--   **`CT`**: The confidence in the aggregate trend direction (0 to 1). High confidence (e.g., >0.95) indicates a significant regional trend.
+-   **`CorrectedVarTAU`**: The variance of TAU, **corrected for inter-site correlation**. This is the value used for the final confidence. Site pairs whose correlation cannot be computed (too few common time increments) are omitted from the correction, with a warning, as in LWP-TRENDS.
+-   **`DT`**: The aggregate trend direction ('Increasing' or 'Decreasing'). When exactly half the sites go each way, 'Increasing' is reported with TAU = 0.5 and CT = 0.5, as in LWP-TRENDS.
+-   **`CT`**: The confidence in the aggregate trend direction (0.5 to 1). High confidence (e.g., >0.95) indicates a consistent regional trend.
+-   **`warnings`**: Warnings raised during the calculation.
