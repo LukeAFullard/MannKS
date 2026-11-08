@@ -39,7 +39,7 @@ Use this package when your data has:
 *   **`large_dataset_mode='full'` is now exact.** Pair sampling, used only in fast mode, is reproducible by default.
 *   **Smaller fixes:** LWP-TRENDS mid-observation selection (`agg_method='lwp'`), data-sufficiency notes aligned with LWP-TRENDS, Yue–Wang and `'auto'` autocorrelation estimated on detrended data, a seeded circular block bootstrap with a `(b+1)/(B+1)` p-value, `regional_test` aligned to time increments (and never reporting CT = 1 from a missing correlation), `sen_probability` matching LWP-TRENDS, right-closed classification thresholds, and a direct test of slope change in `compare_periods`.
 
-See [validation/r_parity](./validation/r_parity) for the parity suite and the settings that reproduce LWP-TRENDS exactly.
+See [validation/r_parity](./validation/r_parity) for the parity suite and the settings that reproduce LWP-TRENDS exactly. The full list of changes is in the [changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md).
 
 **NEW IN V0.5.0**: **Large Dataset Support**. MannKS now automatically handles datasets with 10,000+ observations (up to 50,000+) by switching to optimized stochastic algorithms ("Fast Mode") for Sen's slope and using stratified sampling for seasonal tests. This reduces computation time from minutes to seconds while preserving statistical validity. See [Example 35](./Examples/35_Large_Data_Trend) and the [Large Dataset Guide](./Examples/Detailed_Guides/large_dataset_guide.md).
 
