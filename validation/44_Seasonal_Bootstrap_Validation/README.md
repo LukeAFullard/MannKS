@@ -13,8 +13,8 @@ The table below shows the rejection rates (Type I Error) for Standard vs. Bootst
 
 | Method                |   Type I Error Rate |
 |:----------------------|--------------------:|
-| Standard Seasonal MK  |                0.32 |
-| Seasonal Bootstrap MK |                0.02 |
+| Standard Seasonal MK  |                0.4  |
+| Seasonal Bootstrap MK |                0.04 |
 
 ## Interpretation
 - **Standard Method**: Likely to have inflated Type I error if the autocorrelation is significant, as it treats years as independent observations of the seasonal cycle.

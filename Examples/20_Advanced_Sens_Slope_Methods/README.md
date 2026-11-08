@@ -12,9 +12,9 @@ When you have censored data (e.g., `<1`), calculating a simple slope becomes tri
 Standard methods often just substitute a value (like 0.5), but this can be biased.
 
 The package offers three methods for calculating the slope (`sens_slope_method`):
-1.  **`'nan'` (Robust/Default)**: If a pair is ambiguous (e.g., Left-Censored vs. Left-Censored), the slope is ignored (set to NaN). This is statistically safe.
-2.  **`'lwp'` (LWP-TRENDS)**: Ambiguous slopes are forced to **0**. This "dilutes" the trend, making the slope smaller (closer to zero). This mimics the specific behavior of the LWP-TRENDS R script.
-3.  **`'ats'` (Akritas-Theil-Sen)**: A generalized, robust estimator specifically designed for censored data (Turnbull estimate of slope).
+1.  **`'ats'` (Akritas-Theil-Sen, Default)**: The slope at which Kendall's S between time and the residuals is zero, treating censored values as intervals (as `NADA::cenken`). No values are substituted.
+2.  **`'unbiased'` / `'nan'`**: Pairwise slopes with substituted censored values; ambiguous pairs (e.g. Left-Censored vs. Left-Censored) are dropped (set to NaN). Despite its name this pushes the slope *away* from zero, because the dropped pairs mostly oppose the trend.
+3.  **`'lwp'` (LWP-TRENDS)**: Ambiguous slopes are forced to **0**. This "dilutes" the trend, making the slope smaller (closer to zero). This mimics the specific behavior of the LWP-TRENDS R script.
 
 ## The "How": Comparison
 
@@ -92,7 +92,7 @@ def plot_slope(t_vals, m, color, label, tm, ym):
     y_vals = m * (t_vals - tm) + ym
     plt.plot(t_vals, y_vals, color=color, linestyle='--', label=f'Slope={m:.2f} ({label})', linewidth=2)
 
-plot_slope(t, res_robust.slope, 'tab:green', 'Robust', t_med, y_med)
+plot_slope(t, res_robust.slope, 'tab:green', 'Drop-ambiguous', t_med, y_med)
 plot_slope(t, res_lwp.slope, 'tab:red', 'LWP', t_med, y_med)
 plot_slope(t, res_ats.slope, 'tab:blue', 'ATS', t_med, y_med)
 
@@ -126,7 +126,7 @@ Slope: 1.0000
 
 --- 3. ATS Method ---
 Trend: increasing
-Slope: 1.1146
+Slope: 1.1000
 
 Plot saved to 'slope_comparison.png'
 
@@ -135,20 +135,20 @@ Plot saved to 'slope_comparison.png'
 ## Interpreting the Results
 
 ### 1. The Numbers
-*   **Robust (`'nan'`)**: Calculates the median of only the "sure" slopes. It gives the steepest trend here because it ignores the confusing pairs.
+*   **Drop-ambiguous (`'unbiased'`)**: Calculates the median of only the "sure" slopes. It tends to give the steepest trend because the pairs it ignores are mostly those that oppose the trend.
 *   **LWP (`'lwp'`)**: Returns a smaller slope. Why? Because it took all those "I'm not sure" pairs and called them "0 slope". If you have many censored values, this method will strongly bias your trend magnitude towards zero.
-*   **ATS (`'ats'`)**: Often considered the "gold standard" for censored trends. It handles the probability distribution of the censored values rather than just substituting a single number.
+*   **ATS (`'ats'`)**: The standard estimator for censored trends (Helsel 2012). It uses only the information the censored values actually carry (that they lie below their limit) instead of substituting a single number.
 
-In this dataset, the LWP method yields a much lower slope (1.00 vs 1.10) because it treats the ambiguous pairs (between censored and non-censored) as "zero slope" (no trend), which drags the median down. The ATS method (1.11) provides a compromise that is statistically grounded.
+In this dataset the LWP method yields a lower slope because it treats the ambiguous pairs (between censored and non-censored values) as "zero slope", which drags the median down. In simulations with a known trend, ATS was the least biased of the three (within a few percent up to 50% censoring), while the drop-ambiguous method overestimated and the LWP method underestimated the slope as censoring increased.
 
 ### 2. Visualizing the Difference
 ![Slope Comparison](slope_comparison.png)
 
-*   **Green Line (Robust)**: Steepest.
+*   **Green Line (Drop-ambiguous)**: Typically the steepest.
 *   **Red Line (LWP)**: Flattest (biased towards 0).
 *   **Blue Line (ATS)**: The robust statistical estimate.
 
 ## Recommendation
-*   Use **`'ats'`** for the most rigorous scientific analysis of censored data.
-*   Use **`'nan'`** (default) for a good balance of speed and robustness.
-*   Use **`'lwp'`** only if you strictly need to match legacy numbers from the LWP-TRENDS R script.
+*   Use **`'ats'`** (default) for censored data.
+*   Use **`'lwp'`** only if you need to match the LWP-TRENDS R script.
+*   `'unbiased'` is kept for backward compatibility; it is not recommended.

@@ -116,8 +116,15 @@ def check_seasonality(
         seasons = season_func(pd.to_datetime(data['t_original']))
     else:
         t_numeric = np.asarray(data['t'], dtype=np.float64)
-        t_normalized = t_numeric - t_numeric[0]
+        t_normalized = t_numeric - np.min(t_numeric)
         seasons = (np.floor(t_normalized) % period).astype(int)
+        uniq = np.unique(t_numeric)
+        spacing = np.median(np.diff(uniq)) if len(uniq) > 1 else 1.0
+        if np.ptp(t_numeric) < 2 * period or (period > 1 and spacing < 0.5):
+            warnings.warn(
+                "Numeric `t` should be expressed in season units (season = floor(t - min(t)) % period). "
+                "Check that `t` and `period` are consistent (e.g. months with period=12, not decimal years).",
+                UserWarning)
 
     unique_seasons = np.unique(seasons)
     if len(unique_seasons) < 2:

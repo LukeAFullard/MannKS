@@ -8,10 +8,10 @@ This validation case checks that the Block Bootstrap Mann-Kendall test produces 
 - **Bootstrap Resamples**: 500
 
 ## Results
-- **Mean Difference (Bootstrap - Analytical)**: -0.0100
-- **Mean Absolute Difference**: 0.0269
-- **Correlation between P-values**: 0.9907
-- **Significance Agreement (alpha=0.05)**: 99.0%
+- **Mean Difference (Bootstrap - Analytical)**: -0.0130
+- **Mean Absolute Difference**: 0.0274
+- **Correlation between P-values**: 0.9933
+- **Significance Agreement (alpha=0.05)**: 98.5%
 
 ## P-Value Comparison Scatterplot
 ![P-Value Comparison](p_value_scatter.png)

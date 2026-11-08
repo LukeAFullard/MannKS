@@ -48,8 +48,10 @@ def inspect_trend_data(
                                             Keys are the increment names (e.g.,
                                             'weekly'), and values are the number
                                             of increments in a year. If not
-                                            provided, a default set of increments
-                                            is used. Supported increments are:
+                                            provided, the LWP-TRENDS increments are
+                                            used (monthly, bi-monthly, quarterly,
+                                            bi-annually) plus annually. Supported
+                                            increments are:
                                             'annually', 'bi-annually', 'quarterly',
                                             'bi-monthly', 'monthly', 'weekly', 'daily'.
         plot (bool): If True, generates and saves a set of inspection plots.
@@ -86,9 +88,9 @@ def inspect_trend_data(
 
     start_year = end_year - trend_period + 1
     start_date = pd.to_datetime(f'{start_year}-01-01')
-    end_date = pd.to_datetime(f'{end_year}-12-31')
+    end_date = pd.to_datetime(f'{end_year + 1}-01-01')  # exclusive: keeps all of 31 Dec
 
-    df_filtered = df[(df[time_col] >= start_date) & (df[time_col] <= end_date)].copy()
+    df_filtered = df[(df[time_col] >= start_date) & (df[time_col] < end_date)].copy()
     df_filtered.dropna(subset=[value_col], inplace=True)
 
     if df_filtered.empty:
@@ -101,9 +103,9 @@ def inspect_trend_data(
     if custom_increments:
         time_increments = custom_increments
     else:
+        # LWP-TRENDS candidate increments (plus annual as a last resort).
+        # Daily/weekly increments can be requested via `custom_increments`.
         time_increments = {
-            'daily': 365,
-            'weekly': 52,
             'monthly': 12,
             'bi-monthly': 6,
             'quarterly': 4,

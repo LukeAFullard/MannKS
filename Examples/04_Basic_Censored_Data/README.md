@@ -85,7 +85,7 @@ print(f"Significance: {result.h}")
 --- Trend Test Results ---
 Trend: decreasing
 P-value: 0.00000
-Sen's Slope: -0.9078
+Sen's Slope: -0.9292
 Significance: True
 
 ```
@@ -101,4 +101,4 @@ The generated plot visualizes the censored data points.
 ## Interpretation
 *   **Data Handling**: The package automatically identified and handled the censored values. You didn't need to manually substitute them with 0 or MDL/2.
 *   **Trend Detection**: Despite the missing exact values for the non-detects, the test correctly identified a **decreasing** trend.
-*   **Sen's Slope**: The slope of **-0.9078** (compared to the synthetic trend of -0.8) demonstrates the robustness of the estimator even with heavy censoring.
+*   **Sen's Slope**: The slope of **-0.9292** (compared to the synthetic trend of -0.8) demonstrates the robustness of the estimator even with heavy censoring.

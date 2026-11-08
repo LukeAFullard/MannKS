@@ -174,10 +174,7 @@ def rolling_trend_test(
 
     for win_start, win_end in windows:
         # Select data in window [start, end)
-        if is_datetime:
-            mask = (t_series >= win_start) & (t_series < win_end)
-        else:
-            mask = (t_series >= win_start) & (t_series < win_end)
+        mask = np.asarray((t_series >= win_start) & (t_series < win_end), dtype=bool)
 
         if mask.sum() < min_size:
             continue
@@ -338,11 +335,16 @@ def compare_periods(
             - 'before': Result object for pre-breakpoint data
             - 'after': Result object for post-breakpoint data
             - 'slope_difference': slope_after - slope_before
-            - 'ci_overlap': Boolean, True if confidence intervals overlap
-            - 'significant_change': Boolean, True if CIs do NOT overlap.
-              Note: This is a conservative test. If CIs do not overlap, the difference
-              is statistically significant at alpha. However, overlapping CIs do not
-              necessarily imply no significant difference.
+            - 'ci_overlap': Boolean, True if the two (1 - alpha) intervals overlap.
+              Non-overlap is a very conservative criterion (for two 95%
+              intervals it corresponds to a significance level of about 0.006).
+            - 'z_difference', 'p_value_difference': Approximate two-sided test of
+              equal slopes, z = (b2 - b1) / sqrt(se1^2 + se2^2), with each
+              standard error derived from its interval width
+              (se = (upper - lower) / (2 z_{1-alpha/2})).  This assumes the two
+              periods are independent (they share no data, but serial
+              correlation across the breakpoint is ignored).
+            - 'significant_change': Boolean, ``p_value_difference < alpha``.
             - 'breakpoint': The breakpoint used
     """
     t_arr = np.asarray(t)
@@ -381,21 +383,34 @@ def compare_periods(
 
     slope_diff = result_after.slope - result_before.slope
 
-    # Simple overlap test
-    if np.isnan(result_before.lower_ci) or np.isnan(result_after.lower_ci):
+    from scipy.stats import norm
+    cis = [result_before.lower_ci, result_before.upper_ci, result_after.lower_ci, result_after.upper_ci]
+    if any(pd.isna(v) for v in cis):
         ci_overlap = np.nan
+        z_diff, p_diff = np.nan, np.nan
         significant_change = False
     else:
         no_overlap = (result_before.lower_ci > result_after.upper_ci) or \
                      (result_after.lower_ci > result_before.upper_ci)
         ci_overlap = not no_overlap
-        significant_change = no_overlap
+        zc = norm.ppf(1 - alpha / 2)
+        se_b = (result_before.upper_ci - result_before.lower_ci) / (2 * zc)
+        se_a = (result_after.upper_ci - result_after.lower_ci) / (2 * zc)
+        se = np.sqrt(se_b ** 2 + se_a ** 2)
+        if se > 0:
+            z_diff = slope_diff / se
+            p_diff = float(2 * norm.sf(abs(z_diff)))
+        else:
+            z_diff, p_diff = np.nan, np.nan
+        significant_change = bool(p_diff < alpha) if not np.isnan(p_diff) else bool(no_overlap)
 
     return {
         'before': result_before,
         'after': result_after,
         'slope_difference': slope_diff,
         'ci_overlap': ci_overlap,
+        'z_difference': z_diff,
+        'p_value_difference': p_diff,
         'significant_change': significant_change,
         'breakpoint': breakpoint
     }

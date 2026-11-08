@@ -1,4 +1,4 @@
-"""Monte Carlo calibration checks for MannKS (audit Step 3).
+"""Monte Carlo calibration checks for MannKS.
 
 Usage:  python monte_carlo.py [quick]
 Set MANNKS_SRC to point at an alternative (e.g. patched) copy of the package.
@@ -113,7 +113,7 @@ record("CI coverage with heavy ties (x rounded to integers), n=40, true=0.05", c
        binom_ci(int(cover), R), R)
 
 # ---------------- 6. Censored slope estimators: bias ----------------
-for method in ("unbiased", "lwp"):  # ATS: see censored_slope_study.py
+for method in ("ats", "unbiased", "lwp"):
     reps = R // 2
     est = []
     for r in range(reps):
@@ -123,7 +123,7 @@ for method in ("unbiased", "lwp"):  # ATS: see censored_slope_study.py
         vals = ["<2" if a < 2 else a for a in v]
         est.append(mk.trend_test(mk.prepare_censored_data(vals), t, sens_slope_method=method).slope)
     est = np.array(est, float)
-    record(f"Censored (~35% <2) slope, true=0.05, method={method}: mean rel. bias",
+    record(f"Censored (~20% <2) slope, true=0.05, method={method}: mean rel. bias",
            (np.nanmean(est) - 0.05) / 0.05, None, f"sd={np.nanstd(est):.4f}", reps)
 
 # ---------------- 7. Fast mode (stochastic Sen) vs exact ----------------
@@ -154,10 +154,9 @@ for phi in (0.0, 0.6):
         rej = 0
         for r in range(reps):
             g = np.random.default_rng(50_000 + r)
-            np.random.seed(50_000 + r)  # bootstrap uses the global RNG
             n = 60; t = np.arange(n, dtype=float)
             x = ar1(g, n, phi)
-            res = mk.trend_test(x, t, autocorr_method=meth, n_bootstrap=nb)
+            res = mk.trend_test(x, t, autocorr_method=meth, n_bootstrap=nb, random_state=r)
             rej += res.p < ALPHA
         record(f"H0 AR(1) phi={phi}, n=60, autocorr_method={meth}: P(p<0.05)", rej / reps, None,
                binom_ci(int(rej), reps), reps)

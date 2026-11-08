@@ -10,6 +10,13 @@ Python  : trend_test / seasonal_trend_test with every LWP switch MannKS offers:
 
 Run:  python run_parity.py            (writes out/parity_*.csv and prints a table)
 Env:  LWP_R=/path/to/LWPTrends_v2502.r
+      REUSE_R=1          reuse out/parity_r.csv from a previous run
+      LARGE_MODE=full    pass large_dataset_mode to MannKS (default 'auto')
+
+Expected differences (see README.md): cases where LWP-TRENDS declines to
+compute (all_identical, n2-n4, exact_linear, seasonal_missing_month,
+seasonal_sparse_month, seasonal_lt), same-day duplicate observations in
+multi_per_month_mid, and the sampled slope of long_6000 in fast mode.
 """
 import os
 import sys
@@ -130,11 +137,14 @@ nl = 12 * 500
 vl = 10 + 0.0005 * np.arange(nl) + rng.normal(0, 1, nl)
 add("long_6000", monthly(500, start=1500), fmt(vl), timeincr="Month")
 
-# ---------------- real LWP example data ----------------
+# ---------------- real LWP example data (exported from the R package data) ----------------
+from common import export_lwp_example_data  # noqa: E402
+_examples = export_lwp_example_data()
 for name, ti, seas in [("ex1", "Month", False), ("ex2", "Month", True), ("ex3", "Month", False),
                        ("ex4", "Year", False)]:
-    df = pd.read_csv(os.path.join(HERE, f"data_{name}.csv"), dtype=str)
-    add(f"real_{name}", pd.to_datetime(df.myDate), df.Value.tolist(), seasonal=seas, timeincr=ti)
+    if name in _examples:
+        df = pd.read_csv(_examples[name], dtype=str)
+        add(f"real_{name}", pd.to_datetime(df.myDate), df.Value.tolist(), seasonal=seas, timeincr=ti)
 
 data = pd.DataFrame(DATA)
 cfg = pd.DataFrame(CFG)
@@ -170,7 +180,7 @@ def run_py(cc, mode="auto"):
                             agg_method="lwp" if cc.use_mid else "lwp_median",
                             agg_period=PERIOD[cc.timeincr], random_state=1, **common)
     else:
-        res = mk.seasonal_trend_test(x, t, season_type=SEASON[cc.timeincr],
+        res = mk.seasonal_trend_test(x, t, season_type=SEASON[cc.timeincr], tie_break_method="lwp",
                                      agg_method="lwp" if cc.use_mid else "median",
                                      random_state=1, **common)
     return res
@@ -179,7 +189,8 @@ def run_py(cc, mode="auto"):
 METRICS = [("S", "mk_S", "s"), ("VarS", "mk_VarS", "var_s"), ("tau", "mk_tau", "Tau"),
            ("Z", "mk_Z", "z"), ("p", "mk_p", "p"), ("C", "mk_C", "C"), ("Cd", "mk_Cd", "Cd"),
            ("slope", "sen_AnnualSenSlope", "slope"), ("lower_ci", "sen_Sen_Lci", "lower_ci"),
-           ("upper_ci", "sen_Sen_Uci", "upper_ci"), ("prop_censored", "mk_prop.censored", "prop_censored")]
+           ("upper_ci", "sen_Sen_Uci", "upper_ci"), ("prop_censored", "mk_prop.censored", "prop_censored"),
+           ("sen_probability", "sen_Sen_Probability", "sen_probability")]
 TOL = 1e-6  # relative; both sides are deterministic double-precision computations
 
 rows = []
@@ -223,3 +234,20 @@ pd.set_option("display.width", 250)
 pd.set_option("display.max_columns", 30)
 print(summary.to_string())
 print(f"\nTolerance: relative {TOL}. Failures: {int((num.status == 'FAIL').sum())}/{len(num)}")
+
+
+# ---------------- seasonality test (SeasonalityTest vs check_seasonality) ----------------
+ids = [c for c in ["monthly_seasonal", "monthly_nonseasonal", "seasonal_missing_month", "real_ex2"]
+       if c in set(cfg.case_id)]
+r = subprocess.run(["Rscript", os.path.join(HERE, "r_seasonality.R"), os.environ.get("LWP_R", __import__("common").LWP_R),
+                    f"{OUT}/parity_data.csv", f"{OUT}/seasonality_r.csv", ",".join(ids)],
+                   capture_output=True, text=True)
+if r.returncode == 0:
+    RS = pd.read_csv(f"{OUT}/seasonality_r.csv").set_index("case_id")
+    print("\nSeasonality (Kruskal-Wallis): R SeasonalityTest vs check_seasonality")
+    for cid in ids:
+        g = data[data.case_id == cid]
+        xs = mk.prepare_censored_data([np.nan if v == "NA" else v for v in g.Value])
+        py = mk.check_seasonality(xs, pd.to_datetime(g.myDate).to_numpy())
+        print(f"  {cid:24s} R KW={RS.loc[cid].KW:.6g} p={RS.loc[cid].p:.6g} ({RS.loc[cid].note}) | "
+              f"MannKS H={py.h_statistic:.6g} p={py.p_value:.6g}")

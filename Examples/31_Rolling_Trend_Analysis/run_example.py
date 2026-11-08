@@ -38,8 +38,8 @@ print("Running rolling trend analysis (10Y)...")
 rolling_results_10y = mk.rolling_trend_test(
     x=df['Value'],
     t=df['Date'],
-    window='10Y',
-    step='1Y',
+    window='10YE',
+    step='1YE',
     min_size=30,  # Require at least 30 months of data per window
     slope_scaling='year',
     continuous_confidence=True
@@ -70,8 +70,8 @@ print("\nRunning rolling trend analysis (5Y)...")
 rolling_results_5y = mk.rolling_trend_test(
     x=df['Value'],
     t=df['Date'],
-    window='5Y',
-    step='1Y',
+    window='5YE',
+    step='1YE',
     min_size=30,
     slope_scaling='year',
     continuous_confidence=True
@@ -136,8 +136,8 @@ import MannKS as mk
 rolling_results_10y = mk.rolling_trend_test(
     x=df['Value'],
     t=df['Date'],
-    window='10Y',
-    step='1Y',
+    window='10YE',
+    step='1YE',
     slope_scaling='year'
 )
 
@@ -167,8 +167,8 @@ We also applied a **5-year rolling window** to see how window size affects sensi
 rolling_results_5y = mk.rolling_trend_test(
     x=df['Value'],
     t=df['Date'],
-    window='5Y',
-    step='1Y',
+    window='5YE',
+    step='1YE',
     slope_scaling='year'
 )
 ```

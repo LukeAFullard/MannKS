@@ -136,8 +136,8 @@ Basic Trend: decreasing
 Classification: Highly Likely Decreasing (Confidence: 100.0%)
 Kendall's S: -373.0
 p-value: 0.0000
-Sen's Slope: -3.4488 units per year
-Confidence Interval: [-5.1318, -2.5446]
+Sen's Slope: -3.3147 units per year
+Confidence Interval: [-4.9628, -2.2003]
 Proportion Censored: 42.5%
 Number of Censor Levels: 8
 

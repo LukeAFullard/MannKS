@@ -13,10 +13,10 @@ The table below shows the rejection rates (Type I Error) for Standard vs. Bootst
 
 |   Rho |   Standard Rejection Rate |   Bootstrap Rejection Rate |
 |------:|--------------------------:|---------------------------:|
-|   0   |                      0    |                       0.04 |
-|   0.2 |                      0.1  |                       0.14 |
-|   0.4 |                      0.22 |                       0.12 |
-|   0.6 |                      0.28 |                       0.14 |
+|   0   |                      0.04 |                       0.04 |
+|   0.2 |                      0.04 |                       0.1  |
+|   0.4 |                      0.2  |                       0.14 |
+|   0.6 |                      0.32 |                       0.2  |
 |   0.8 |                      0.54 |                       0.22 |
 
 ## Type I Error vs Autocorrelation Plot

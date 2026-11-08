@@ -29,24 +29,24 @@ mk.trend_test(..., sens_slope_method='ats', autocorr_method='block_bootstrap')
 --- Scenario 1: Aggregation + Bootstrap ---
 Original N: 730
 Aggregated N (approx): 24.3
-Block Size Used (on aggregated data): 4
-P-value (Bootstrap): 0.0000
+Block Size Used (on aggregated data): 3
+P-value (Bootstrap): 0.0050
 Trend: increasing
 
 --- Scenario 2: High Censoring + Bootstrap ---
-High Censor Rule Applied: ['Long run of single value', 'WARNING: Sen slope influenced by left-censored values.']
-Block Size Used: 8
-P-value: 0.0000
+High Censor Rule Applied: ['Long run of single value']
+Block Size Used: 10
+P-value: 0.0050
 
 --- Scenario 3: Seasonal Bootstrap ---
 Block Size Used (Cycles): 3
-P-value: 0.0000
+P-value: 0.0100
 Trend: increasing
 
 --- Scenario 4: ATS Slope + Bootstrap P-value ---
-Slope (ATS): 0.0373
-CI (ATS): [0.0118, 0.0607]
-P-value (Bootstrap): 0.0200
+Slope (ATS): 0.0124
+CI (ATS): [-0.0488, 0.0544]
+P-value (Bootstrap): 0.4776
 ```
 
 ## Conclusion

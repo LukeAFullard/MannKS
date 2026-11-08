@@ -15,7 +15,7 @@ def test_get_analysis_note_all_na():
 
 def test_get_analysis_note_seasonal_no_season_col():
     """Test get_analysis_note returns 'ok' when season_col is missing."""
-    data = pd.DataFrame({'value': [1, 2, 3], 'censored': [False, False, False]})
+    data = pd.DataFrame({'value': [1, 2, 3, 5, 4, 6], 'censored': [False] * 6})
     note = get_analysis_note(data, is_seasonal=True, post_aggregation=True)
     assert note == "ok"
 
@@ -42,9 +42,9 @@ def test_get_analysis_note_post_agg_seasonal_insufficient_unique():
 def test_get_analysis_note_post_agg_seasonal_long_run():
     """Test for 'Long run of single value in a Season' post-aggregation."""
     data = pd.DataFrame({
-        'value': [1, 1, 1, 1, 2, 3, 4, 4, 4, 4],
+        'value': [1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 5, 7],
         'censored': False,
-        'season': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2]
+        'season': [1] * 9 + [2] * 5
     })
     note = get_analysis_note(data, is_seasonal=True, post_aggregation=True)
     assert note == "Long run of single value in a Season"
@@ -52,7 +52,7 @@ def test_get_analysis_note_post_agg_seasonal_long_run():
 def test_get_analysis_note_post_agg_non_seasonal_long_run():
     """Test for 'Long run of single value' post-aggregation."""
     data = pd.DataFrame({
-        'value': [1, 1, 1, 1, 1, 1, 3, 4, 5, 6],
+        'value': [1, 1, 1, 1, 1, 1, 1, 3, 4, 6],
         'censored': False
     })
     note = get_analysis_note(data, is_seasonal=False, post_aggregation=True)
@@ -64,7 +64,7 @@ def test_get_sens_slope_analysis_note_two_censored():
     t = np.array([1, 2, 3, 4])
     cen_type = np.array(['lt', 'gt', 'lt', 'gt'])
     note = get_sens_slope_analysis_note(slopes, t, cen_type)
-    assert note == "CRITICAL: Sen slope is based on a pair of two censored values."
+    assert note == "WARNING: Sen slope based on two censored values"
 
 def test_get_sens_slope_analysis_note_left_right_censored():
     """Test Sen's slope note for influence from left- and right-censored values."""
@@ -72,7 +72,7 @@ def test_get_sens_slope_analysis_note_left_right_censored():
     t = np.array([1, 2, 3, 4])
     cen_type = np.array(['lt', 'not', 'not', 'gt'])
     note = get_sens_slope_analysis_note(slopes, t, cen_type)
-    assert note == "WARNING: Sen slope influenced by left- and right-censored values."
+    assert note == "WARNING: Sen slope influenced by censored values"
 
 def test_get_sens_slope_analysis_note_right_censored():
     """Test Sen's slope note for influence from right-censored values."""
@@ -80,7 +80,7 @@ def test_get_sens_slope_analysis_note_right_censored():
     t = np.array([1, 2, 3])
     cen_type = np.array(['not', 'not', 'gt'])
     note = get_sens_slope_analysis_note(slopes, t, cen_type)
-    assert note == "WARNING: Sen slope influenced by right-censored values."
+    assert note == "WARNING: Sen slope influenced by censored values"
 
 def test_get_sens_slope_analysis_note_nan_median():
     """Test that get_sens_slope_analysis_note returns 'ok' if median slope is NaN."""

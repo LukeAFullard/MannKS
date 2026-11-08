@@ -117,7 +117,7 @@ Default Classification: Highly Likely Increasing
 Custom Classification:  Virtual Certainty Increasing
 
 === Topic 3: Minimum Sample Size Warning ===
-n=3, min_size=5 -> Notes: ['< 5 Non-censored values', 'sample size (3) below minimum (5)']
+n=3, min_size=5 -> Notes: ['< 5 Non-censored values', 'sample size (3) below minimum (5)', '< 5 Non-censored values']
 n=3, min_size=2 -> Notes: []
 
 === Topic 4: Seasonal Trend Test with Numeric Time ===

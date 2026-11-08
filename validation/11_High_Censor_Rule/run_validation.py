@@ -242,6 +242,9 @@ def analyze_scenario(scenario_name, df):
                         sens_slope_method='lwp',
                         hicensor=True, # The key parameter
                         agg_period='month',
+                        tau_method='a',
+                        tie_break_method='lwp',
+                        alpha=0.10,  # LWP-TRENDS reports 90% confidence intervals
                         slope_scaling='year')
 
     # 3. LWP R Script (v2102)

@@ -43,7 +43,7 @@ def plot_seasonal_distribution(x, t, period=12, season_type='month', plot_path='
     else:
         t_numeric = np.asarray(t, dtype=np.float64)
         # Normalize to start from 0 for consistent seasonal calculation
-        t_normalized = t_numeric - t_numeric[0]
+        t_normalized = t_numeric - np.min(t_numeric)
         seasons = (np.floor(t_normalized) % period).astype(int)
 
     df = pd.DataFrame({'Value': x, 'Season': seasons})
@@ -628,12 +628,22 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
 
     Args:
         result: The namedtuple returned by segmented_trend_test.
-        x_data: Original data values.
+        x_data: Original data values, or the DataFrame from
+            ``prepare_censored_data`` (censored values are marked).
         t_data: Original time values.
         save_path: Path to save the plot.
     """
     if save_path is None:
         return
+
+    censored_mask = None
+    if isinstance(x_data, pd.DataFrame):
+        if 'censored' in x_data.columns:
+            censored_mask = x_data['censored'].to_numpy(dtype=bool)
+        x_data = x_data['value'].to_numpy(dtype=float) if 'value' in x_data.columns \
+            else x_data.iloc[:, 0].to_numpy(dtype=float)
+    else:
+        x_data = np.asarray(x_data, dtype=float)
 
     from ._datetime import _to_numeric_time
 
@@ -650,7 +660,14 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
     x_axis = pd.to_datetime(t_data) if is_datetime else t_data
 
     # Plot raw data
-    ax.scatter(x_axis, x_data, color='gray', alpha=0.5, label='Observations')
+    if censored_mask is not None and censored_mask.any():
+        x_axis_arr = np.asarray(x_axis)
+        ax.scatter(x_axis_arr[~censored_mask], x_data[~censored_mask], color='gray', alpha=0.5,
+                   label='Observations')
+        ax.scatter(x_axis_arr[censored_mask], x_data[censored_mask], color='red', marker='v',
+                   alpha=0.6, label='Censored (limit)')
+    else:
+        ax.scatter(x_axis, x_data, color='gray', alpha=0.5, label='Observations')
 
     # Re-create segments to get boundaries
     if is_datetime:
@@ -693,10 +710,11 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
             # of the segment data, as the intercepts are defined relative to this point.
             # We re-calculate the pivot point for the segment data.
 
-            mask = (t_numeric >= start) & (t_numeric < end)
+            is_last = i == len(segments) - 1
+            mask = (t_numeric >= start) & ((t_numeric <= end) if is_last else (t_numeric < end))
             if np.sum(mask) > 0:
                 t_seg = t_numeric[mask]
-                x_seg = x_data[mask] if isinstance(x_data, np.ndarray) else x_data.iloc[mask]
+                x_seg = x_data[mask]
 
                 # Ensure data is numeric for median calculation.
                 if np.issubdtype(np.asarray(x_seg).dtype, np.number):

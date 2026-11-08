@@ -1,48 +1,95 @@
 # Validation Report
 
-This report summarizes the findings from the comprehensive validation of the `MannKenSen` Python package against the reference `LWP-TRENDS` R script (`LWPTrends_v2502.r`) and `NADA2` R scripts (`ATS.R`, `censeaken.R`).
+This report summarises the validation of `MannKS` (v0.6.0) against the reference
+LWP-TRENDS R script (`LWPTrends_v2502.r`, run live through `rpy2`) and the NADA2
+R scripts (`ATS.R`, `censeaken.R`), together with simulation studies of the
+bootstrap and segmented-regression features.
 
-## Executive Summary
+## How to reproduce
 
-The validation suite, consisting of 42 distinct test cases (V-01 to V-44), has been successfully executed. These tests cover a wide range of scenarios, including:
-- Basic non-seasonal trends
-- Tied values and timestamps
-- Unequally spaced time series
-- Censored data (left, right, and mixed)
-- Seasonal trends (monthly, quarterly, missing seasons)
-- Regional trend analysis
-- Data quality edge cases
-- Statistical performance (bootstrap CIs, Type I error, power)
+The scenario scripts (`validation/NN_*/run_validation.py`) expect the R sources in
+`Example_Files/R/LWPTrends_v2502` and `Example_Files/R/NADA2`. They also need `rpy2`
+and the R packages listed in `validation/r_parity/README.md`, plus `Icens` for NADA2.
+Each LWP comparison is written to `master_results.csv`, one row per test.
 
-All validation scripts completed successfully, indicating that the package is robust and functions as expected across these diverse scenarios.
+More detailed parity checks, with an explicit 1e-6 tolerance on every statistic
+(S, Var(S), Z, p, C, Cd, tau, slope, CI, `sen_probability`), are in
+[`r_parity/`](r_parity/README.md).
 
-## Key Findings & Inconsistencies
+## LWP-TRENDS parity (`master_results.csv`)
 
-While the `MannKenSen` package generally replicates the behavior of the reference R scripts, several known methodological differences lead to slight discrepancies in results. These are intentional design choices to improve statistical robustness or fix bugs present in the R scripts.
+"LWP mode" in these scripts uses:
 
-### 1. Sen's Slope Calculation
-- **Difference:** The R script uses a heuristic for "ambiguous" censored pairs (e.g., `<5` vs `>10`), often assigning them a slope of 0. `MannKenSen` provides an option to replicate this (`sens_slope_method='lwp'`) but also offers a more robust default.
-- **Impact:** In cases with heavy mixed censoring, the R script's Sen's slope may collapse to exactly 0.0, while `MannKenSen`'s robust method may return a non-zero slope.
-- **Verification:** Validated in V-13 and V-33.
+```python
+mk_test_method='lwp', ci_method='lwp', sens_slope_method='lwp', agg_method='lwp',
+tau_method='a', tie_break_method='lwp', alpha=0.10
+```
 
-### 2. Confidence Intervals
-- **Difference:** The R script uses linear interpolation for confidence intervals (`ci_method='lwp'`). `MannKenSen` defaults to a direct rank-based lookup (`ci_method='direct'`) which is more standard but slightly wider/conservative.
-- **Impact:** `MannKenSen`'s default CIs are slightly wider than the R script's. Using `ci_method='lwp'` aligns them almost perfectly.
-- **Verification:** Validated in V-01 and V-37.
+The R side calls `GetMoreDateInfo(..., FindDateShifts=FALSE)`, because MannKS does
+not implement LWP-TRENDS' date shifting (moving end-of-month samples into an empty
+following month).
 
-### 3. Data Aggregation
-- **Difference:** The R script enforces a strict aggregation step (one value per time increment) before analysis. `MannKenSen` allows analysis of raw data (`agg_method='none'`) or LWP-style aggregation (`agg_method='lwp'`).
-- **Impact:** When `agg_method='lwp'` is used, results match the R script. Without it, `MannKenSen` uses all data points, leading to higher power and different p-values.
-- **Verification:** Validated in V-04 and V-27.
+| Outcome | Rows | Cases |
+|---|---|---|
+| Slope, p, lower and upper CI agree with R to ≤ 1e-6 (relative) | 48 | V-01 – V-05, V-07 – V-11, V-13 – V-17, V-27 |
+| Small differences due to the test harness | 3 | V-06 (numeric time: R receives the decimal years converted to whole-day dates and aggregates them by month; MannKS analyses the decimal years directly) |
+| R returns `NA` because a data-sufficiency check fails; MannKS computes and reports the corresponding analysis note | 10 | V-03_flat, V-18, V-19 (a season with < 3 values), V-28 (< 5 non-censored values), V-29 (all censored), V-30 (long run) |
+| R errors on the input (`if (kenS > 0)` in `GetKendal`) | 3 | V-12 |
 
-### 4. Regional Trend Test
-- **Difference:** The R script uses a standard `cor()` function which can be fragile with missing data. `MannKenSen` implements a more robust pairwise correlation that handles `NaN` values gracefully.
-- **Impact:** `MannKenSen` can successfully compute regional trends in sparse datasets where the R script might fail or return `NA`.
-- **Verification:** Validated in V-26.
+Before the v0.6.0 fixes, none of these rows agreed with R to this tolerance. The
+causes were:
+- Var(S) omitted tie and censoring corrections.
+- The CI level differed (MannKS used 95%; LWP-TRENDS reports 90%).
+- Mid-observation selection differed from R.
 
-### 5. Bootstrap Confidence Intervals (V-37)
-- **Finding:** The block bootstrap method (accounting for autocorrelation) produces confidence intervals that are comparable to, but generally wider than, the analytic intervals (assuming independence) when autocorrelation is present. This confirms the validity of the bootstrap implementation for serially dependent data.
+## Known, documented differences from LWP-TRENDS
+
+1. **Data-sufficiency gating.** LWP-TRENDS does not compute a trend when an analysis
+   note is raised. MannKS raises the same notes but still computes.
+2. **Date shifting** (`FindDateShifts`) is not implemented.
+3. **Equidistant same-day samples.** When two observations are equally close to an
+   increment's mid-point (e.g. same-day duplicates), MannKS keeps the first. R's
+   choice depends on the row order produced by `merge()`.
+4. **Default estimators.** The defaults are not the LWP-TRENDS methods:
+   - the slope for censored data defaults to Akritas-Theil-Sen;
+   - the CI defaults to nearest rank with α = 0.05;
+   - `mk_test_method` defaults to `'robust'`.
+
+   The LWP-mode settings above reproduce LWP-TRENDS.
+
+## NADA2 / Akritas-Theil-Sen
+
+`sens_slope_method='ats'` returns the exact midpoint of the interval where the
+Kendall score of the residuals is zero. NADA's bisection approximates the edges of
+that interval, so slopes agree to within NADA's tolerance (median relative
+difference about 0.3% against `NADA::cenken`; see
+`r_parity/censored_slope_study.py`). In simulations with a known slope, ATS was the
+least biased censored estimator:
+
+| Censoring | ATS | LWP (ambiguous pairs = 0) | drop ambiguous pairs |
+|---|---|---|---|
+| 20% | +2% | +3% | +17% |
+| 50% | +4% | −55% | +69% |
+
+## Bootstrap and segmented-regression studies (V-36 – V-52)
+
+These are simulation studies with small numbers of replicates (often 50), so their
+rejection rates and coverages carry Monte Carlo errors of several percentage points.
+Larger simulations (1000–2000 replicates) are in `r_parity/monte_carlo.py`. There:
+
+- Mann-Kendall Type I error is close to 0.05, including with heavy ties and with censoring.
+- Sen's slope CI coverage is 0.95–0.96.
+- The block bootstrap reduces the rejection rate for AR(1) noise with ρ = 0.6 from
+  0.30 to 0.15. It is slightly liberal for iid data at n = 60 (about 0.07–0.09).
+- The Yue-Wang correction holds its nominal size for iid data (0.05) and keeps full
+  power, but under-corrects strong autocorrelation in short series (0.18 at ρ = 0.6,
+  n = 60).
+
+Segment slopes and their confidence intervals are conditional on the estimated
+breakpoints.
 
 ## Conclusion
 
-The `MannKenSen` package has been verified to be a reliable tool for trend analysis. It successfully emulates the legacy `LWP-TRENDS` R script when configured in 'LWP mode' while offering superior default methods for general use. The minor discrepancies observed are documented and stem from intentional improvements in statistical methodology.
+With the LWP-mode settings, MannKS reproduces LWP-TRENDS exactly wherever
+LWP-TRENDS produces a result, apart from the documented differences above. The
+default settings use estimators that are better calibrated for censored data.

@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+validation/r_parity/out/
+Rplots.pdf

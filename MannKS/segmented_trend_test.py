@@ -87,53 +87,31 @@ class SegmentedTrendResult(_Segmented_Trend_Test_Tuple):
 
 def _prepare_data(x, t, hicensor=False):
     """
-    Internal helper to prepare data for segmented analysis.
+    Prepare data for segmented analysis using the same rules as
+    ``trend_test`` (censoring labels, NaN removal, high-censor rule), then
+    sort by time.
     """
+    from ._helpers import _prepare_data as _prepare_common
     is_dt = _is_datetime_like(t)
-    t_num = _to_numeric_time(t)
-
-    if isinstance(x, pd.DataFrame):
+    if isinstance(x, pd.DataFrame) and 'value' in x.columns:
         df = x.copy()
-        if 'value' not in df.columns:
-             if x.shape[1] == 1:
-                 df.columns = ['value']
-                 df['censored'] = False
-                 df['cen_type'] = 'none'
-             else:
-                 raise ValueError("Input DataFrame must contain a 'value' column.")
         if 'censored' not in df.columns:
-             df['censored'] = False
+            df['censored'] = False
+        df['censored'] = df['censored'].astype(bool)
         if 'cen_type' not in df.columns:
-             df['cen_type'] = 'none'
-    else:
-        df = pd.DataFrame({'value': np.asarray(x)})
-        df['censored'] = False
-        df['cen_type'] = 'none'
-
-    df['t'] = t_num
-    df['t_original'] = np.asarray(t)
-
-    # Handle missing values
-    mask = ~np.isnan(df['value'])
-    df = df[mask].copy()
-
-    df = df.sort_values('t').reset_index(drop=True)
-
-    if hicensor:
-        if isinstance(hicensor, bool) and hicensor:
-             if 'lt' in df['cen_type'].values:
-                 max_lt = df.loc[df['cen_type'] == 'lt', 'value'].max()
-                 mask_hi = df['value'] < max_lt
-                 df.loc[mask_hi, 'censored'] = True
-                 df.loc[mask_hi, 'cen_type'] = 'lt'
-                 df.loc[mask_hi, 'value'] = max_lt
-        elif isinstance(hicensor, (int, float)):
-             max_lt = hicensor
-             mask_hi = df['value'] < max_lt
-             df.loc[mask_hi, 'censored'] = True
-             df.loc[mask_hi, 'cen_type'] = 'lt'
-             df.loc[mask_hi, 'value'] = max_lt
-
+            if df['censored'].any():
+                warnings.warn("No 'cen_type' column: censored values are assumed to be left-censored ('lt').",
+                              UserWarning)
+            df['cen_type'] = np.where(df['censored'], 'lt', 'not')
+        x = df[['value', 'censored', 'cen_type']].reset_index(drop=True)
+    elif isinstance(x, pd.DataFrame):
+        if x.shape[1] == 1:
+            x = x.iloc[:, 0].to_numpy()
+        else:
+            raise ValueError("Input DataFrame must contain a 'value' column.")
+    df, _ = _prepare_common(x, t, hicensor)
+    df['t'] = _to_numeric_time(np.asarray(t))[df.index.to_numpy()]
+    df = df.sort_values('t', kind='stable').reset_index(drop=True)
     return df, is_dt
 
 def segmented_trend_test(
@@ -173,7 +151,13 @@ def segmented_trend_test(
         random_state: Seed for random number generator.
         large_dataset_mode: Controls large dataset handling (passed to slope estimator).
         max_pairs: Max pairs for fast slope estimation.
-        **kwargs: Additional arguments for trend estimation (e.g. lt_mult, gt_mult).
+        **kwargs: Additional arguments for trend estimation (lt_mult, gt_mult,
+            sens_slope_method: 'ats' (default for censored segments), 'lwp'
+            or 'unbiased').
+
+    Note:
+        Segment slopes and confidence intervals are conditional on the
+        estimated breakpoints (no adjustment for breakpoint selection).
 
     Returns:
         namedtuple: Segmented_Trend_Test result.
@@ -234,12 +218,14 @@ def segmented_trend_test(
         # Extract kwargs relevant for estimation
         lt_mult = kwargs.get('lt_mult', 0.5)
         gt_mult = kwargs.get('gt_mult', 1.1)
+        sens_slope_method = kwargs.get('sens_slope_method', 'ats')
 
         hybrid_model.fit(
             t_numeric, x_val, censored, cen_type, lt_mult, gt_mult,
             alpha=alpha,
             large_dataset_mode=large_dataset_mode,
-            max_pairs=max_pairs
+            max_pairs=max_pairs,
+            sens_slope_method=sens_slope_method
         )
 
         # 3. Format Results

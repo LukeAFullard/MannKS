@@ -177,7 +177,15 @@ class HybridSegmentedTrend:
         self.bootstrap_samples_ = None
 
     def fit(self, t, x, censored=None, cen_type=None, lt_mult=0.5, gt_mult=1.1, alpha=0.05,
-            large_dataset_mode='auto', max_pairs=None):
+            large_dataset_mode='auto', max_pairs=None, sens_slope_method='ats'):
+        """
+        Fit breakpoints (OLS, piecewise-regression) and then estimate each
+        segment's slope robustly (Sen's slope; Akritas-Theil-Sen for censored
+        segments unless ``sens_slope_method`` is 'lwp'/'unbiased').
+
+        Segment confidence intervals are conditional on the estimated
+        breakpoints: they do not include breakpoint-location uncertainty.
+        """
         t = np.asarray(t)
         x = np.asarray(x)
 
@@ -350,15 +358,10 @@ class HybridSegmentedTrend:
 
                          filtered_samples = [s for s in col_samples if lower_bound <= s <= upper_bound]
 
-                         if len(filtered_samples) > 0:
-                             low = np.percentile(filtered_samples, 2.5)
-                             high = np.percentile(filtered_samples, 97.5)
-                             best_bp_cis.append((low, high))
-                         else:
-                             # Fallback if filtering excludes all samples
-                             low = np.percentile(col_samples, 2.5)
-                             high = np.percentile(col_samples, 97.5)
-                             best_bp_cis.append((low, high))
+                         use = filtered_samples if len(filtered_samples) > 0 else col_samples
+                         low = np.percentile(use, 100 * alpha / 2)
+                         high = np.percentile(use, 100 * (1 - alpha / 2))
+                         best_bp_cis.append((low, high))
                      else:
                          best_bp_cis.append((np.nan, np.nan))
             else:
@@ -376,11 +379,13 @@ class HybridSegmentedTrend:
         from ._stats import (
             _sens_estimator_adaptive,
             _sens_estimator_censored_adaptive,
-            _sens_estimator_unequal_spacing,
-            _sens_estimator_censored,
             _mk_score_and_var_censored,
             _confidence_intervals
         )
+
+        from ._large_dataset import detect_size_tier
+        if max_pairs is None:
+            max_pairs = detect_size_tier(len(t), user_mode=large_dataset_mode)['max_pairs']
 
         self.segments_ = []
         boundaries = np.concatenate(([t.min()], self.breakpoints_, [t.max()]))
@@ -405,45 +410,34 @@ class HybridSegmentedTrend:
                 })
                 continue
 
-            if censored is not None:
-                cen_seg = censored[mask]
-                cen_type_seg = cen_type[mask]
-                # Use adaptive censored estimator
-                slopes = _sens_estimator_censored_adaptive(
-                    x_seg, t_seg, cen_type_seg, lt_mult, gt_mult,
-                    max_pairs=max_pairs, random_state=self.random_state
-                )
-                s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, cen_seg, cen_type_seg)
-            else:
-                # Use adaptive estimator
-                slopes = _sens_estimator_adaptive(
-                    x_seg, t_seg, max_pairs=max_pairs, random_state=self.random_state
-                )
-                dummy_cen = np.zeros(len(x_seg), dtype=bool)
-                dummy_type = np.full(len(x_seg), 'not', dtype=object)
-                s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, dummy_cen, dummy_type)
-
-            if len(slopes) == 0 or np.all(np.isnan(slopes)):
-                slope = np.nan
-            else:
-                slope = np.nanmedian(slopes)
-
-            # Confidence Intervals
-            # Scale total_pairs for correct CIs if subsampling was used
+            cen_seg = (np.asarray(censored, dtype=bool)[mask] if censored is not None
+                       else np.zeros(len(x_seg), dtype=bool))
+            cen_type_seg = (np.asarray(cen_type)[mask] if cen_type is not None
+                            else np.full(len(x_seg), 'not', dtype=object))
+            s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, cen_seg, cen_type_seg)
             n_seg = len(x_seg)
             total_pairs = n_seg * (n_seg - 1) // 2
+            sampled = max_pairs is not None and total_pairs > max_pairs
 
-            lower_ci, upper_ci = _confidence_intervals(slopes, var_s, alpha=alpha, total_pairs=total_pairs)
-
-            # Robust Intercept
-            if censored is not None:
-                uncensored_mask = ~cen_seg.astype(bool)
-                if np.any(uncensored_mask):
-                    intercept = np.median(x_seg[uncensored_mask] - slope * t_seg[uncensored_mask])
-                else:
-                    intercept = np.nan
+            if cen_seg.any() and sens_slope_method == 'ats':
+                from ._ats import ats_slope
+                ats = ats_slope(t_seg, x_seg, cen_seg, cen_type=cen_type_seg, var_s=var_s,
+                                ci_alpha=alpha, max_pairs=max_pairs, random_state=self.random_state)
+                slope, intercept = ats['beta'], ats['intercept']
+                lower_ci, upper_ci = ats['ci_lower'], ats['ci_upper']
             else:
-                intercept = np.median(x_seg - slope * t_seg)
+                if cen_seg.any():
+                    method = 'lwp' if sens_slope_method == 'lwp' else 'unbiased'
+                    slopes = _sens_estimator_censored_adaptive(
+                        x_seg, t_seg, cen_type_seg, lt_mult, gt_mult, method=method,
+                        max_pairs=max_pairs, random_state=self.random_state)
+                else:
+                    slopes = _sens_estimator_adaptive(
+                        x_seg, t_seg, max_pairs=max_pairs, random_state=self.random_state)
+                slope = np.nanmedian(slopes) if np.any(~np.isnan(slopes)) else np.nan
+                lower_ci, upper_ci = _confidence_intervals(
+                    slopes, var_s, alpha=alpha, total_pairs=total_pairs if sampled else None)
+                intercept = np.median(x_seg - slope * t_seg) if np.isfinite(slope) else np.nan
 
             self.segments_.append({
                 'slope': slope,

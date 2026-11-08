@@ -25,9 +25,36 @@ def test_get_analysis_note_less_than_5_non_censored_values():
     assert note == "< 5 Non-censored values"
 
 def test_get_analysis_note_long_run_of_single_value():
-    data = pd.DataFrame({'value': [1]*11 + [2, 3, 4, 5, 6, 7, 8, 9, 10], 'censored': [False]*20})
+    # LWP-TRENDS rule: longest run of identical consecutive differences
+    # (rle(diff(x))) longer than half the series.
+    data = pd.DataFrame({'value': [1]*12 + [2, 3, 4, 5, 6, 7, 8, 10], 'censored': [False]*20})
     note = get_analysis_note(data, post_aggregation=True)
     assert note == "Long run of single value"
+
+
+def test_get_analysis_note_long_run_matches_lwp_threshold():
+    # 10 equal differences out of 20 values is exactly 0.5 -> not flagged (R uses > 0.5)
+    data = pd.DataFrame({'value': [1]*11 + [2, 3, 4, 5, 6, 7, 8, 9, 11], 'censored': [False]*20})
+    assert get_analysis_note(data, post_aggregation=True) == "ok"
+
+
+def test_get_analysis_note_exact_linear_series_flagged_like_lwp():
+    # Equal increments are a "long run" under the LWP-TRENDS rule.
+    data = pd.DataFrame({'value': np.arange(12) * 0.5 + 1, 'censored': [False]*12})
+    assert get_analysis_note(data, post_aggregation=True) == "Long run of single value"
+
+
+def test_get_analysis_note_post_aggregation_repeats_basic_checks():
+    data = pd.DataFrame({'value': [1, 2, 3, 4], 'censored': [False]*4})
+    assert get_analysis_note(data, post_aggregation=True) == "< 5 Non-censored values"
+
+
+def test_get_analysis_note_missing_season_fails_like_lwp():
+    data = pd.DataFrame({'value': np.arange(8.0) + np.r_[0, 0.3, 0.1, 0.7, 0.2, 0.9, 0.4, 0.6],
+                         'censored': [False]*8, 'season': [1, 1, 1, 1, 2, 2, 2, 2]})
+    assert get_analysis_note(data, is_seasonal=True, post_aggregation=True) == "ok"
+    assert get_analysis_note(data, is_seasonal=True, post_aggregation=True,
+                             expected_seasons=[1, 2, 3]) == "< 3 non-NA values in Season"
 
 def test_get_analysis_note_seasonal_less_than_3_non_na():
     data = pd.DataFrame({
@@ -50,9 +77,9 @@ def test_get_analysis_note_seasonal_less_than_2_unique_values():
 
 def test_get_analysis_note_seasonal_long_run():
     data = pd.DataFrame({
-        'value': [1, 1, 1, 1, 2, 5, 6, 7, 8],
-        'censored': [False, False, False, False, False, False, False, False, False],
-        'season': [1, 1, 1, 1, 1, 2, 2, 2, 2]
+        'value': [1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 6, 7, 9],
+        'censored': [False] * 13,
+        'season': [1] * 9 + [2] * 4
     })
     note = get_analysis_note(data, is_seasonal=True, post_aggregation=True)
     assert note == "Long run of single value in a Season"
@@ -70,7 +97,7 @@ def test_get_sens_slope_analysis_note_influenced_by_left_censored():
     data = prepare_censored_data(x_raw)
     slopes = _sens_estimator_censored(data['value'].values, t, data['cen_type'].values, method='lwp')
     note = get_sens_slope_analysis_note(slopes, t, data['cen_type'].values)
-    assert note == "WARNING: Sen slope influenced by left-censored values."
+    assert note == "WARNING: Sen slope influenced by censored values"
 
 def test_get_sens_slope_analysis_note_influenced_by_right_censored():
     x_raw = [1, 5, 2, '>10']
@@ -78,7 +105,7 @@ def test_get_sens_slope_analysis_note_influenced_by_right_censored():
     data = prepare_censored_data(x_raw)
     slopes = _sens_estimator_censored(data['value'].values, t, data['cen_type'].values, method='lwp')
     note = get_sens_slope_analysis_note(slopes, t, data['cen_type'].values)
-    assert note == "WARNING: Sen slope influenced by right-censored values."
+    assert note == "WARNING: Sen slope influenced by censored values"
 
 def test_get_sens_slope_analysis_note_influenced_by_both_censored():
     x_raw = ['<1', 5, 2, '>10']
@@ -86,7 +113,7 @@ def test_get_sens_slope_analysis_note_influenced_by_both_censored():
     data = prepare_censored_data(x_raw)
     slopes = _sens_estimator_censored(data['value'].values, t, data['cen_type'].values, method='lwp')
     note = get_sens_slope_analysis_note(slopes, t, data['cen_type'].values)
-    assert note == "WARNING: Sen slope influenced by left- and right-censored values."
+    assert note == "WARNING: Sen slope influenced by censored values"
 
 def test_get_sens_slope_analysis_note_based_on_two_censored():
     x_raw = ['<1', '<2', '>3', '>4']
@@ -94,7 +121,7 @@ def test_get_sens_slope_analysis_note_based_on_two_censored():
     data = prepare_censored_data(x_raw)
     slopes = _sens_estimator_censored(data['value'].values, t, data['cen_type'].values, method='lwp')
     note = get_sens_slope_analysis_note(slopes, t, data['cen_type'].values)
-    assert note == "CRITICAL: Sen slope is based on a pair of two censored values."
+    assert note == "WARNING: Sen slope based on two censored values"
 
 def test_get_sens_slope_analysis_note_tied_non_censored():
     x_raw = [1, 2, 1, 2, 1]

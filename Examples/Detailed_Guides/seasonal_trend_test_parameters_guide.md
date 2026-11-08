@@ -99,7 +99,7 @@ Aggregation in a seasonal context is about ensuring that you have **one represen
     -   `'median'`: Calculates the median of all values within the season-cycle block. Equivalent to LWP R script `UseMidObs=FALSE`.
     -   `'robust_median'`: As above, but uses a robust median logic suitable for censored data.
     -   `'middle'`: Selects the observation whose timestamp is closest to the mean of the actual timestamps in that season-year group.
-    -   `'middle_lwp'`: Selects the observation closest to the theoretical midpoint of the time period.
+    -   `'middle_lwp'`: Selects the observation closest to the mid-point of the season's time increment (LWP-TRENDS definition; same rule as `'lwp'`).
 -   **Limitations:** **Aggregating censored data is statistically complex and can introduce bias.** For example, the median of `['<2', '5', '10']` is `5`, but the median of `['<2', '<5', '10']` is ambiguous. The `'robust_median'` method uses a reasonable heuristic, but you should be aware of this underlying uncertainty. See **[Example 9](../09_Aggregation_Tied_Clustered_Data/README.md)**.
 
 ---

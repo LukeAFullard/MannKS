@@ -78,13 +78,11 @@ Running Data Inspection...
 Data Availability Summary:
 | increment   |   n_obs |   n_year |   prop_year |   n_incr_year |   prop_incr_year | data_ok   |
 |:------------|--------:|---------:|------------:|--------------:|-----------------:|:----------|
-| daily       |      56 |        5 |           1 |            56 |        0.0306849 | False     |
-| weekly      |      56 |        5 |           1 |            56 |        0.215385  | False     |
-| monthly     |      56 |        5 |           1 |            56 |        0.933333  | True      |
-| bi-monthly  |      56 |        5 |           1 |            29 |        0.966667  | True      |
-| quarterly   |      56 |        5 |           1 |            20 |        1         | True      |
-| bi-annually |      56 |        5 |           1 |            10 |        1         | True      |
-| annually    |      56 |        5 |           1 |             5 |        1         | True      |
+| monthly     |      56 |        5 |           1 |            56 |         0.933333 | True      |
+| bi-monthly  |      56 |        5 |           1 |            29 |         0.966667 | True      |
+| quarterly   |      56 |        5 |           1 |            20 |         1        | True      |
+| bi-annually |      56 |        5 |           1 |            10 |         1        | True      |
+| annually    |      56 |        5 |           1 |             5 |         1        | True      |
 
 ```
 

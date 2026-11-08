@@ -22,7 +22,7 @@ pd.DataFrame(rows).to_csv(f"{OUT}/cenken_in.csv", index=False)
 R = run_r("r_cenken.R", f"{OUT}/cenken_in.csv", f"{OUT}/cenken_r.csv").set_index("case_id")
 res = []
 for cid, (x, y, cen) in cases.items():
-    a = ats_slope(x, y, cen, cen_type=np.where(cen, "lt", "not"), lod=y, bootstrap_ci=False)
+    a = ats_slope(x, y, cen, cen_type=np.where(cen, "lt", "not"), lod=y, var_s=0.0)
     res.append(dict(case_id=cid, n=len(x), pcen=cen.mean(), py_slope=a["beta"], R_slope=R.loc[cid].slope,
                     py_int=a["intercept"], R_int=R.loc[cid].intercept))
 df = pd.DataFrame(res)
@@ -49,7 +49,7 @@ for dl in (1.0, 2.0, 3.0):
             est[m].append(mk.trend_test(X, t, sens_slope_method=m).slope)
         cen = X.censored.to_numpy()
         est["ats"].append(ats_slope(t, X.value.to_numpy(), cen, cen_type=X.cen_type.to_numpy(),
-                                    lod=X.value.to_numpy(), bootstrap_ci=False)["beta"])
+                                    lod=X.value.to_numpy(), var_s=0.0)["beta"])
         est["oracle_uncensored"].append(mk.trend_test(v, t).slope)
     for m, e in est.items():
         e = np.array(e, float)

@@ -137,7 +137,7 @@ class ValidationUtils:
             ro.globalenv['df_r'] = r_df
             ro.r('df_r$CenType <- as.factor(df_r$CenType)')
 
-            ro.r('df_r <- GetMoreDateInfo(df_r)')
+            ro.r('df_r <- GetMoreDateInfo(df_r, FindDateShifts=FALSE)')  # MannKS does not shift end-of-month samples
 
             is_annual = True
             ro.r('year_counts <- table(df_r$Year)')
@@ -301,10 +301,14 @@ class ValidationUtils:
              mk_std = mk.trend_test(x_std, t_std, **mk_kwargs)
 
         lwp_defaults = {
+            # LWP-TRENDS settings (see validation/r_parity/README.md)
             'mk_test_method': 'lwp',
             'ci_method': 'lwp',
             'sens_slope_method': 'lwp',
-            'agg_method': 'middle_lwp'
+            'agg_method': 'lwp',
+            'tau_method': 'a',
+            'tie_break_method': 'lwp',
+            'alpha': 0.10,  # LWP-TRENDS reports 90% confidence intervals
         }
         lwp_final_kwargs = {**lwp_defaults, **lwp_mode_kwargs}
 
@@ -326,6 +330,9 @@ class ValidationUtils:
              else:
                  mk_lwp = mk.trend_test(x_std, t_lwp, **lwp_final_kwargs)
         else:
+             # Period-based LWP aggregation needs datetimes; numeric time has one value per time.
+             if lwp_final_kwargs.get('agg_method') == 'lwp':
+                  lwp_final_kwargs['agg_method'] = 'none'
              if seasonal and 'agg_period' in lwp_final_kwargs:
                   del lwp_final_kwargs['agg_period']
              if seasonal:
@@ -401,27 +408,13 @@ class ValidationUtils:
         return result_row, mk_std
 
     def _append_to_csv(self, row: Dict):
+        """Insert or replace this test's row (keyed by test_id) in the master CSV."""
         df = pd.DataFrame([row])
         if os.path.exists(self.master_csv_path) and os.stat(self.master_csv_path).st_size > 0:
-             cols = pd.read_csv(self.master_csv_path, nrows=0).columns.tolist()
-             # Align columns if new ones (patched) were added
-             for col in df.columns:
-                 if col not in cols:
-                     # This is tricky if master csv structure is rigid.
-                     # Append matching results to the file.
-                     # Let's just drop extra columns to keep master CSV consistent,
-                     # OR allow master CSV to grow.
-                     pass
-
-             # Actually, if we add columns, standard pd.read_csv might fail if we just append without header.
-             # But this is a specific validation script. Let's just ignore the patched columns for the master CSV
-             # to avoid breaking other scripts that read it, unless we want to update the schema globally.
-             # Given the scope, let's keep master CSV standard and only report patched in this README.
-             common_cols = [c for c in cols if c in df.columns]
-             df_to_save = df[common_cols]
-             df_to_save.to_csv(self.master_csv_path, mode='a', header=False, index=False)
-        else:
-             df.to_csv(self.master_csv_path, mode='w', header=True, index=False)
+            existing = pd.read_csv(self.master_csv_path)
+            existing = existing[existing['test_id'] != row['test_id']]
+            df = pd.concat([existing, df.reindex(columns=existing.columns)], ignore_index=True)
+        df.to_csv(self.master_csv_path, index=False)
 
     def _get_decimal_year(self, df: pd.DataFrame) -> np.ndarray:
         if 'time' in df.columns:

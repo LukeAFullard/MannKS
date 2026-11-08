@@ -1,60 +1,48 @@
 # Statistical Methodology: Block Bootstrap for Autocorrelated Data
 
-The `MannKS` package implements block bootstrap methods to robustly handle serial correlation (autocorrelation) in time series data. Standard Mann-Kendall tests assume independence; when this assumption is violated, the Type I error rate (false positive rate) can be significantly inflated.
+The `MannKS` package implements block bootstrap methods to handle serial correlation (autocorrelation) in time series data. The standard Mann-Kendall test assumes independence; when this assumption is violated, the Type I error rate (false positive rate) can be substantially inflated.
 
-We use two distinct bootstrap strategies for the two main goals of trend analysis: Hypothesis Testing (P-value) and Estimation (Confidence Intervals). This combination is statistically rigorous as it addresses the specific requirements of each statistical inference task.
+Two bootstrap procedures are used, one for each inference task: hypothesis testing (the p-value) and estimation (the slope's confidence interval).
 
 ## 1. Hypothesis Testing: Detrended Residual Block Bootstrap
 
-To test the null hypothesis ($H_0$) that there is **no trend**, we must generate a null distribution of the Mann-Kendall $S$ statistic that preserves the data's autocorrelation structure but removes any existing trend.
+To test the null hypothesis ($H_0$) of **no trend**, we generate a null distribution of the Mann-Kendall $S$ statistic that preserves the data's short-range dependence but contains no trend.
 
 **Procedure:**
-1.  **Trend Estimation:** Estimate the trend using Sen's Slope ($\hat{\beta}$).
-2.  **Detrending:** Calculate residuals: $r_i = x_i - \hat{\beta} t_i$.
-    *   *Numerical Stability:* We use centered time ($t_{centered} = t - \text{median}(t)$) for this calculation. This prevents floating-point precision issues that can arise when working with large timestamp values (e.g., Unix epochs).
-    *   *Note on Censored Data:* For censored values (e.g., $<5$), the residual is calculated using the numeric detection limit. While this is an approximation, the rank-based nature of the Mann-Kendall test makes it robust to the specific values of these residuals as long as the temporal structure is preserved.
-3.  **Block Size Selection:**
-    *   By default (`block_size='auto'`), the optimal block length is calculated based on the data's estimated **correlation length** (the lag at which autocorrelation drops below a significance threshold). This ensures blocks are large enough to capture the dependence structure but small enough to provide sufficient randomness.
-    *   *Seasonal Data:* For seasonal tests, "blocks" effectively represent complete seasonal cycles (e.g., full years) to preserve the seasonal structure within the bootstrapped samples.
-4.  **Resampling:** Apply a **Moving Block Bootstrap** to the residuals.
-    *   Blocks of consecutive residuals are sampled with replacement to form a new series $r^*_{boot}$.
-5.  **No Trend Reconstruction:** The bootstrap sample is simply the shuffled residuals ($x^*_{boot} = r^*_{boot}$). We do *not* add the trend back, because we are simulating $H_0$.
-6.  **Test Statistic:** Calculate the Mann-Kendall $S$ statistic on $(x^*_{boot}, t_{original})$.
-7.  **P-value:** Compare the observed $S$ against the distribution of bootstrap $S$ values.
+1.  **Trend estimation:** Estimate the slope $\hat{\beta}$ with the selected estimator (`sens_slope_method`: Akritas-Theil-Sen by default for censored data, Sen's slope otherwise).
+2.  **Detrending:** Compute residuals $r_i = x_i - \hat{\beta}\,(t_i - \text{median}(t))$. Centring time avoids precision problems with large timestamps (e.g. Unix epochs).
+    *   *Censored data:* the residual of a censored value is computed from its detection limit and keeps its censoring flag. Detrending therefore shifts each detection limit by the removed trend, so resampled censored residuals carry limits that vary over time. This is an approximation; the rank-based $S$ is only affected where such limits overlap uncensored residuals.
+3.  **Block length** (`block_size='auto'`): twice the first lag at which the autocorrelation of the **detrended** series drops below 0.1, bounded to $[3, \sqrt{n}]$. This is a simple heuristic, not an optimal block-length selector.
+    *   *Seasonal data:* the bootstrap resamples whole cycles (e.g. years), preserving the seasonal structure. The block length (in cycles) is chosen from the autocorrelation of the detrended cycle means.
+4.  **Resampling:** a **circular block bootstrap** (Politis & Romano, 1992). Blocks of consecutive residuals, with their censoring flags, start at random positions and wrap around the end of the series, so every observation is equally likely to be drawn.
+5.  **No trend reconstruction:** the bootstrap series is the resampled residuals; the trend is not added back, because we are simulating $H_0$.
+6.  **Test statistic:** compute $S^*$ on $(r^*, t_{\text{original}})$.
+7.  **P-value:** $p = \dfrac{1 + \#\{|S^*_b| \ge |S|\}}{B + 1}$, which is never exactly zero.
 
-**References:**
-*   Politis, D. N., & White, H. (2004). Automatic block-length selection for the dependent bootstrap. *Econometric Reviews*, 23(1), 53-70.
-
----
+`random_state` makes the procedure reproducible.
 
 ## 2. Confidence Intervals: Pairs Block Bootstrap
 
-For calculating confidence intervals around the Sen's Slope, we use a **Pairs Block Bootstrap**.
+For the slope's confidence interval we use a **pairs block bootstrap**.
 
 **Procedure:**
-1.  **Block Sampling:** Instead of separating residuals, we sample blocks of time-value pairs $(x_i, t_i)$.
-2.  **Resampling:** Concatenate these blocks to form a new dataset $(x^*_{boot}, t^*_{boot})$.
-    *   *Note:* The bootstrapped time vector $t^*_{boot}$ will contain duplicate timestamps and will not be strictly increasing.
-3.  **Sorting:** To ensure correct calculation of pairwise slopes (especially for censored data logic), we sort the bootstrapped sample by time: $(x^*_{sorted}, t^*_{sorted})$.
-4.  **Estimation:** Calculate Sen's Slope on this sorted bootstrapped dataset.
-4.  **Confidence Interval:** The 90% CI is determined from the 5th and 95th percentiles of the bootstrap distribution of slopes.
+1.  **Block sampling:** draw circular blocks of observation indices, as above. Each observation keeps its value, time and censoring status ("pairs").
+2.  **Resampled data set:** the drawn observations, with their original times. Repeated observations keep their multiplicity; pairs with equal times do not contribute to the slope.
+3.  **Estimation:** compute the slope with the selected estimator.
+4.  **Interval:** percentile interval of the bootstrap slopes at level $1-\alpha$ (the `alpha` argument; the default is a 95% interval).
 
-### Why Pairs Bootstrap? (The "Shifting Limit" Issue)
+### Why the pairs bootstrap? (The "shifting limit" issue)
 
-We previously attempted a residual-based bootstrap for confidence intervals ($x^*_{boot} = r^*_{boot} + \hat{\beta}t_{original}$). However, this method introduces a systematic bias when applied to **censored data**.
+A residual bootstrap for confidence intervals ($x^*_{boot} = r^*_{boot} + \hat{\beta}t_{original}$) is biased for **censored data**. A censored residual is tied to a particular point in time relative to the trend line. If it is moved to another time and the trend is added back, the implied detection limit changes. For example, with a decreasing trend the late, low (often censored) values have high residuals; moved to the start of the series and with the trend added back, they become large values that are still marked as censored, i.e. artificially high detection limits. This distorts the slope estimate, typically shrinking it towards zero.
 
-**The Problem:**
-In a residual bootstrap, a "censored residual" is derived from a specific point in time relative to the trend line. If we move this residual to a different point in time (by shuffling) and add the trend back, the implied "detection limit" changes.
+The pairs bootstrap avoids this by keeping each value, its censoring status and its time together. It is also robust to heteroscedastic errors.
 
-*   *Example:* Consider a decreasing trend. Data at the end of the series is often censored (low values). These have "high" residuals relative to the trend line. If we move such a residual to the beginning of the series (where values are high), and add the high trend value, the reconstructed data point becomes a very large number that is still marked as "censored". This effectively creates a "high detection limit" data point at the start of the series.
-*   **Result:** This artificial mixing of detection limits distorts the slope calculation, typically biasing the slope magnitude downwards (towards zero) or creating asymmetric confidence intervals that do not cover the true parameter.
+## Without autocorrelation correction
 
-**The Solution:**
-The **Pairs Bootstrap** avoids this entirely by keeping the value $x_i$, its censoring status, and its time $t_i$ together. We do not try to "reconstruct" values; we simply re-weight the original observations while preserving their local dependence.
-
-**Additional Benefits:**
-*   **Heteroscedasticity:** Pairs bootstrap is also robust to non-constant variance (heteroscedasticity) in the error terms, as it does not rely on the assumption that residuals are identically distributed across the entire time series.
+When `autocorr_method='none'`, the Akritas-Theil-Sen interval is obtained by inverting the censored Kendall test: the limits are the slopes $\beta$ at which $S(\beta) = \pm z_{1-\alpha/2}\sqrt{\operatorname{Var}(S)}$. This is the same construction that gives Sen's rank-based interval for uncensored data.
 
 **References:**
-*   Efron, B., & Tibshirani, R. J. (1993). *An Introduction to the Bootstrap*. Chapman and Hall/CRC. (Section 8.6 on Moving Block Bootstrap).
-*   Davison, A. C., & Hinkley, D. V. (1997). *Bootstrap Methods and their Application*. Cambridge University Press. (Discussion on model-based vs. pairs resampling).
+*   Politis, D. N., & Romano, J. P. (1992). A circular block-resampling procedure for stationary data. In *Exploring the Limits of Bootstrap*, Wiley, 263-270.
+*   Efron, B., & Tibshirani, R. J. (1993). *An Introduction to the Bootstrap*. Chapman and Hall/CRC.
+*   Davison, A. C., & Hinkley, D. V. (1997). *Bootstrap Methods and their Application*. Cambridge University Press.
+*   Akritas, M. G., Murphy, S. A., & LaValley, M. P. (1995). The Theil-Sen estimator with doubly censored data and applications to astronomy. *JASA*, 90(429), 170-177.

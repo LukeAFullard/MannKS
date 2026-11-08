@@ -3,17 +3,17 @@
 Validation of V-28: Insufficient Data. Testing datasets with n=4 while min_size=5. Expecting warnings and NaN results.
 
 ## Results
-| Test ID                | Method            |        Slope |      P-Value |      Lower CI |      Upper CI |
-|:-----------------------|:------------------|-------------:|-------------:|--------------:|--------------:|
-| V-28_strong_increasing | MannKS (Standard) |  2.05781     |  0.0894294   | nan           | nan           |
-| V-28_strong_increasing | MannKS (LWP Mode) |  2.05781     |  0.0894294   |   1.93783     |   2.08845     |
-| V-28_strong_increasing | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |
-| V-28_weak_decreasing   | MannKS (Standard) | -0.543101    |  0.0894294   | nan           | nan           |
-| V-28_weak_decreasing   | MannKS (LWP Mode) | -0.543101    |  0.0894294   |  -0.679392    |  -0.307999    |
-| V-28_weak_decreasing   | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |
-| V-28_stable            | MannKS (Standard) | -0.0708291   |  0.734095    | nan           | nan           |
-| V-28_stable            | MannKS (LWP Mode) | -0.0708291   |  0.734095    |  -0.117407    |   0.11397     |
-| V-28_stable            | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |
+| Test ID                | Method            |        Slope |      P-Value |     Lower CI |     Upper CI |
+|:-----------------------|:------------------|-------------:|-------------:|-------------:|-------------:|
+| V-28_strong_increasing | MannKS (Standard) |  2.05781     |  0.0894294   |  1.93783     |  2.08896     |
+| V-28_strong_increasing | MannKS (LWP Mode) |  2.05781     |  0.0894294   |  1.93783     |  2.08638     |
+| V-28_strong_increasing | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 |
+| V-28_weak_decreasing   | MannKS (Standard) | -0.543101    |  0.0894294   | -0.679392    | -0.291902    |
+| V-28_weak_decreasing   | MannKS (LWP Mode) | -0.543101    |  0.0894294   | -0.679392    | -0.372918    |
+| V-28_weak_decreasing   | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 |
+| V-28_stable            | MannKS (Standard) | -0.0708291   |  0.734095    | -0.117407    |  0.127561    |
+| V-28_stable            | MannKS (LWP Mode) | -0.0708291   |  0.734095    | -0.117407    |  0.0591582   |
+| V-28_stable            | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 | -2.14748e+09 |
 
 ## LWP Accuracy (Python vs R)
 | Test ID                |   Slope Error |   Slope % Error |
@@ -42,9 +42,9 @@ The `MannKS` package behaves as expected. It provides the user with necessary wa
 
 
 ### Captured Analysis Notes
-- V-28_strong_increasing (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)']
-- V-28_strong_increasing (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)']
-- V-28_weak_decreasing (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)']
-- V-28_weak_decreasing (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)']
-- V-28_stable (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)']
-- V-28_stable (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', 'WARNING: Sen slope based on tied non-censored values']
+- V-28_strong_increasing (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']
+- V-28_strong_increasing (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']
+- V-28_weak_decreasing (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']
+- V-28_weak_decreasing (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']
+- V-28_stable (Std): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']
+- V-28_stable (LWP): ['< 5 Non-censored values', 'sample size (4) below minimum (5)', '< 5 Non-censored values']

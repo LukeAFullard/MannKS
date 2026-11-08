@@ -11,7 +11,7 @@
     *   **Trend:** Likely no trend or non-significant.
     *   **Data Quality Warning:** The system should produce an analysis note warning about "Long run of single value" (e.g., "WARNING: Long run of single value...").
     *   **Comparison:** We aim to verify if MannKS detects this pattern similarly to the LWP-TRENDS R script.
-
+    
 
 **Verification Conclusion:**
 
@@ -24,13 +24,13 @@ However, it **did not issue** a specific warning for the long run of identical v
 ![v30_combined.png](v30_combined.png)
 
 ## Results
-| Test ID       | Method            |         Slope |       P-Value |      Lower CI |      Upper CI |
-|:--------------|:------------------|--------------:|--------------:|--------------:|--------------:|
-| V-30_long_run | MannKS (Standard) |   0           |   0.694687    |   0           |   0           |
-| V-30_long_run | MannKS (LWP Mode) |   0           |   0.694687    |   0           |   0           |
-| V-30_long_run | LWP-TRENDS (R)    |  -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |
-| V-30_long_run | MannKS (ATS)      |   0           |   0.694687    |   0           |   0           |
-| V-30_long_run | NADA2 (R)         | nan           | nan           | nan           | nan           |
+| Test ID       | Method            |        Slope |      P-Value |      Lower CI |      Upper CI |
+|:--------------|:------------------|-------------:|-------------:|--------------:|--------------:|
+| V-30_long_run | MannKS (Standard) |  0           |  0.626618    |   0           |   0           |
+| V-30_long_run | MannKS (LWP Mode) |  0           |  0.626618    |   0           |   0           |
+| V-30_long_run | LWP-TRENDS (R)    | -2.14748e+09 | -2.14748e+09 |  -2.14748e+09 |  -2.14748e+09 |
+| V-30_long_run | MannKS (ATS)      |  0           |  0.626618    |   0           |   0           |
+| V-30_long_run | NADA2 (R)         | -2.40541e-08 |  0.626618    | nan           | nan           |
 
 ## Warnings
 ### Test: V-30_long_run

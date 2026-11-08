@@ -48,7 +48,7 @@ The `MannKS` package includes a system of "Analysis Notes" to provide data quali
 ## Data Structure & Aggregation
 
 ### `Long run of single value`
--   **What it means:** A significant portion of your data (by default, >50%) consists of a single, repeated value (e.g., `[1, 2, 3, 3, 3, 3, 3, 3, 4, 5]`).
+-   **What it means:** After aggregation to one value per time increment, the longest run of identical consecutive *differences* covers more than half of the series (the LWP-TRENDS rule, `rle(diff(x))`). The usual cause is a repeated value (e.g. `[1, 2, 3, 3, 3, 3, 3, 3, 4, 5]`), but an exactly linear series (constant increments) is also flagged.
 -   **Usefulness and Implications:** This highlights a high number of **ties** in your data. While the Mann-Kendall test (specifically, Kendall's Tau-b) has corrections for ties, an excessive number can still reduce the test's statistical power, making it harder to detect a real trend. It can also artificially pull the Sen's slope magnitude towards zero if the tied value is prevalent throughout the time series.
 -   **Limitations and Nuances:** This can be a natural feature of discrete data (e.g., counts of items) or data with a low measurement resolution.
 -   **Recommended Actions:**
@@ -57,7 +57,7 @@ The `MannKS` package includes a system of "Analysis Notes" to provide data quali
 
 ### `tied timestamps present without aggregation`
 -   **What it means:** Your time vector `t` contains duplicate values (e.g., multiple measurements were recorded at the exact same time), and you have not chosen an aggregation method.
--   **Usefulness and Implications:** This is a critical warning. The Sen's slope is calculated from the slopes of all pairs of points. If two points have the same timestamp, the slope denominator (`t_j - t_i`) is zero, leading to an infinite slope (`inf`), which breaks the calculation. The `MannKS` package removes these pairs, but this can **bias the result**. It effectively ignores some of your data in an unmanaged way.
+-   **Usefulness and Implications:** Pairs of observations with the same timestamp carry no information about the trend: they score 0 in the Mann-Kendall S statistic (and the tie is accounted for in its variance), and they have no defined pairwise slope, so they are excluded from the Sen's slope. The remaining pairs are used as usual, but heavily clustered sampling gives those times more weight.
 -   **Limitations and Nuances:** This is especially problematic if the tied values are not identical. If you have `(t1, x1)` and `(t1, x2)`, the package cannot know which value truly represents that time point.
 -   **Recommended Actions:**
     1.  **Aggregate (Tie-Breaking):** Use `agg_method='median'` or `'robust_median'` to combine the duplicate-time observations into a single point. This keeps the timestamps as they are.
@@ -75,11 +75,11 @@ The `MannKS` package includes a system of "Analysis Notes" to provide data quali
 These notes are specific to the `seasonal_trend_test`.
 
 ### `< 3 non-NA values in Season` / `< 2 unique values in Season`
--   **What it means:** A specific season (e.g., "January") has very little usable data across the entire record.
+-   **What it means:** A specific season (e.g., "January") has very little usable data across the entire record. For month, quarter, day-of-week, hour, minute and second seasons, a season with **no** data at all also triggers the first note (as in LWP-TRENDS).
 -   **Implications:** That specific season cannot be reliably analyzed for a trend. It will likely be dropped or contribute very little to the overall seasonal test.
 
 ### `Long run of single value in a Season`
--   **What it means:** Within a specific season (e.g., "March"), more than 75% of the values are identical.
+-   **What it means:** Within a specific season (e.g., "March"), the longest run of identical consecutive differences covers more than 75% of that season's values (LWP-TRENDS rule).
 -   **Implications:** Similar to the general "Long run" note, but specific to one season. It reduces the power of the test for that season.
 
 ### `minimum season size (X) below minimum (Y)`
@@ -90,7 +90,9 @@ These notes are specific to the `seasonal_trend_test`.
 
 ## Sen's Slope & Censored Data
 
-### `WARNING: Sen slope influenced by [left/right]-censored values.`
+These notes are produced for the pairwise slope estimators (`sens_slope_method='lwp'` or `'unbiased'`) and follow LWP-TRENDS `SenSlope`. They are not produced for the default Akritas-Theil-Sen estimator, which does not substitute values for censored observations.
+
+### `WARNING: Sen slope influenced by censored values`
 -   **What it means:** The final reported Sen's slope (which is the median of all pairwise slopes) was a slope calculated from a pair of data points where at least one of the points was censored.
 -   **Usefulness and Implications:** This is a crucial advisory note. It tells you that the **magnitude** of your trend is an **estimate** that is directly influenced by the substitution multipliers (`lt_mult`, `gt_mult`). A different choice of multiplier could lead to a different slope. This note increases transparency, reminding you that while the *direction* of the trend might be statistically robust, the *magnitude* has a degree of uncertainty tied to how censored data was handled.
 -   **Limitations and Nuances:** This is very common in censored datasets and is not necessarily an error, but it requires careful interpretation.
@@ -98,7 +100,7 @@ These notes are specific to the `seasonal_trend_test`.
     1.  **Acknowledge Uncertainty:** When reporting the Sen's slope, mention that its magnitude is an estimate influenced by censored values.
     2.  **Sensitivity Analysis:** As a best practice, re-run the test with different multipliers (e.g., `lt_mult=0.55`, `lt_mult=0.6`) to see how sensitive your slope estimate is. If it changes dramatically, be more cautious. See [Example 13](../13_Censored_Data_Multipliers/README.md).
 
-### `CRITICAL: Sen slope is based on a pair of two censored values.`
+### `WARNING: Sen slope based on two censored values`
 -   **What it means:** The median Sen's slope was calculated from a pair where *both* points were censored (e.g., the slope between `<5` and `<10`).
 -   **Usefulness and Implications:** This is a more severe version of the warning above. The slope's magnitude is now **entirely dependent** on the substitution multipliers. The calculation `(10*lt_mult - 5*lt_mult) / (t2 - t1)` has very little connection to the true, unobserved values. The resulting slope should be considered a rough estimate at best.
 -   **Limitations and Nuances:** This is rare but can occur in heavily censored datasets with few uncensored points to anchor the calculations.
@@ -107,5 +109,5 @@ These notes are specific to the `seasonal_trend_test`.
     2.  **Focus on Significance:** In this situation, the p-value (i.e., whether a trend exists at all) is a more reliable result than the Sen's slope.
 
 ### `WARNING: Sen slope based on tied non-censored values`
--   **What it means:** The calculated Sen's slope is approximately zero, often because the median slope is derived from a pair of tied values (slope = 0).
+-   **What it means:** The Sen's slope is exactly zero and the pairs at the median are uncensored pairs with equal values.
 -   **Implications:** This typically happens when the trend is flat or "No Trend". It serves as a confirmation that the lack of trend is driven by tied data points.

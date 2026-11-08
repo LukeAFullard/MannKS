@@ -24,9 +24,12 @@
 - Maintains statistical validity with massive performance gains.
 
 **Accuracy:**
-- **MK Score:** Exact (no approximation).
-- **Sen's Slope:** Typical error < 0.5% of true slope.
-- 95% CI covers true value in >99% of cases.
+- **MK test (S, Var(S), p):** Exact (no approximation), for censored data too.
+- **Slope:** With 100,000 sampled pairs the relative standard deviation of the
+  estimate around the exact value was about 0.3% in simulations (n = 6000), with
+  no detectable bias.
+- Pair sampling uses a fixed seed by default, so results are reproducible; pass
+  `random_state` to vary it.
 
 **Use when:**
 - Dataset is medium-large
@@ -62,10 +65,8 @@ Sen's slope is the **median** of all pairwise slopes. By the Central Limit Theor
 Seasonal tests require **stratified sampling**:
 
 1. Group observations by season
-2. Sample up to `max_per_season` from each season
-3. Maintains seasonal balance: S = Σ Sᵢ
-
-This ensures no season is over/under-represented.
+2. For very large data (n > 10,000 in fast mode), sample up to `max_per_season` observations from each season
+3. When the slope is estimated from sampled pairs, each season's share of the `max_pairs` budget is proportional to its number of within-season pairs, so the pooled slopes weight seasons exactly as the full calculation does (S = Σ Sᵢ is always computed exactly on the data used)
 
 ## Practical Guidelines
 

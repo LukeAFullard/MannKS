@@ -29,11 +29,41 @@ def _get_min_positive_diff(arr):
     return np.min(pos_diffs) if len(pos_diffs) > 0 else 0.0
 
 
+def _tie_break_delta(min_diff, n, method):
+    """
+    Size of the tiny shift used to separate censored from uncensored values and
+    to make uncensored values distinct inside the variance calculation
+    (``delx``/``dely`` in NADA::cenken / LWP-TRENDS ``GetKendal``).
+
+    The shift must satisfy ``n * delta < min_diff`` so that the cumulative
+    shifts ``i * delta`` used in the variance terms can never move a value past
+    a neighbouring distinct value.
+
+    - ``'lwp'``: ``min_diff / 1000`` exactly as in the R code.
+    - ``'robust'``: ``min_diff / (2 * (n + 1))``, which satisfies the
+      constraint for any ``n``.
+    """
+    if min_diff <= 0:
+        return 1.0
+    if method == 'lwp':
+        return min_diff / 1000.0
+    return min_diff / (2.0 * (n + 1))
+
+
 def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test_method='robust', tie_break_method='robust'):
     """
     Calculates the Mann-Kendall S statistic and its variance for censored data.
+
+    This is a port of ``GetKendal`` from LWP-TRENDS (itself adapted from
+    ``NADA::cenken``).  Censored comparisons that cannot be resolved score 0
+    (Helsel 2012).  Tied time values score 0 and are accounted for in the
+    variance, as are ties among values and among censored values.
+
+    Returns:
+        (S, Var(S), D, Tau) where D is the Tau denominator (Tau-a: n(n-1)/2,
+        Tau-b: the tie-adjusted denominator).
     """
-    x = np.asarray(x)
+    x = np.asarray(x, dtype=float)
     t = np.asarray(t)
     censored = np.asarray(censored)
     cen_type = np.asarray(cen_type)
@@ -48,30 +78,19 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
         xx[gt_mask] = max_gt_val
         cx[gt_mask] = False
 
-    # Time is treated as uncensored
-    yy = rankdata(t, method='ordinal')
+    # Time is treated as uncensored.  Equal times share a rank, so pairs with
+    # tied times contribute 0 to S (as in LWP-TRENDS, which ranks by
+    # season-year).
+    yy = rankdata(t, method='dense').astype(float)
     cy = np.zeros_like(yy, dtype=bool)
     n = len(xx)
-
-    MAX_SAFE_N = 46340
-    if n > MAX_SAFE_N:
-        # We can relax this warning since chunking (O(N) memory) and
-        # fast path (O(N log N) time) handle large datasets efficiently.
-        # However, for pure O(N^2) paths (e.g. censored data without chunking override),
-        # this remains a relevant caution regarding computation time.
-        pass
 
     if n < 2:
         return 0, 0, 0, 0
 
     # 3. Calculate delx and dely to break ties
-    unique_xx = np.unique(xx)
-    min_diff_x = _get_min_positive_diff(unique_xx)
-    delx = min_diff_x / (1000.0 if tie_break_method == 'lwp' else 2.0) if min_diff_x > 0 else 1.0
-
-    unique_yy = np.unique(yy)
-    min_diff_y = _get_min_positive_diff(unique_yy)
-    dely = min_diff_y / (1000.0 if tie_break_method == 'lwp' else 2.0) if min_diff_y > 0 else 1.0
+    delx = _tie_break_delta(_get_min_positive_diff(np.unique(xx)), n, tie_break_method)
+    dely = _tie_break_delta(_get_min_positive_diff(np.unique(yy)), n, tie_break_method)
 
     dupx = xx - delx * cx
     dupy = yy - dely * cy
@@ -83,52 +102,24 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     uu = 0
 
     use_fast_path = (n > 5000 and not np.any(cx) and mk_test_method != 'lwp')
-    use_chunking = n > 5000 and not use_fast_path
+    use_chunking = n > 2000 and not use_fast_path
 
     if use_fast_path:
-        # FAST PATH: Uncensored large data using O(N log N) algorithm
-        # Audit: Verified O(N log N) complexity implementation
-        # We rely on scipy.stats.kendalltau which is O(N log N).
-        # To replicate the existing behavior for tied timestamps (treating them as
-        # ordinal/sequential based on array order), we sort x by t stable-ly
-        # and compare against an ordinal time vector (0..N-1).
-
-        # 1. Sort x by t (stable)
-        # Note: yy is rankdata(t, 'ordinal') which is effectively 1..N permutation
-        # matching the sort order. So sorting by yy is equivalent to sorting by t.
-        sort_idx = np.argsort(yy, kind='stable')
-        x_sorted = xx[sort_idx]
-        t_ordinal = np.arange(n)
-
-        # 2. Calculate Tau-b
-        res = kendalltau(x_sorted, t_ordinal)
+        # FAST PATH: uncensored data, O(N log N).  scipy's Tau-b handles ties
+        # in both x and t, and S is recovered exactly from Tau-b:
+        #   S = tau_b * sqrt((n0 - n1) * (n0 - n2))
+        res = kendalltau(xx, yy)
         tau_b = res.statistic
-        if np.isnan(tau_b): tau_b = 0
+        if np.isnan(tau_b):
+            tau_b = 0.0
 
-        # 3. Recover S from Tau-b
-        # Calculate ties in x
-        _, c_x = np.unique(x_sorted, return_counts=True)
-        tt = np.sum(c_x * (c_x - 1)) // 2
-
-        # Ties in t_ordinal are 0 (by definition of ordinal ranking)
-        uu = 0
-
+        _, c_x = np.unique(xx, return_counts=True)
+        _, c_y = np.unique(yy, return_counts=True)
+        tt = int(np.sum(c_x * (c_x - 1)) // 2)
+        uu = int(np.sum(c_y * (c_y - 1)) // 2)
         n_pairs = n * (n - 1) // 2
-
-        # Audit validation for heavy ties
-        if n_pairs > 0 and (float(tt) / float(n_pairs)) > 0.5:
-            warnings.warn(
-                "Heavy ties detected (>50% tied pairs). Fast MK score approximation "
-                "may have minor rounding errors. Consider using large_dataset_mode='full' "
-                "for exact results.",
-                UserWarning
-            )
-
-        # For Tau-b, denom = sqrt((pairs-tt)(pairs-uu))
-        # Since uu=0, denom = sqrt((pairs-tt)*pairs)
-        denom_b = np.sqrt(float(n_pairs - tt) * float(n_pairs))
-
-        kenS = int(round(tau_b * denom_b)) # v0.5.0 Audit: Verified S recovery from Tau-b
+        denom_b = np.sqrt(float(n_pairs - tt) * float(n_pairs - uu))
+        kenS = int(round(tau_b * denom_b))
 
     elif use_chunking:
         # Loop over chunks of i (rows)
@@ -271,8 +262,8 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     # delc: Correction for all ties.
     tmpx = dxx - intg * (1 - dcx) * delx
     tmpy = dyy - intg * (1 - dcy) * dely
-    rxlng = _rle_lengths(rankdata(tmpx, method='ordinal'))
-    rylng = _rle_lengths(rankdata(tmpy, method='ordinal'))
+    rxlng = _rle_lengths(rankdata(tmpx, method='average'))
+    rylng = _rle_lengths(rankdata(tmpy, method='average'))
 
     def var_adj_term(lng):
         lng_vals, lng_counts = np.unique(lng, return_counts=True)
@@ -289,8 +280,13 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     delc = (x1 + y1) / 18.0 - term2 - term3
 
     # deluc: Correction for ties between uncensored and censored values.
-    x4 = x3
-    y4 = y3
+    # NADA/LWP: x4 <- nrxlng * (rxlng - 1), i.e. sum over tie groups of (length - 1).
+    # Note: R's rank() averages ties, so tie runs are detected by rle(); the
+    # equivalent here is rankdata(method='average').
+    _lv, _lc = np.unique(rxlng, return_counts=True)
+    x4 = np.sum(_lc * (_lv - 1))
+    _lv, _lc = np.unique(rylng, return_counts=True)
+    y4 = np.sum(_lc * (_lv - 1))
     tmpx_uc = intg * dcx - 1
     tmpx_uc[tmpx_uc < 0] = 0
     nrxlng_uc = np.sum(tmpx_uc)
@@ -312,8 +308,8 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     # delu: Correction for ties between two censored values.
     dxx_u = dxx - intg * dcx * delx
     dyy_u = dyy - intg * dcy * dely
-    rxlng_u = _rle_lengths(rankdata(dxx_u, method='ordinal'))
-    rylng_u = _rle_lengths(rankdata(dyy_u, method='ordinal'))
+    rxlng_u = _rle_lengths(rankdata(dxx_u, method='average'))
+    rylng_u = _rle_lengths(rankdata(dyy_u, method='average'))
     x1_u, x2_u, x3_u = var_adj_term(rxlng_u)
     y1_u, y2_u, y3_u = var_adj_term(rylng_u)
 
@@ -354,7 +350,7 @@ def _p_value(z, alpha, continuous_confidence=False):
         continuous_confidence (bool): If True, returns trend direction (increasing/decreasing)
                                      even if not significant (h=False), unless z=0.
     """
-    p = 2 * (1 - norm.cdf(abs(z)))
+    p = 2 * norm.sf(abs(z))
     h = abs(z) > norm.ppf(1 - alpha / 2)
 
     if continuous_confidence:
@@ -378,8 +374,7 @@ def _mk_probability(p, s):
     """
     Computes the Mann-Kendall probability.
     """
-    # Ensure p is a scalar to prevent array issues downstream
-    p_scalar = np.mean(p)
+    p_scalar = float(p)
     C = 1 - p_scalar / 2
     Cd = C if s <= 0 else p_scalar / 2
     return float(C), float(Cd)
@@ -427,49 +422,57 @@ def _sens_estimator_unequal_spacing(x, t):
     if n < 2:
         return np.array([])
 
-    # Create all pairs of indices
-    i, j = np.triu_indices(n, k=1)
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
+    if n <= 2000:
+        i, j = np.triu_indices(n, k=1)
+        x_diff = x[j] - x[i]
+        t_diff = t[j] - t[i]
+        # Pairs with (numerically) equal times have no defined slope.
+        valid_mask = np.abs(t_diff) > 1e-10
+        return x_diff[valid_mask] / t_diff[valid_mask]
 
-    # Calculate differences
-    x_diff = x[j] - x[i]
-    t_diff = t[j] - t[i]
+    # Row-wise construction keeps peak memory at ~one copy of the slopes.
+    out = []
+    for i in range(n - 1):
+        dt = t[i + 1:] - t[i]
+        m = np.abs(dt) > 1e-10
+        out.append((x[i + 1:][m] - x[i]) / dt[m])
+    return np.concatenate(out)
 
-    # Avoid division by zero using a tolerance for float comparison
-    valid_mask = np.abs(t_diff) > 1e-10
 
-    return x_diff[valid_mask] / t_diff[valid_mask]
+def _total_pairs_if_sampled(n, max_pairs):
+    """Number of possible pairs if a pair-sampling estimator will subsample, else None."""
+    n_pairs = n * (n - 1) // 2
+    if max_pairs is not None and n_pairs > max_pairs:
+        return n_pairs
+    return None
 
 
 def _sens_estimator_adaptive(x, t, max_pairs=None, random_state=None):
     """
-    Adaptive Sen's slope: automatic or fast based on size.
+    Sen's slopes, exact or sampled.
 
     Args:
-        max_pairs: None for automatic, or specific limit
-        random_state: For reproducibility in fast mode
+        max_pairs: None -> exact (all pairs).  An integer -> sample at most
+            this many pairs when there are more possible pairs than that.
+        random_state: Seed for pair sampling (a fixed default seed is used
+            when None, so results are reproducible).
     """
-    n = len(x)
-
     if max_pairs is None:
-        # Automatic
-        if n * (n - 1) // 2 <= 100000:
-            return _sens_estimator_unequal_spacing(x, t)
-        else:
-            from ._large_dataset import fast_sens_slope
-            return fast_sens_slope(x, t, random_state=random_state)
-    else:
-        # User specified limit
-        from ._large_dataset import fast_sens_slope
-        return fast_sens_slope(x, t, max_pairs=max_pairs, random_state=random_state)
+        return _sens_estimator_unequal_spacing(x, t)
+    from ._large_dataset import fast_sens_slope
+    return fast_sens_slope(x, t, max_pairs=max_pairs, random_state=random_state)
 
 
 def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_mult=DEFAULT_GT_MULTIPLIER, method='unbiased'):
     """
     Computes Sen's slope for censored, unequally spaced data.
 
-    This implements the logic from the LWP-TRENDS R script, which is the
-    default behavior. An optional, more statistically robust method is also
-    provided.
+    This implements the pairwise-slope logic of the LWP-TRENDS R script
+    (``GetInterObservationSlopes``).  For a less biased estimator with
+    censored data use the Akritas-Theil-Sen estimator (``sens_slope_method='ats'``,
+    the default in ``trend_test``/``seasonal_trend_test``).
 
     Args:
         x (np.array): The data values.
@@ -480,8 +483,12 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
         method (str): The method to use for handling ambiguous slopes.
             - 'lwp': Sets ambiguous slopes to 0, mimicking the
               LWP-TRENDS R script.
-            - 'unbiased' (default): Sets ambiguous slopes to np.nan, which is a more
-              statistically neutral approach. (Formerly 'nan').
+            - 'unbiased' (alias 'nan'): Drops ambiguous slopes (sets them
+              to np.nan).  Despite the historical name this is *not*
+              unbiased: with a trend, the dropped pairs are mostly those of
+              the opposite sign, so the median is pushed away from zero
+              (roughly +15% at 20% censoring and +70% at 50% censoring in
+              simulations).
 
     Returns:
         np.array: An array of calculated slopes.
@@ -501,87 +508,71 @@ def _sens_estimator_censored(x, t, cen_type, lt_mult=DEFAULT_LT_MULTIPLIER, gt_m
     3.  **Handling of Ambiguous Slopes**: The method acknowledges that the
         slope between certain pairs of points (e.g., two left-censored values)
         is ambiguous. The `method` parameter determines how these are handled:
-        -   `'lwp'`: Sets ambiguous slopes to 0. This is a
-            conservative choice that reduces the magnitude of the overall
-            median slope but may not be statistically neutral.
-        -   `'unbiased'` (or `'nan'`): Sets ambiguous slopes to NaN, effectively removing them
-            from the median calculation. This is a more statistically neutral
-            approach, as it does not bias the slope towards zero.
+        -   `'lwp'`: Sets ambiguous slopes to 0 (LWP-TRENDS behaviour).  This
+            biases the median towards zero as censoring increases.
+        -   `'unbiased'` (or `'nan'`): Sets ambiguous slopes to NaN, removing
+            them from the median.  This biases the median *away* from zero.
+        Both are heuristics; the Akritas-Theil-Sen estimator (`_ats.py`) is
+        the recommended estimator for censored data.
     """
     n = len(x)
-
-    # Add a hard limit to prevent integer overflow on large n*n arrays
-    MAX_SAFE_N = 46340
-    if n > MAX_SAFE_N:
-        warnings.warn(
-            f"Sample size n={n} exceeds maximum safe size of {MAX_SAFE_N}. "
-            f"This would cause an integer overflow during pairwise calculations. "
-            f"Consider using the regional_test() function for aggregation or subsampling your data.",
-            UserWarning
-        )
-        return np.array([])
-
-    if n > 5000:
-        mem_gb = (n**2 * 8 / 1e9)
-        warnings.warn(
-            f"Large sample size (n={n}) requires ~{mem_gb:.1f} GB memory "
-            f"for pairwise calculations. Maximum safe n is {MAX_SAFE_N}. "
-            f"Using `regional_test()` for aggregating multiple smaller sites is recommended.",
-            UserWarning
-        )
-
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
     if n < 2:
         return np.array([])
+    code = _censor_codes(cen_type)
+    if n <= 2000:
+        i, j = np.triu_indices(n, k=1)
+        slopes, valid = _censored_pair_slopes(x, t, code, i, j, lt_mult, gt_mult, method)
+        return slopes[valid]
+    out = []
+    for i0 in range(n - 1):
+        j = np.arange(i0 + 1, n)
+        i = np.full(len(j), i0)
+        slopes, valid = _censored_pair_slopes(x, t, code, i, j, lt_mult, gt_mult, method)
+        out.append(slopes[valid])
+    return np.concatenate(out)
 
-    # Create all pairs of indices
-    i_indices, j_indices = np.triu_indices(n, k=1)
 
-    # 1. Calculate raw differences and slopes (for censor checks)
-    x_diff_raw = x[j_indices] - x[i_indices]
-    t_diff = t[j_indices] - t[i_indices]
+def _censor_codes(cen_type):
+    """Map censor labels to integer codes: 0 = not censored, 1 = 'lt', 2 = 'gt'."""
+    cen_type = np.asarray(cen_type).astype(str)
+    return np.where(cen_type == 'lt', 1, np.where(cen_type == 'gt', 2, 0)).astype(np.int8)
 
-    # Avoid division by zero using a tolerance for float comparison
-    valid_t_mask = np.abs(t_diff) > 1e-10
-    x_diff_raw = x_diff_raw[valid_t_mask]
-    t_diff = t_diff[valid_t_mask]
-    i_indices = i_indices[valid_t_mask]
-    j_indices = j_indices[valid_t_mask]
 
-    slopes_raw = x_diff_raw / t_diff
+def _censored_pair_slopes(x, t, code, i, j, lt_mult=DEFAULT_LT_MULTIPLIER,
+                          gt_mult=DEFAULT_GT_MULTIPLIER, method='unbiased'):
+    """
+    Censored pairwise slopes for index pairs (i, j), following LWP-TRENDS
+    ``GetInterObservationSlopes``.  Each pair is oriented by time (later minus
+    earlier), so the result does not depend on the order of the input rows.
 
-    # 2. Modify values for final slope calculation (as per R script)
-    x_mod = x.copy().astype(float)
-    x_mod[cen_type == 'lt'] *= lt_mult
-    x_mod[cen_type == 'gt'] *= gt_mult
-    x_diff_mod = x_mod[j_indices] - x_mod[i_indices]
-    slopes_mod = x_diff_mod / t_diff
+    Returns (slopes, valid) where ``valid`` is False for pairs with
+    (numerically) equal times.
+    """
+    dt = t[j] - t[i]
+    valid = np.abs(dt) > 1e-10
+    later_first = dt >= 0
+    late = np.where(later_first, j, i)
+    early = np.where(later_first, i, j)
+    dt_abs = np.abs(dt)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        slopes_raw = (x[late] - x[early]) / dt_abs
+        x_mod = x.copy()
+        x_mod[code == 1] *= lt_mult
+        x_mod[code == 2] *= gt_mult
+        slopes = (x_mod[late] - x_mod[early]) / dt_abs
 
-    # 3. Create censor labels for pairs and apply rules
-    # The order MUST be j, i to match the R script's lower.tri() logic,
-    # which pairs (later_time, earlier_time).
-    cen_type_pairs = cen_type[j_indices] + " " + cen_type[i_indices]
-    slopes_final = slopes_mod.copy()
-
-    # Determine the value to assign to ambiguous slopes based on the method
-    # 'lwp' uses 0, 'unbiased' (and 'nan') uses np.nan
-    ambiguous_slope_value = 0 if method == 'lwp' else np.nan
-
-    # Rule 1: No slope between two censored values of the same type.
-    slopes_final[(cen_type_pairs == 'gt gt') | (cen_type_pairs == 'lt lt')] = ambiguous_slope_value
-
-    # Rule 2: Ambiguous if later value is left-censored ('lt') and slope is positive.
-    slopes_final[(slopes_raw > 0) & (cen_type_pairs == 'lt not')] = ambiguous_slope_value
-
-    # Rule 3: Ambiguous if earlier value is left-censored ('lt') and slope is negative.
-    slopes_final[(slopes_raw < 0) & (cen_type_pairs == 'not lt')] = ambiguous_slope_value
-
-    # Rule 4: Ambiguous if earlier value is right-censored ('gt') and slope is positive.
-    slopes_final[(slopes_raw > 0) & (cen_type_pairs == 'not gt')] = ambiguous_slope_value
-
-    # Rule 5: Ambiguous if later value is right-censored ('gt') and slope is negative.
-    slopes_final[(slopes_raw < 0) & (cen_type_pairs == 'gt not')] = ambiguous_slope_value
-
-    return slopes_final
+    cl, ce = code[late], code[early]
+    ambiguous = (
+        ((cl == 1) & (ce == 1)) | ((cl == 2) & (ce == 2))          # 1. both censored, same side
+        | ((slopes_raw > 0) & (cl == 1) & (ce == 0))               # 2. 'lt not', positive
+        | ((slopes_raw < 0) & (cl == 0) & (ce == 1))               # 3. 'not lt', negative
+        | ((slopes_raw > 0) & (cl == 0) & (ce == 2))               # 4. 'not gt', positive
+        | ((slopes_raw < 0) & (cl == 2) & (ce == 0))               # 5. 'gt not', negative
+    )
+    slopes[ambiguous] = 0.0 if method == 'lwp' else np.nan
+    return slopes, valid
 
 
 def _sens_estimator_censored_adaptive(x, t, cen_type,
@@ -589,22 +580,11 @@ def _sens_estimator_censored_adaptive(x, t, cen_type,
                                       method='unbiased',
                                       max_pairs=None,
                                       random_state=None):
-    """Adaptive censored Sen's slope."""
-    n = len(x)
-
+    """Censored Sen's slopes, exact (max_pairs=None) or sampled."""
     if max_pairs is None:
-        if n * (n - 1) // 2 <= 100000:
-            return _sens_estimator_censored(
-                x, t, cen_type, lt_mult, gt_mult, method
-            )
-        else:
-            from ._large_dataset import fast_sens_slope_censored
-            return fast_sens_slope_censored(
-                x, t, cen_type,
-                lt_mult=lt_mult, gt_mult=gt_mult,
-                method=method,
-                random_state=random_state
-            )
+        return _sens_estimator_censored(
+            x, t, cen_type, lt_mult, gt_mult, method
+        )
     else:
         from ._large_dataset import fast_sens_slope_censored
         return fast_sens_slope_censored(
@@ -616,111 +596,125 @@ def _sens_estimator_censored_adaptive(x, t, cen_type,
         )
 
 
+def _valid_pair_count(slopes, total_pairs):
+    """
+    Number of usable (non-NaN) slopes in the population the slopes represent.
+
+    When ``total_pairs`` is None the slopes are the full set of pairs.  When the
+    slopes are a random sample of ``total_pairs`` pairs, the valid fraction
+    observed in the sample is scaled up to the population.
+    """
+    n_all = len(slopes)
+    n_valid = int(np.sum(~np.isnan(slopes)))
+    if total_pairs is None or n_all == 0:
+        return float(n_valid)
+    return float(total_pairs) * n_valid / n_all
+
+
 def _confidence_intervals(slopes, var_s, alpha, method='direct', total_pairs=None):
     """
-    Computes the confidence intervals for Sen's slope.
+    Confidence interval for Sen's slope (Gilbert 1987, section 16.5).
+
+    The ranks of the limits among the N usable slopes are
+    ``(N -/+ Z_{1-alpha/2} * sqrt(Var(S))) / 2``.
 
     Args:
-        slopes: Array of slopes (sample or full population)
-        var_s: Variance of S statistic (corresponds to total_pairs)
-        alpha: Significance level
-        method: 'direct' or 'lwp'
-        total_pairs: Total number of possible pairs. If None, assumes slopes
-                     contains all pairs. Used for scaling when slopes is a sample.
+        slopes: Array of slopes (all pairs, or a random sample of pairs).
+            NaN entries (ambiguous censored pairs) are ignored.
+        var_s: Variance of the Mann-Kendall S statistic.
+        alpha: Significance level (two-sided interval of level 1 - alpha).
+        method: 'direct' (nearest rank) or 'lwp' (linear interpolation
+            between ranks, as in LWP-TRENDS).
+        total_pairs: Number of possible pairs when ``slopes`` is a random
+            sample; None when ``slopes`` holds every pair.
     """
-    # Filter out NaN values, which can occur with the 'nan' method for
-    # censored slopes.
     valid_slopes = slopes[~np.isnan(slopes)]
     n_sample = len(valid_slopes)
 
     if n_sample == 0 or var_s < EPSILON:
         return np.nan, np.nan
 
-    if total_pairs is None:
-        total_pairs = n_sample
+    n_pop = _valid_pair_count(slopes, total_pairs)
 
-    # For a two-sided confidence interval
     Z = norm.ppf(1 - alpha / 2)
-
-    # Calculate limits in terms of the total population ranks
     C = Z * np.sqrt(var_s)
-    M1 = (total_pairs - C) / 2
-    M2 = (total_pairs + C) / 2
+    M1 = (n_pop - C) / 2
+    M2 = (n_pop + C) / 2
 
-    # Convert to quantiles
-    q1 = M1 / total_pairs
-    q2 = M2 / total_pairs
-
-    # Map to ranks in the sample
-    rank1 = q1 * n_sample
-    rank2 = q2 * n_sample
+    # Map population ranks to ranks in the (possibly sampled) slope set.
+    rank1 = M1 / n_pop * n_sample
+    rank2 = M2 / n_pop * n_sample
 
     sorted_slopes = np.sort(valid_slopes)
 
     if method == 'lwp':
-        # LWP-TRENDS R script method (interpolation)
-        # Note: 1-based ranks for interpolation
+        # LWP-TRENDS: approx() over ranks 1..N; outside the range R returns NA
+        # and falls back to min/max, which np.interp's clamping reproduces.
         ranks = np.arange(1, n_sample + 1)
         lower_ci, upper_ci = np.interp([rank1, rank2], ranks, sorted_slopes)
     else:
-        # Default method (direct indexing)
-        # q1 is fraction of data. q1 * n gives float index.
-        # We target the index corresponding to that rank.
-        # rank 1 -> index 0
-
-        lower_idx = int(np.round(rank1 - 1))
-        upper_idx = int(np.round(rank2 - 1))
-
-        # Ensure indices are within bounds
-        lower_idx = np.clip(lower_idx, 0, n_sample - 1)
-        upper_idx = np.clip(upper_idx, 0, n_sample - 1)
-
+        lower_idx = int(np.clip(np.round(rank1 - 1), 0, n_sample - 1))
+        upper_idx = int(np.clip(np.round(rank2 - 1), 0, n_sample - 1))
         lower_ci = sorted_slopes[lower_idx]
         upper_ci = sorted_slopes[upper_idx]
 
     return lower_ci, upper_ci
 
 
+def _rank_of_zero(sorted_slopes, ties):
+    """
+    Rank of the value 0 among sorted slopes by linear interpolation, with tied
+    slope values collapsed as in R's ``approx(..., ties=median|max|min)``.
+    Returns NaN when 0 lies outside the range of the slopes.
+    """
+    vals, first, counts = np.unique(sorted_slopes, return_index=True, return_counts=True)
+    lo_rank = first + 1.0
+    hi_rank = first + counts.astype(float)
+    if ties == 'max':
+        r = hi_rank
+    elif ties == 'min':
+        r = lo_rank
+    else:
+        r = (lo_rank + hi_rank) / 2.0
+    if 0 < vals[0] or 0 > vals[-1]:
+        return np.nan
+    if len(vals) == 1:
+        return r[0]
+    return float(np.interp(0.0, vals, r))
+
+
 def _sen_probability(slopes, var_s, total_pairs=None):
     """
-    Calculates the probability that the Sen's slope is > 0.
+    Probability that the true slope is *less than zero*, from the rank of
+    zero among the pairwise slopes (LWP-TRENDS ``Sen_Probability``,
+    ``Sen_Probabilitymax``, ``Sen_Probabilitymin``).
+
+    Returns (p_median_ties, p_max_ties, p_min_ties).  As in LWP-TRENDS, when
+    every slope is negative (positive) the median-ties rank is set to the
+    largest (smallest) rank; the max/min variants are NaN when 0 is outside
+    the range of the slopes.
     """
-    # Filter out NaN values from slopes
     valid_slopes = slopes[~np.isnan(slopes)]
     n_sample = len(valid_slopes)
 
     if n_sample == 0 or var_s < EPSILON:
         return np.nan, np.nan, np.nan
 
-    if total_pairs is None:
-        total_pairs = n_sample
-
     sorted_slopes = np.sort(valid_slopes)
-    ranks = np.arange(1, n_sample + 1)
-
-    # Replicate R's approx function with different tie methods
-    R0_median = np.interp(0, sorted_slopes, ranks)
-    R0_max = np.interp(0, sorted_slopes, ranks, right=n_sample) # ties='max'
-    R0_min = np.interp(0, sorted_slopes, ranks, left=1) # ties='min
-
-    # Handle edge cases where all slopes are on one side of zero
+    R0_median = _rank_of_zero(sorted_slopes, 'median')
+    R0_max = _rank_of_zero(sorted_slopes, 'max')
+    R0_min = _rank_of_zero(sorted_slopes, 'min')
     if np.all(valid_slopes < 0):
-        R0_median = R0_max = n_sample
-        R0_min = 1 # R behavior is complex here, this is a simplification
+        R0_median = float(n_sample)
     elif np.all(valid_slopes > 0):
-        R0_median = R0_min = 1
-        R0_max = n_sample # R behavior
+        R0_median = 1.0
 
-    # Calculate probabilities
-    # Scale the sample statistic to the population scale
-    scaling = total_pairs / n_sample
+    scaling = _valid_pair_count(slopes, total_pairs) / n_sample
+    sd = np.sqrt(var_s)
 
-    z_median = ((2 * R0_median - n_sample) * scaling) / np.sqrt(var_s) if var_s > 0 else 0
-    z_max = ((2 * R0_max - n_sample) * scaling) / np.sqrt(var_s) if var_s > 0 else 0
-    z_min = ((2 * R0_min - n_sample) * scaling) / np.sqrt(var_s) if var_s > 0 else 0
+    def prob(r0):
+        if np.isnan(r0):
+            return np.nan
+        return float(norm.cdf((2 * r0 - n_sample) * scaling / sd))
 
-    sen_prob = norm.cdf(z_median)
-    sen_prob_max = norm.cdf(z_max)
-    sen_prob_min = norm.cdf(z_min)
-
-    return sen_prob, sen_prob_max, sen_prob_min
+    return prob(R0_median), prob(R0_max), prob(R0_min)

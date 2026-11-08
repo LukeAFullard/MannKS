@@ -1,4 +1,7 @@
-"""regional_test vs R getTAU, feeding R's own per-site S and C into regional_test."""
+"""regional_test vs R getTAU, feeding R's own per-site S and C into regional_test.
+
+Two scenarios: all sites sampled on the same day of each month, and sites sampled on
+different days of the same months (aligned by month in both implementations)."""
 import os, sys, subprocess, warnings
 import numpy as np, pandas as pd
 sys.path.insert(0, os.environ.get("MANNKS_SRC", os.path.join(os.path.dirname(__file__), "../..")))

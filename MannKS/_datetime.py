@@ -146,31 +146,22 @@ def _get_time_ranks(t_values, cycles):
     return ranks
 
 
-def _get_theoretical_midpoint(datetime_series):
+def _get_theoretical_midpoint(datetime_series, period=None):
     """
-    Calculates the theoretical midpoint of a time period for a series of datetimes.
-    This is used for the 'middle_lwp' aggregation method to replicate R's logic.
+    Mid-point of the time increment for a group of datetimes.
+
+    With ``period`` ('Y', 'Q', 'M', ...) the LWP-TRENDS increment mid-point is
+    returned (see ``_helpers._lwp_period_midpoint``); otherwise the mid-point
+    of the group's time range.
     """
+    from ._helpers import _lwp_period_midpoint
     if not isinstance(datetime_series, pd.Series):
         datetime_series = pd.Series(datetime_series)
+    times = pd.to_datetime(datetime_series)
+    if period is not None:
+        return _lwp_period_midpoint(times.iloc[0], period)
+    return times.min() + (times.max() - times.min()) / 2
 
-    # All dates in the group should be in the same period (e.g., month, week)
-    first_date = datetime_series.iloc[0]
-
-    # Determine the period (month, week, etc.)
-    # Infer the period from the first date to determine start/end bounds.
-    # Note: Explicit period handling would be required for non-standard periods.
-    if first_date.day == 1 and first_date.month != 2:
-        # Likely start of a month, find end of month
-        start_of_period = first_date.replace(day=1)
-        end_of_period = (start_of_period + pd.DateOffset(months=1)) - pd.Timedelta(nanoseconds=1)
-    else:
-        # Assume weekly or other, and just use the range of the data in the group
-        start_of_period = datetime_series.min()
-        end_of_period = datetime_series.max()
-
-    midpoint = start_of_period + (end_of_period - start_of_period) / 2
-    return midpoint
 
 def _get_agg_func(agg_period: str):
     """

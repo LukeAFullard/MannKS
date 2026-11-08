@@ -118,9 +118,10 @@ class TestRegionalAggregation(unittest.TestCase):
             'time': [pd.to_datetime('2020-01-01'), pd.to_datetime('2020-01-01')]
         })
         result = regional_test(trend_results, time_series_data)
-        self.assertEqual(result.DT, 'No Clear Direction')
+        # LWP-TRENDS getTAU takes the increasing direction when balanced.
+        self.assertEqual(result.DT, 'Increasing')
         self.assertEqual(result.TAU, 0.5)
-        self.assertTrue(np.isnan(result.CT))
+        self.assertAlmostEqual(result.CT, 0.5)
 
 
 if __name__ == '__main__':

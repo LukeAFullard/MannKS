@@ -2,8 +2,8 @@
 ## 1. Model Selection Accuracy (Correct N)
 | Method | Accuracy | Mean Time (s) |
 | :--- | :--- | :--- |
-| Piecewise_Regression | 93.3% | 4.0554 |
-| MannKS_Hybrid | 93.3% | 3.8888 |
+| Piecewise_Regression | 93.3% | 1.4799 |
+| MannKS_Hybrid | 93.3% | 1.4792 |
 
 ## 2. Breakpoint Location Accuracy (MAE)
 | Method | Mean Error | Std Dev | Min | Max |

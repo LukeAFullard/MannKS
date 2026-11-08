@@ -122,3 +122,4 @@ The plots generated show the same data and trend lines, but the interpretation i
 
 ### Flat Trend (Continuous)
 ![Flat Cont](flat_no_trend_cont.png)
+

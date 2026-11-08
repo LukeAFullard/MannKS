@@ -88,6 +88,7 @@ print("--- SCENARIO A: Censored Data Analysis ---")
 # - use_bagging=True: Use Bootstrap Aggregating to find robust breakpoint locations.
 #                     This is crucial for censored/noisy data to avoid local minima.
 # - slope_scaling='year': Report slopes in units per year (easier to interpret).
+# - random_state=42: Set seed for reproducibility of bootstrap results.
 print("Running Model Selection (0-2 breakpoints) on Censored Data...")
 result_censored, summary_censored = find_best_segmentation(
     x=df_censored,
@@ -96,7 +97,8 @@ result_censored, summary_censored = find_best_segmentation(
     use_bagging=True,
     n_bootstrap=20, # Use >=100 for production
     alpha=0.05,
-    slope_scaling='year'
+    slope_scaling='year',
+    random_state=42
 )
 
 print("\nModel Selection Summary (Censored):")
@@ -128,7 +130,8 @@ result_uncensored, summary_uncensored = find_best_segmentation(
     use_bagging=True,
     n_bootstrap=20,
     alpha=0.05,
-    slope_scaling='year'
+    slope_scaling='year',
+    random_state=42
 )
 
 print("\nModel Selection Summary (Uncensored):")
@@ -242,38 +245,7 @@ print(f"Censored: Probability change occurred in 2010: {prob_cens:.1%}")
 Running Model Selection (0-2 breakpoints) on Censored Data...
 
 Model Selection Summary (Censored):
-|   n_breakpoints |      bic |      aic |       sar | converged   |
-|----------------:|---------:|---------:|----------:|:------------|
-|               0 |  652.065 |  645.104 | 3469.98   | True        |
-|               1 |  280.711 |  266.788 |  705.511  | True        |
-|               2 | -421.626 | -442.51  |   36.1201 | True        |
-
-Best Model (Censored): 2 Breakpoints
-Plot saved to /app/Examples/32_Segmented_Regression/segmented_plot_censored.png
-
---- SCENARIO B: Uncensored Data Analysis (Hypothetical) ---
-Running Model Selection (0-2 breakpoints) on Uncensored Data...
-
-Model Selection Summary (Uncensored):
-|   n_breakpoints |      bic |      aic |        sar | converged   |
-|----------------:|---------:|---------:|-----------:|:------------|
-|               0 |  940.669 |  933.708 | 11549.8    | True        |
-|               1 | -328.415 | -342.337 |    55.7513 | True        |
-|               2 | -322.515 | -343.398 |    54.5879 | True        |
-
-Best Model (Uncensored): 1 Breakpoints
-Plot saved to /app/Examples/32_Segmented_Regression/segmented_plot_uncensored.png
-
---- CI Comparison: Bootstrap vs Standard OLS ---
-Censored (Bootstrap): 2010-05-16 18:29:15.925353765 (CI: 2010-04-30 07:25:27.472343922 to 2010-06-11 04:50:16.322888136)
-Censored (Standard OLS): 2010-05-25 01:55:24.474270582 (CI: 2010-05-03 16:04:51.965868235 to 2010-06-15 11:45:56.982672930)
-Standard OLS Censored Plot saved to /app/Examples/32_Segmented_Regression/segmented_plot_censored_ols.png
-
-Uncensored (Bootstrap): 2010-05-28 19:54:14.609125614 (CI: 2010-05-16 02:11:56.899489164 to 2010-06-10 15:01:24.963670015)
-Uncensored (Standard OLS): 2010-05-30 18:27:04.428439617 (CI: 2010-05-11 23:17:11.799438 to 2010-06-18 13:36:57.057441235)
-Standard OLS Uncensored Plot saved to /app/Examples/32_Segmented_Regression/segmented_plot_uncensored_ols.png
-Uncensored: Probability change occurred in 2010: 100.0%
-Censored: Probability change occurred in 2010: 95.0%
+Error executing example: `Import tabulate` failed.  Use pip or conda to install the tabulate package.
 
 ```
 

@@ -124,7 +124,7 @@ def run_r_script(data, r_script_path):
                 suppressMessages(library(NADA))
 
                 df$myDate <- as.Date(df$myDate)
-                df <- GetMoreDateInfo(df)
+                df <- GetMoreDateInfo(df, FindDateShifts=FALSE)
 
                 df$TimeIncr <- df$Month
                 df$Season <- df$Month
@@ -212,7 +212,7 @@ def run_v33():
             mk_test_method='lwp',
             sens_slope_method='lwp',
             ci_method='lwp',
-            tau_method='b',
+            tau_method='a',
             slope_scaling='year',
             alpha=0.1,
             tie_break_method='lwp'

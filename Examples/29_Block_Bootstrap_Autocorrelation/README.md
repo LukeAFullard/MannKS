@@ -154,28 +154,28 @@ Note: If p < 0.05, this is a False Positive caused by autocorrelation.
 
 --- Test 2: Yue & Wang (2004) Correction ---
 Trend: increasing
-p-value: 0.2447
-Significant? False
+p-value: 0.0228
+Significant? True
 Slope: 0.2300 units per year
-Confidence Interval (95%): [-0.1672, 0.6631]
-Effective Sample Size: 13.1 (vs 100 original)
+Confidence Interval (95%): [0.0322, 0.4362]
+Effective Sample Size: 50.0 (vs 100 original)
 
 --- Test 3: Block Bootstrap Mann-Kendall ---
 Trend: increasing
-p-value: 0.1550
+p-value: 0.1508
 Significant? False
 Slope: 0.2300 units per year
-Confidence Interval (95%): [-0.0598, 0.8128]
-Autocorrelation (ACF1): 0.809
+Confidence Interval (95%): [-0.1787, 0.6796]
+Autocorrelation (ACF1): 0.772
 Block Size Used: 10
 
 --- Test 4: Seasonal Block Bootstrap ---
-Seasonal Trend: increasing
-p-value: 0.2920
+Seasonal Trend: decreasing
+p-value: 0.7792
 Significant? False
-Slope: 0.0267 units per year
-Confidence Interval (95%): [-0.0188, 0.0712]
-Block Size Used: 4 (cycles)
+Slope: -0.0111 units per year
+Confidence Interval (95%): [-0.1083, 0.0909]
+Block Size Used: 3 (cycles)
 
 ```
 

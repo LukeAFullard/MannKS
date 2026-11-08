@@ -36,9 +36,9 @@ def test_moving_block_bootstrap_indices():
     assert np.all(indices >= 0)
     assert np.all(indices < n)
 
-    # Check if indices are consecutive in blocks of 3 (mostly)
-    # This is stochastic, but we can check basic properties
-    diffs = np.diff(indices)
+    # Indices are consecutive within blocks; circular blocks wrap around,
+    # so consecutive means +1 modulo n.
+    diffs = np.diff(indices) % n
     # In a block of 3, we expect +1 differences twice, then a jump.
     # So count of (diff == 1) should be substantial.
     assert np.sum(diffs == 1) >= (n // block_size) * (block_size - 1)

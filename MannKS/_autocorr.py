@@ -59,78 +59,99 @@ def estimate_acf(x, max_lag=None):
     return acf, significant_lag
 
 
-def effective_sample_size(x, method='yue'):
+def detrend(x, t):
     """
-    Calculate effective sample size accounting for autocorrelation.
+    Residuals after removing the Sen's slope trend, ``x - b * (t - median(t))``.
+    Autocorrelation must be estimated on detrended data: a monotonic trend
+    otherwise produces large positive sample autocorrelations.
+    """
+    from ._stats import _sens_estimator_unequal_spacing
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
+    if len(x) < 3:
+        return x - np.nanmean(x)
+    slopes = _sens_estimator_unequal_spacing(x, t)
+    b = np.nanmedian(slopes) if len(slopes) else 0.0
+    if not np.isfinite(b):
+        b = 0.0
+    return x - b * (t - np.median(t))
+
+
+def effective_sample_size(x, t=None, method='yue'):
+    """
+    Effective sample size accounting for serial correlation.
 
     Args:
-        x: Data vector
-        method: 'yue' (Yue & Wang 2004) or 'bayley' (Bayley & Hammersley 1946)
+        x: Data vector (assumed to be in time order).
+        t: Time vector.  If given, the series is detrended with Sen's slope
+            before the autocorrelation is estimated (Yue & Wang 2004).
+        method: 'yue' (Yue & Wang 2004 variance-inflation factor
+            ``1 + 2 * sum_k (1 - k/n) rho_k``, using only lags whose sample
+            autocorrelation is significant at the 5% level) or 'bayley'
+            (AR(1) approximation ``n (1 - rho_1) / (1 + rho_1)``).
 
     Returns:
-        n_eff: Effective sample size
-        acf1: Lag-1 autocorrelation
+        (n_eff, acf1): effective sample size, capped to the range [3, n] so
+        that the correction can only inflate Var(S), and the lag-1
+        autocorrelation of the (detrended) series.
+
+    Note:
+        Like all variance-correction methods, this under-corrects for strong
+        autocorrelation in short series (e.g. AR(1) with rho = 0.6, n = 60
+        gives a rejection rate of ~0.19 at alpha = 0.05 under H0).
     """
-    x = np.asarray(x)
-    # Remove NaNs for ESS calculation
-    x = x[~np.isnan(x)]
+    x = np.asarray(x, dtype=float)
+    if t is not None:
+        t = np.asarray(t, dtype=float)
+        keep = ~np.isnan(x)
+        x = detrend(x[keep], t[keep])
+    else:
+        x = x[~np.isnan(x)]
     n = len(x)
 
     if n < 3:
         return n, 0.0
 
-    acf, _ = estimate_acf(x, max_lag=min(n//4, 50))
+    acf, _ = estimate_acf(x, max_lag=min(n // 4, 50))
     acf1 = acf[1] if len(acf) > 1 else 0.0
 
     if method == 'yue':
-        # Yue & Wang (2004) formula
-        if np.abs(acf1) < 1e-10:
-            return n, acf1
-
-        # Sum of autocorrelations (with exponential decay assumption/actual ACF)
-        # Yue & Wang typically use the actual sample ACF values up to some lag.
-        # The report implementation uses sum of acf[k] * (n-k)/n
-        rho_sum = 0
-        for k in range(1, len(acf)):
-            rho_sum += (1 - k/n) * acf[k]
-
-        # Guard against negative n_eff (possible with strong negative autocorr)
-        denom = 1 + 2 * rho_sum
-        if denom <= 0:
-             n_eff = n # Fallback
-        else:
-             n_eff = n / denom
+        k = np.arange(1, len(acf))
+        rho = acf[1:]
+        rho = np.where(np.abs(rho) > 1.96 / np.sqrt(n), rho, 0.0)
+        factor = 1 + 2 * np.sum((1 - k / n) * rho)
+        n_eff = n / factor if factor > 0 else n
     else:
-        # Simple Bayley-Hammersley formula (often approx as (1-rho)/(1+rho))
-        # Strictly Bayley-Hammersley is more complex sum, but this is the common AR(1) approx
         n_eff = n * (1 - acf1) / (1 + acf1)
 
-    return max(n_eff, 3), acf1  # Ensure minimum of 3
+    return float(min(max(n_eff, 3), n)), acf1
 
 
-def should_apply_correction(x, threshold=0.1):
+def should_apply_correction(x, t=None, threshold=0.1):
     """
-    Determine if autocorrelation correction is needed.
+    Decide whether serial-correlation correction is needed.
 
-    Args:
-        x: Data vector
-        threshold: ACF threshold for correction (default 0.1)
+    The series is detrended first (when ``t`` is given).  Correction is
+    recommended when the lag-1 autocorrelation of the detrended series exceeds
+    both ``threshold`` and its 5% significance bound ``1.96 / sqrt(n)``.
 
     Returns:
-        needs_correction: Boolean
-        acf1: Lag-1 autocorrelation
-        n_eff: Effective sample size
+        (needs_correction, acf1, n_eff)
     """
-    x = np.asarray(x)
-    x = x[~np.isnan(x)]
+    x = np.asarray(x, dtype=float)
+    if t is not None:
+        t = np.asarray(t, dtype=float)
+        keep = ~np.isnan(x)
+        r = detrend(x[keep], t[keep])
+    else:
+        r = x[~np.isnan(x)]
 
-    if len(x) < 3:
-        return False, 0.0, len(x)
+    if len(r) < 3:
+        return False, 0.0, len(r)
 
-    acf, significant_lag = estimate_acf(x)
+    acf, _ = estimate_acf(r)
     acf1 = acf[1] if len(acf) > 1 else 0.0
-    n_eff, _ = effective_sample_size(x)
+    n_eff, _ = effective_sample_size(r)
 
-    needs_correction = (np.abs(acf1) > threshold or significant_lag is not None)
-
+    needs_correction = abs(acf1) > max(threshold, 1.96 / np.sqrt(len(r)))
     return needs_correction, acf1, n_eff

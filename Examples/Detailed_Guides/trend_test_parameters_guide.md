@@ -79,13 +79,13 @@ These parameters control how the test handles censored data.
 -   **Limitations:** This is a simple substitution, not a statistical model like Regression on Order Statistics (ROS). The resulting slope is an estimate whose accuracy depends on how well the multiplier reflects the true underlying values. See **[Example 13](../13_Censored_Data_Multipliers/README.md)**.
 
 #### `sens_slope_method`
--   **Type:** `str`, **Default:** `'unbiased'`
--   **Description:** Controls the method used for calculating the Sen's slope, particularly in the presence of censored data.
+-   **Type:** `str`, **Default:** `'ats'`
+-   **Description:** Slope estimator used when the data contain censored values (uncensored data always use the exact Sen's slope).
 -   **Usefulness:**
-    *   `'unbiased'` (Default): A slope between two incompatible censored values (e.g., `<5` and `<10`) is treated as ambiguous (`NaN`) and excluded from the median calculation. This is statistically neutral. (Formerly `'nan'`, which is still accepted for backward compatibility).
-    *   `'ats'`: Uses the **Akritas-Theil-Sen (ATS)** estimator. This is a statistically robust method specifically designed for censored data. It calculates the slope by finding the value that zeroes the generalized Kendall's S statistic for the residuals. It handles mixed censoring types (left and right) and is the recommended method for rigorous analysis of censored datasets.
-    *   `'lwp'`: Assigns a slope of `0` to ambiguous censored pairs. This mimics the behavior of the legacy LWP-TRENDS R script.
--   **Limitations:** `'ats'` is computationally more intensive than the other methods and uses bootstrapping for confidence intervals. `'lwp'` can artificially bias the slope towards zero and is only recommended for backward compatibility. See **[Example 21](../21_Sens_Slope_Methods/README.md)**.
+    *   `'ats'` (Default): The **Akritas-Theil-Sen** estimator (as in `NADA::cenken`): the slope at which Kendall's S between time and the censored residuals is zero. Censored values are treated as intervals, so no substitution is needed and both left and right censoring are handled. Its confidence interval inverts the censored Kendall test (the same construction as Sen's interval). In simulations it was the least biased option (within a few percent up to 50% censoring).
+    *   `'lwp'`: Pairwise slopes with censored values substituted (`lt_mult`, `gt_mult`) and ambiguous pairs set to `0`, exactly as the LWP-TRENDS R script. Use it to reproduce LWP-TRENDS. It is biased towards zero as censoring increases (about -55% at 50% censoring in simulations).
+    *   `'unbiased'` (alias `'nan'`): Pairwise slopes with ambiguous pairs dropped. Despite the historical name it is biased *away* from zero (about +17% at 20% censoring and +70% at 50%), because the dropped pairs are mostly those opposing the trend.
+-   **Limitations:** The ATS estimate is computed exactly from all pairs (sampled pairs in fast mode); for several thousand censored observations this takes a few seconds. See **[Example 20](../20_Advanced_Sens_Slope_Methods/README.md)**.
 
 #### `mk_test_method`
 -   **Type:** `str`, **Default:** `'robust'`
@@ -105,7 +105,7 @@ These parameters control how the test handles censored data.
         *   `'median'`: Uses the median of values at the tied timestamp.
         *   `'robust_median'`: Uses a censored-data-aware median (recommended for censored data).
         *   `'middle'`: Selects the observation whose timestamp is closest to the mean of the actual timestamps in the group.
-        *   `'middle_lwp'`: Selects the observation closest to the theoretical midpoint of the time period.
+        *   `'middle_lwp'`: Selects the observation closest to the mid-point of the `agg_period` increment, using the LWP-TRENDS definition of the mid-point (same rule as `'lwp'`).
     2.  **Clustered Data (Thinning):** If you have high-frequency data (e.g., daily samples for one month, then monthly for years), it can bias the trend result. You can "thin" the data to a consistent frequency (e.g., one value per year) using these methods:
         *   `'lwp'`: Selects the single observation closest to the theoretical midpoint of the period (mimics LWP R script `UseMidObs=TRUE`).
         *   `'lwp_median'`: Calculates the median of all observations in the period (mimics LWP R script `UseMidObs=FALSE`).
