@@ -17,40 +17,48 @@ def _is_datetime_like(x):
     return False
 
 
+def _datetime_to_seconds(t):
+    """
+    Seconds since 1970-01-01 (float) for any datetime-like array.
+
+    numpy ``datetime64`` and naive datetimes are taken as UTC wall time;
+    timezone-aware values are converted to their UTC instant.  Missing
+    values (NaT/None) become NaN.
+    """
+    arr = np.asarray(t)
+    if not np.issubdtype(arr.dtype, np.datetime64):
+        idx = pd.to_datetime(pd.Index(arr.ravel(), dtype=object), utc=True)
+        arr = idx.tz_convert(None).to_numpy().reshape(arr.shape)
+    missing = np.isnat(arr)
+    out = arr.astype('datetime64[s]').astype(float)
+    out[missing] = np.nan
+    return out
+
+
+def _raise_if_string_times(arr):
+    if arr.dtype.kind in 'US' or (arr.dtype == 'O' and arr.size and isinstance(arr.ravel()[0], str)):
+        raise TypeError("The time vector `t` contains strings. Convert it first, "
+                        "e.g. with pd.to_datetime(t), or pass numbers.")
+
+
 def _to_numeric_time(t):
     """
-    Converts a time vector to numeric (Unix timestamp) if it is datetime-like.
-    Returns float array.
+    Converts a time vector to numeric (seconds since 1970-01-01 for
+    datetimes, see ``_datetime_to_seconds``).  Returns a float array.
     """
     t_arr = np.asarray(t)
     if t_arr.ndim == 0:
         t_arr = t_arr.reshape(1)
-
     if _is_datetime_like(t_arr):
-        # Handle numpy datetime64
-        if np.issubdtype(t_arr.dtype, np.datetime64):
-            return t_arr.astype('datetime64[s]').astype(float)
-        # Handle pandas Series or Index
-        if isinstance(t, (pd.Series, pd.Index)):
-             return t.astype('int64').to_numpy() / 1e9 # ns to s
-        # Handle object array of datetimes
-        try:
-             return np.array([x.timestamp() for x in t_arr], dtype=float)
-        except AttributeError:
-             pass # Fall through to default
-
-    # Try forcing float conversion (handles int/float inputs)
+        return _datetime_to_seconds(t_arr)
     try:
         return t_arr.astype(float)
     except (ValueError, TypeError):
-        # Fallback: try pandas conversion then numeric
+        # Strings (e.g. breakpoint dates given as text)
         try:
-            converted = pd.to_datetime(t_arr)
-            if isinstance(converted, pd.Timestamp):
-                return converted.timestamp()
-            return converted.astype('int64').to_numpy() / 1e9
+            return _datetime_to_seconds(pd.to_datetime(t_arr.ravel()).to_numpy()).reshape(t_arr.shape)
         except Exception:
-             raise ValueError("Could not convert time vector `t` to numeric values.")
+            raise ValueError("Could not convert time vector `t` to numeric values.")
 
 
 def _get_dt_prop(dt, prop):
@@ -123,9 +131,9 @@ def _get_cycle_identifier(dt_series, season_type):
         return (iso_cal.year * 100 + iso_cal.week).to_numpy()
 
     elif season_type in ['hour', 'minute', 'second']:
-        # The cycle is the day, identified by the Unix timestamp of the day's start
-        # Convert to int64 (nanoseconds) and then to float seconds
-        return (dt_accessor.normalize().astype(np.int64) / 10**9)
+        # The cycle is the day, identified by the Unix timestamp of the day's
+        # start (independent of the datetime resolution, ns or us).
+        return _datetime_to_seconds(np.asarray(dt_accessor.normalize()))
 
     else:
         # Default to year if the concept of a cycle is not obvious

@@ -130,27 +130,45 @@ def get_sens_slope_analysis_note(slopes, t, cen_type):
     n = len(t)
     if n < 2:
         return "ok"
+    cen = np.isin(np.asarray(cen_type).astype(str), ['lt', 'gt'])
+    if not cen.any():
+        # No censored values: only the tied-values note can apply.
+        if median_slope == 0:
+            return "WARNING: Sen slope based on tied non-censored values"
+        return "ok"
     # Only exact (all-pair) slope sets can be matched to their pairs; check the
-    # count before materialising the pair indices.
+    # count before looking at the pair indices.
     _, counts = np.unique(t, return_counts=True)
     expected = n * (n - 1) // 2 - int(np.sum(counts * (counts - 1) // 2))
     if len(slopes) != expected:
         return "ok"
-    i, j = np.triu_indices(n, k=1)
-    valid = np.abs(t[j] - t[i]) > 1e-10
-    if int(valid.sum()) != expected:
-        return "ok"
-    i, j = i[valid], j[valid]
 
     abs_diffs = np.abs(slopes - median_slope)
-    idx = np.where(abs_diffs == np.nanmin(abs_diffs))[0]
-    cen = np.isin(np.asarray(cen_type).astype(str), ['lt', 'gt'])
-    ci, cj = cen[i[idx]], cen[j[idx]]
+    idx = np.flatnonzero(abs_diffs == np.nanmin(abs_diffs))
+    del abs_diffs
 
-    if np.any(ci | cj):
-        if np.all(ci & cj):
+    # Walk the pairs (np.triu_indices order, equal times removed) in blocks,
+    # picking out the pairs at positions ``idx``.
+    from ._stats import _iter_triu_blocks
+    any_cen, all_both = False, True
+    pos = 0
+    for i, j in _iter_triu_blocks(n):
+        valid = np.abs(t[j] - t[i]) > 1e-10
+        i, j = i[valid], j[valid]
+        a, b = np.searchsorted(idx, [pos, pos + len(i)])
+        if b > a:
+            sel = idx[a:b] - pos
+            ci_blk, cj_blk = cen[i[sel]], cen[j[sel]]
+            any_cen |= bool(np.any(ci_blk | cj_blk))
+            all_both &= bool(np.all(ci_blk & cj_blk))
+        pos += len(i)
+    if pos != expected:
+        return "ok"
+    if any_cen:
+        if all_both:
             return "WARNING: Sen slope based on two censored values"
         return "WARNING: Sen slope influenced by censored values"
     if median_slope == 0:
         return "WARNING: Sen slope based on tied non-censored values"
     return "ok"
+

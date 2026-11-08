@@ -1,151 +1,110 @@
-
 # Example 35: Large Dataset Trend Analysis
 
 ## The "Why": Handling Big Environmental Data
-Environmental monitoring datasets are growing. Hourly sensor data over a decade yields nearly 90,000 observations. Standard non-parametric tests like Mann-Kendall and Sen's Slope are computationally expensive ($O(n^2)$), making them impractical for $n > 5,000$.
+Hourly sensor data over a decade yields nearly 90,000 observations. The Mann-Kendall test and Sen's slope compare every pair of observations, and the number of pairs grows with the square of n (72 million pairs for n = 12,000).
 
-**MannKS v0.5.0** introduces optimized algorithms to handle large datasets efficiently while preserving statistical rigor:
-1.  **Stochastic Slope Estimation:** Uses stratified random pair sampling to estimate Sen's slope in $O(n)$ time.
-2.  **Stratified Seasonal Sampling:** Ensures balanced seasonal representation when downsampling.
-3.  **Memory-Optimized MK Score:** Uses chunked calculations to prevent memory crashes.
+MannKS handles this automatically:
+1.  **The Mann-Kendall test is always exact.** S, Var(S) and the p-value are computed with an O(n log n) algorithm, for censored and seasonal data too.
+2.  **The slope is estimated from a random sample of pairs** (fast mode, automatic above n = 5,000). The sampling is reproducible, and `approximation_error` reports how large the sampling error can be (95% half-width).
+3.  **Seasonal tests use every observation.** When pairs are sampled for the slope, each season gets a share of the budget in proportion to its number of pairs.
 
 ## The "How": Code Walkthrough
-
-This example demonstrates three scenarios using large synthetic datasets ($n=12,000$).
-
-### 1. Linear Trend (Medium & High Noise)
-We test the `fast` mode on a simple linear trend.
+Five scenarios with n = 12,000 and known true slopes:
 
 ```python
 import numpy as np
-from MannKS import trend_test
-import time
-
-# Generate 12,000 points
-t = np.arange(12000)
-x = 0.5 * t + np.random.normal(0, 10, 12000)
-
-# Run trend test in fast mode
-start = time.time()
-result = trend_test(
-    x, t,
-    large_dataset_mode='fast',
-    max_pairs=100000,
-    random_state=42
-)
-elapsed = time.time() - start
-
-print(f"Time: {elapsed:.2f}s")
-print(f"Mode: {result.computation_mode}")
-print(f"Pairs Used: {result.pairs_used}")
-print(f"Estimated Slope: {result.slope:.6f}")
-```
-
-### 2. Seasonal Trend (Stratified Sampling)
-For seasonal data, random downsampling can bias results if one season is over-represented. MannKS uses **stratified sampling**.
-
-```python
 import pandas as pd
-from MannKS import seasonal_trend_test
+from MannKS import trend_test, seasonal_trend_test, segmented_trend_test, prepare_censored_data
 
-# 12,000 hours of data with daily seasonality
-dates = pd.date_range(start='2000-01-01', periods=12000, freq='h')
-t = np.arange(12000)
-season = 20 * np.sin(2 * np.pi * t / 24)
-x = 0.2 * t + season + np.random.normal(0, 5, 12000)
+rng = np.random.default_rng(42)
+n = 12000
+t = np.arange(n)
 
-# Run seasonal test
-# season_type='hour' uses hour-of-day (0-23)
-result = seasonal_trend_test(
-    x, dates,
-    season_type='hour',
-    large_dataset_mode='fast',
-    max_per_season=200, # Downsample to 200 points per season (4800 total)
-    slope_scaling='hour',
-    random_state=42
-)
+# 1-2. Linear trends: fast mode is chosen automatically for n > 5,000
+res1 = trend_test(0.5 * t + rng.normal(0, 10, n), t)
+res2 = trend_test(0.1 * t + rng.normal(0, 50, n), t)
 
-print(f"Mode: {result.computation_mode}")
-print(f"Slope: {result.slope:.6f} {result.slope_units}")
-print(f"Notes: {result.analysis_notes}")
+# 3. Censored data (values below 1000 reported as '<1000')
+x3 = 0.5 * t + rng.normal(0, 200, n)
+res3 = trend_test(prepare_censored_data([f'<1000' if v < 1000 else v for v in x3]), t)
+
+# 4. Seasonal: hourly data with a daily cycle, 24 hourly seasons
+dates = pd.date_range(start='2000-01-01', periods=n, freq='h')
+x4 = 0.2 * t + 20 * np.sin(2 * np.pi * t / 24) + rng.normal(0, 5, n)
+res4 = seasonal_trend_test(x4, dates, season_type='hour', slope_scaling='hour')
+
+# 5. Segmented: slope 1.0 then -0.5
+half = n // 2
+x5 = np.r_[1.0 * t[:half], 1.0 * half - 0.5 * (t[half:] - half)] + rng.normal(0, 5, n)
+res5 = segmented_trend_test(x5, t, n_breakpoints=1, random_state=42)
+
+for r in (res1, res2, res3, res4):
+    print(r.computation_mode, r.slope, r.approximation_error, (r.lower_ci, r.upper_ci))
 ```
 
-### 3. Segmented Trend
-Segmented analysis finds breakpoints. Phase 1 (breakpoint detection) uses the full dataset via OLS (efficient). Phase 2 (slope estimation) uses the fast estimator for large segments.
-
-```python
-from MannKS import segmented_trend_test
-
-# ... generate segmented data ...
-
-result = segmented_trend_test(
-    x, t,
-    n_breakpoints=1,
-    large_dataset_mode='fast',
-    random_state=42
-)
-
-print(f"Segments found: {len(result.segments)}")
-for i, row in result.segments.iterrows():
-    print(f"Segment {i+1}: Slope={row['slope']:.4f}")
-```
-
-## Sample Output
+## Output
+Timings depend on the machine.
 
 ```text
---- Linear Trend (Medium Noise) ---
-Time: 19.33s
+--- 1. Linear trend (medium noise) ---
+Time: 0.05s
 Mode: fast
-Pairs Used: 99915
-Estimated Slope: 0.499972 units per unit of t
-True Slope:      0.500000
-Error:           0.01%
-Conf. Interval:  (0.499919, 0.500028)
-Trend:           increasing
+Pairs used for the slope: 99,919
+Estimated slope: 0.499995 units per unit of t
+True slope:      0.500000
+Error:           0.00%
+Sampling error (95% half-width, approximation_error): 2.75e-05
+Conf. interval:  (0.499944, 0.500047)
+Trend: increasing, p = 0
 
---- Linear Trend (High Noise) ---
-Time: 19.22s
+--- 2. Linear trend (high noise) ---
+Time: 0.05s
 Mode: fast
-Pairs Used: 99915
-Estimated Slope: 0.099539 units per unit of t
-True Slope:      0.100000
-Error:           0.46%
-Conf. Interval:  (0.099272, 0.099809)
-Trend:           increasing
+Pairs used for the slope: 99,919
+Estimated slope: 0.100192 units per unit of t
+True slope:      0.100000
+Error:           0.19%
+Sampling error (95% half-width, approximation_error): 0.000142
+Conf. interval:  (0.099917, 0.100441)
+Trend: increasing, p = 0
 
---- Seasonal Trend (Stratified) ---
-Time: 0.43s
+(Proportion censored: 17%)
+--- 3. Censored data (Akritas-Theil-Sen slope) ---
+Time: 0.05s
 Mode: fast
-Pairs Used: 477600
-Estimated Slope: 0.199985 units per hour
-True Slope:      0.200000
-Error:           0.01%
-Conf. Interval:  (0.199943, 0.200025)
-Trend:           increasing
-Notes:           ['Large seasonal dataset: Used stratified sampling (max 200 obs/season)']
+Pairs used for the slope: 99,919
+Estimated slope: 0.499298 units per unit of t
+True slope:      0.500000
+Error:           0.14%
+Sampling error (95% half-width, approximation_error): 0.000765
+Conf. interval:  (0.497731, 0.501064)
+Trend: increasing, p = 0
 
---- Segmented Trend ---
-Time: 19.97s
-Mode: hybrid
-Segments found: 2
-  Segment 1: Slope=1.0000, CI=(0.9999, 1.0000)
-  Segment 2: Slope=-0.5000, CI=(-0.5000, -0.4999)
-True Slopes: Segment 1 = 1.0, Segment 2 = -0.5
+--- 4. Seasonal trend (24 hourly seasons) ---
+Time: 0.46s
+Mode: fast
+Pairs used for the slope: 98,424
+Estimated slope: 0.199999 units per hour
+True slope:      0.200000
+Error:           0.00%
+Sampling error (95% half-width, approximation_error): 1.48e-05
+Conf. interval:  (0.199972, 0.200027)
+Trend: increasing, p = 0
+
+--- 5. Segmented trend ---
+Time: 5.54s
+Breakpoint: 5999.9 (true: 6000)
+  Segment 1: slope = 1.0000, CI = (1.0000, 1.0001)
+  Segment 2: slope = -0.5000, CI = (-0.5000, -0.4999)
+True slopes: segment 1 = 1.0, segment 2 = -0.5
 ```
 
 ## Interpretation & Insights
 
-1.  **Fast Mode Efficiency**:
-    - The Linear Trend test took ~19s for 12,000 points. A full $O(n^2)$ calculation would take significantly longer and consume ~1.2GB RAM.
-    - The optimized `_mk_score` function handles memory efficiently, preventing crashes.
+1.  **Speed**: each fast-mode test on 12,000 points takes a fraction of a second. Exact mode would need all 72 million pairwise slopes (several seconds and gigabytes of memory).
+2.  **Accuracy**: the slope errors are well below 1%, and each confidence interval contains the true slope. The difference between the sampled and the exact slope is of the order of `approximation_error`, which is much smaller than the confidence interval. Fast mode adds little uncertainty beyond that of the data.
+3.  **Censored data**: censored data run as fast as uncensored data. The default Akritas-Theil-Sen estimator uses the censored values as intervals (no substitution) and recovers the true slope.
+4.  **Seasonal data**: the seasonal test uses all 12,000 observations (500 per season). Before version 0.6.1, seasons were cut to 1,000 observations by default; this is now only done if you set `max_per_season`.
+5.  **Segmented data**: the breakpoint and both segment slopes are recovered. The breakpoint search (`piecewise-regression`) is the slowest part and scales with n. Above about 20,000 observations, aggregate first.
 
-2.  **Accuracy**:
-    - Even with stochastic sampling (`max_pairs=100,000`), the slope error is negligible (< 0.01% for medium noise, < 0.5% for high noise).
-    - Confidence intervals correctly bracket the true slope.
-
-3.  **Seasonal Stratification**:
-    - The seasonal test was incredibly fast (0.43s) because it downsampled the data to ~4,800 points (200 per season * 24 seasons).
-    - Despite downsampling, the slope estimate is accurate (0.01% error) because stratification preserved the seasonal structure.
-    - The `analysis_notes` confirm that stratification was applied.
-
-This capability ensures MannKS remains a robust tool for modern, high-frequency environmental data analysis.
+See the [Large Dataset Guide](../Detailed_Guides/large_dataset_guide.md) for accuracy measurements and performance figures.

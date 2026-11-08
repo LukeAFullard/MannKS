@@ -198,11 +198,6 @@ def trend_test(
     with warnings.catch_warnings(record=True) as w_log:
         warnings.simplefilter("always")
 
-        n_raw = len(x_arr)
-        tier_info = detect_size_tier(n_raw, user_mode=large_dataset_mode, force_tier=None)
-        for w in tier_info['warnings']:
-            warnings.warn(w, UserWarning)
-
         data_filtered, is_datetime = _prepare_data(x, t, hicensor)
         data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
         raw_data = data_filtered
@@ -272,7 +267,10 @@ def trend_test(
         cen_type_filtered = data_filtered['cen_type'].to_numpy()
 
         n_filtered = len(x_filtered)
+        # Mode chosen on the data actually analysed (after aggregation).
         tier_info_filtered = detect_size_tier(n_filtered, user_mode=large_dataset_mode)
+        for w in tier_info_filtered['warnings']:
+            warnings.warn(w, UserWarning)
         pair_cap = max_pairs if max_pairs is not None else tier_info_filtered['max_pairs']
 
         note = get_analysis_note(data_filtered, values_col='value', censored_col='censored',
@@ -309,7 +307,8 @@ def trend_test(
             if block_size == 'auto':
                 block_size_used = detrended_block_size(
                     x_filtered, t_filtered, censored_filtered, cen_type_filtered,
-                    method=sens_slope_method, lt_mult=lt_mult, gt_mult=gt_mult)
+                    method=sens_slope_method, lt_mult=lt_mult, gt_mult=gt_mult,
+                    max_pairs=pair_cap, random_state=random_state)
             else:
                 block_size_used = int(block_size)
 
@@ -318,7 +317,8 @@ def trend_test(
                 block_size=block_size_used, n_bootstrap=n_bootstrap,
                 tau_method=tau_method, mk_test_method=mk_test_method,
                 tie_break_method=tie_break_method, random_state=random_state,
-                sens_slope_method=sens_slope_method, lt_mult=lt_mult, gt_mult=gt_mult
+                sens_slope_method=sens_slope_method, lt_mult=lt_mult, gt_mult=gt_mult,
+                max_pairs=pair_cap
             )
             z = norm.ppf(1 - p / 2) * np.sign(s)
             h = p < alpha
@@ -361,6 +361,7 @@ def trend_test(
         slopes = np.array([])
         sampled_total = None
         pairs_used = None
+        ats_approx_error = None
         has_censored = bool(np.any(censored_filtered))
 
         if sens_slope_method == 'ats' and has_censored:
@@ -376,6 +377,7 @@ def trend_test(
             analysis_notes.extend(ats_results['notes'])
             if pair_cap is not None:
                 pairs_used = ats_results['pairs_used']
+                ats_approx_error = ats_results.get('approximation_error')
         else:
             pair_method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
             if has_censored:
@@ -409,12 +411,13 @@ def trend_test(
                 block_size=block_size_used, n_bootstrap=n_bootstrap, alpha=alpha,
                 random_state=random_state,
                 method=sens_slope_method if has_censored else 'drop_ambiguous',
-                lt_mult=lt_mult, gt_mult=gt_mult
+                lt_mult=lt_mult, gt_mult=gt_mult, max_pairs=pair_cap
             )
 
         # --- Slope scaling ---
         slope_per_second = slope
         scaled_slope = slope
+        slope_factor = 1.0
         scaled_lower_ci = lower_ci
         scaled_upper_ci = upper_ci
 
@@ -426,6 +429,7 @@ def trend_test(
                     scaled_slope = slope * factor
                     scaled_lower_ci = lower_ci * factor
                     scaled_upper_ci = upper_ci * factor
+                    slope_factor = factor
                     slope_units = f"{x_unit} per {slope_scaling.lower()}"
                 except (ValueError, TypeError) as e:
                     warnings.warn(f"Slope scaling failed: {e}", UserWarning)
@@ -451,13 +455,16 @@ def trend_test(
         computation_mode = tier_info_filtered['strategy']
         approximation_error = None
         if sampled_total is not None and len(slopes) > 0:
-            valid = slopes[~np.isnan(slopes)]
-            if len(valid) > 0:
-                iqr = np.percentile(valid, 75) - np.percentile(valid, 25)
-                approximation_error = 1.96 * iqr / np.sqrt(len(valid))
+            from ._large_dataset import sampled_median_error
+            approximation_error = sampled_median_error(slopes)
+        elif ats_approx_error is not None:
+            approximation_error = ats_approx_error
 
         for w in w_log:
             captured_warnings.append(str(w.message))
+
+    if approximation_error is not None:
+        approximation_error = approximation_error * slope_factor  # same units as `slope`
 
     results = res(trend, h, p, z, Tau, s, var_s, scaled_slope, intercept, scaled_lower_ci, scaled_upper_ci, C, Cd,
                   '', [], sen_prob, sen_prob_max, sen_prob_min,
@@ -472,7 +479,7 @@ def trend_test(
     else:
         classification = results.trend.title() if results.trend != 'no trend' else 'No Trend'
 
-    final_notes = [note for note in analysis_notes if note != 'ok']
+    final_notes = list(dict.fromkeys(note for note in analysis_notes if note != 'ok'))
     final_results = results._replace(classification=classification, analysis_notes=final_notes)
 
     for w_str in captured_warnings:

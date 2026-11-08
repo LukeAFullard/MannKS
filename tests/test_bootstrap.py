@@ -64,10 +64,11 @@ def test_bootstrap_mk_censored_alignment():
     bootstrap._mk_score_and_var_censored = mock_mk
 
     # Force block size 1, so we shuffle individual elements
-    bootstrap.block_bootstrap_mann_kendall(x, t, censored, cen_type,
-                                           block_size=1, n_bootstrap=10)
-
-    bootstrap._mk_score_and_var_censored = original_mk
+    try:
+        bootstrap.block_bootstrap_mann_kendall(x, t, censored, cen_type,
+                                               block_size=1, n_bootstrap=10)
+    finally:
+        bootstrap._mk_score_and_var_censored = original_mk
 
     # Check alignment
     for i in range(len(captured_x)): # skip first call (observed)
@@ -88,18 +89,19 @@ def test_bootstrap_mk_censored_alignment():
 
     # Rerun with distinct detrended values
     # x=[10, 30], slope forced to 0
+    original_slope = bootstrap._slope
     bootstrap._mk_score_and_var_censored = mock_mk
-    original_sen = bootstrap._sens_estimator_censored
-    bootstrap._sens_estimator_censored = lambda *args: [0.0]
+    bootstrap._slope = lambda *args, **kwargs: 0.0   # force slope 0 (no detrending)
 
     captured_x = []
     captured_censored = []
 
-    bootstrap.block_bootstrap_mann_kendall(x, t, censored, cen_type,
-                                           block_size=1, n_bootstrap=10)
-
-    bootstrap._mk_score_and_var_censored = original_mk
-    bootstrap._sens_estimator_censored = original_sen
+    try:
+        bootstrap.block_bootstrap_mann_kendall(x, t, censored, cen_type,
+                                               block_size=1, n_bootstrap=10)
+    finally:
+        bootstrap._mk_score_and_var_censored = original_mk
+        bootstrap._slope = original_slope
 
     # Skip the first call (observed statistic)
     for i in range(1, len(captured_x)):

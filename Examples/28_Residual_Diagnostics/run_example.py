@@ -13,6 +13,8 @@ import pandas as pd
 import MannKS as mk
 import matplotlib.pyplot as plt
 
+np.random.seed(42)  # reproducible example
+
 # We will generate synthetic data for 3 scenarios to demonstrate how to interpret residual plots.
 
 # --- Helper Function for Data Generation ---

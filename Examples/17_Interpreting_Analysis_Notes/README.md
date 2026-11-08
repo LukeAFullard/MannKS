@@ -122,7 +122,6 @@ Sen's Slope: 0.3750
 Analysis Notes:
   - < 5 Non-censored values
   - sample size (4) below minimum (10)
-  - < 5 Non-censored values
 
 --- Scenario: Long Run of Single Value ---
 Time: [2000 2001 2002 2003 2004 2005 2006 2007 2008 2009]
@@ -141,7 +140,6 @@ Sen's Slope: 1.2500
 Analysis Notes:
   - < 3 unique values
   - sample size (3) below minimum (10)
-  - < 3 unique values
   - WARNING: Sen slope influenced by censored values
 
 Plot saved to 'scenarios_plot.png'

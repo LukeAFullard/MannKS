@@ -190,5 +190,5 @@ For a full explanation, please see the **[Slope Scaling Parameters section in th
 `large_dataset_mode`, `max_pairs` and `random_state` work as in `trend_test`. In fast mode, sampled pairs are allocated to seasons in proportion to their number of within-season pairs, so the pooled slope weights seasons exactly as the full calculation does.
 
 #### `max_per_season`
--   **Type:** `int` (optional), **Default:** `None` (1,000 in fast mode)
--   **Description:** For very large data sets (more than 10,000 observations in fast mode), each season is randomly subsampled to at most this many observations before the test. An analysis note records when this happens. See the **[Large Dataset Guide](./large_dataset_guide.md)**.
+-   **Type:** `int` (optional), **Default:** `None` (no subsampling)
+-   **Description:** If given, each season with more observations is randomly subsampled to this many before the test (stratified sampling, seeded by `random_state`), and an analysis note records it. This reduces the power of the test and is rarely needed: the seasonal test is exact and fast for large data. See the **[Large Dataset Guide](./large_dataset_guide.md)**.

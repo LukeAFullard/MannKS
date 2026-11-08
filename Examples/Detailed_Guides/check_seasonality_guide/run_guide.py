@@ -34,6 +34,7 @@ def generate_guide():
     from MannKS import check_seasonality
 
     # --- 1. Synthetic Data Generation ---
+    np.random.seed(42)  # reproducible example
     # Create a dataset with high-frequency (daily) data over several years.
     # This simulates a scenario where multiple data points exist for each month.
     dates = pd.to_datetime(pd.date_range(start='2020-01-01', end='2022-12-31', freq='D'))

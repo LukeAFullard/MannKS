@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.1 — large data sets
+
+Bug fixes and performance work for large data sets. Results for data with up to 5,000 observations (after aggregation) are unchanged, except where noted.
+
+### Fixes
+
+* **Censored data did not scale.** The censored Mann-Kendall statistic compared every pair, even in fast mode: 3.4 GB of memory at n = 10,000, and out of memory at n = 50,000. It now uses an exact O(n log n) algorithm, giving the same S, Var(S) and Tau, and handles 1,000,000 values in about a second.
+* **Block bootstrap on large data.** Each resample re-estimated the slope from every pair: O(n²) per resample, and a `NaN` confidence interval above n = 46,340. The resamples now use the same pair sampling as the main estimate, in both `trend_test` and `seasonal_trend_test`.
+* **Missing dates (NaT) became a time 292 billion years before 1970** instead of being dropped. Missing times and infinite values are now removed, with a warning. `inspect_trend_data` failed on data containing a missing date.
+* **Python `datetime` objects were converted using the computer's local time zone** (all other date types are treated as UTC), which put hour-long gaps or overlaps in hourly data at daylight-saving changes. All date types are now converted consistently: naive values as UTC, and time-zone-aware values at their UTC instant.
+* **Seasonal tests subsampled large data by default.** Above 10,000 observations each season was randomly cut to 1,000 values before the test, which lost power. The test now uses every observation (it is exact and fast). Subsampling happens only if `max_per_season` is given. *Results change for seasonal tests with more than 10,000 observations.*
+* **`approximation_error` underestimated the error** when the sampled slopes cluster (e.g. `sens_slope_method='lwp'`, which sets ambiguous slopes to 0). It is now a distribution-free interval for the sampled median, and is also reported for censored data with the default ATS estimator.
+* `approximation_error` was in units per second even when `slope_scaling` was used. It is now in the same units as `slope`.
+* `large_dataset_mode='full'` above n = 46,340 returned no slope. It now uses fast mode, with a warning.
+* The fast-mode warnings now refer to the number of observations after aggregation, which is what decides the mode.
+* Dates given as strings now raise a clear error asking for `pd.to_datetime`.
+* Duplicated analysis notes are removed.
+
+### Performance
+
+* Exact (`'full'`) mode is 4–9× faster and uses a third to two-thirds of the memory: 1.2 s and 0.6 GB at n = 5,000 (previously 5.6 s and 1.8 GB). Slopes are built in blocks, and the confidence interval and Sen probability use order statistics instead of a full sort.
+* The exact Akritas–Theil–Sen estimate finds its solution by bisection instead of evaluating every candidate (n = 5,000 censored: 1.5 s instead of 12.8 s).
+* Pair sampling is 3× faster.
+* `segmented_trend_test` warns above 20,000 observations: its breakpoint search (`piecewise-regression`) takes minutes at that size.
+
+### Validation
+
+* `tests/test_large_data_robustness.py` checks the new algorithms against the pairwise calculations, and the new interval, probability, ATS and note code against straightforward reference implementations. They agree exactly.
+* Simulations of fast mode: confidence intervals contained the true slope 94.7–96.3% of the time (nominal 95%), and the type I error was 5.0%. See the [Large Dataset Guide](./Examples/Detailed_Guides/large_dataset_guide.md).
+* The LWP-TRENDS parity results are unchanged.
+
+### Documentation
+
+* README: the version history is now a table, and there is a new large data section with measured performance.
+* Examples 32 and 33 showed an error message instead of their output. Example 32's simulated data were wrong with pandas 3, and its text claimed narrower OLS intervals than the results showed. Examples 28 and two guides are now seeded, so they are reproducible.
+
 ## 0.6.0 — correctness release
 
 This release fixes statistical defects found in a pre-release audit against the LWP-TRENDS R code (v2502, run live) and other independent references. **Several results and defaults change.** Re-run any analyses made with earlier versions before comparing them with new results.

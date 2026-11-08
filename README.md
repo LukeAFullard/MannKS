@@ -32,53 +32,20 @@ Use this package when your data has:
 - **No normal distribution** (non-parametric methods don't require it)
 - **Small to large sample sizes** (Automatic support for n > 10,000)
 
-**NEW IN V0.6.0**: **Correctness release.** A pre-release audit against the LWP-TRENDS R code (run live) and independent references fixed several statistical defects, and the defaults changed. Results can differ from v0.5.x:
-*   **Var(S) now includes the tie and censoring corrections** (Kendall 1975; NADA/LWP-TRENDS). Previously ties were never detected, which inflated Var(S) and p-values for any tied or censored data.
-*   **The censored slope defaults to the Akritas–Theil–Sen estimator** (`sens_slope_method='ats'`, as in NADA::cenken), with a confidence interval from inverting the censored Kendall test. The former default, which drops ambiguous pairs, is biased away from zero (about +17% at 20% censoring and +70% at 50%). It remains available as `'drop_ambiguous'`; its old names `'unbiased'` and `'nan'` still work but are deprecated.
-*   **Results no longer depend on input row order**: data are sorted by time, and observations with equal times score 0 in S.
-*   **`large_dataset_mode='full'` is now exact.** Pair sampling, used only in fast mode, is reproducible by default.
-*   **Smaller fixes:** LWP-TRENDS mid-observation selection (`agg_method='lwp'`), data-sufficiency notes aligned with LWP-TRENDS, Yue–Wang and `'auto'` autocorrelation estimated on detrended data, a seeded circular block bootstrap with a `(b+1)/(B+1)` p-value, `regional_test` aligned to time increments (and never reporting CT = 1 from a missing correlation), `sen_probability` matching LWP-TRENDS, right-closed classification thresholds, and a direct test of slope change in `compare_periods`.
+---
 
-See [validation/r_parity](./validation/r_parity) for the parity suite and the settings that reproduce LWP-TRENDS exactly. The full list of changes is in the [changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md).
+## 🆕 What's New
 
-**NEW IN V0.5.0**: **Large Dataset Support**. MannKS now automatically handles datasets with 10,000+ observations (up to 50,000+) by switching to optimized stochastic algorithms ("Fast Mode") for Sen's slope and using stratified sampling for seasonal tests. This reduces computation time from minutes to seconds while preserving statistical validity. See [Example 35](./Examples/35_Large_Data_Trend) and the [Large Dataset Guide](./Examples/Detailed_Guides/large_dataset_guide.md).
+> **Upgrading from 0.5.x?** Version 0.6 is a correctness release. Several statistical defects were fixed and some defaults changed, so **results can differ from earlier versions**. Re-run analyses before comparing old and new results. The [changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) lists every change.
 
-```python
-# Automatic mode handles large data
-result = trend_test(x_large, t_large) # Uses fast approximation if n > 5000
-
-# Or force a specific mode
-result = trend_test(x, t, large_dataset_mode='fast', max_pairs=100000)
-```
-
-**NEW IN V0.4.0**: **Segmented Trend Analysis**. The `segmented_trend_test` function performs a hybrid segmented regression analysis. It uses **Piecewise Regression** (OLS) to automatically identify structural breakpoints in the time series, followed by robust **Mann-Kendall / Sen's Slope** estimation on each identified segment. This allows you to detect distinct phases in a trend (e.g., "Stable" -> "Rapid Decrease" -> "Stable").
-
-**NEW IN V0.3.0**: **Rolling Trend Analysis**. The `rolling_trend_test` function allows you to perform a rolling window analysis, calculating the Sen's slope, Mann-Kendall score, and confidence intervals over time. This enables the detection of when a trend started, stopped, or changed direction, rather than just providing a single global summary. The feature includes:
-*   Flexible window sizes (numeric or time-based, e.g., '10 years')
-*   `compare_periods` utility to statistically test for changes in trend between two time periods (e.g., before vs. after an intervention).
-
-**NEW IN V0.2.0**: The `trend_test` and `seasonal_trend_test` functions now support a **Block Bootstrap** method (`autocorr_method='block_bootstrap'`). This feature provides robust trend testing for data with serial correlation (autocorrelation) by resampling blocks of data rather than individual points, preserving the internal dependency structure.
-
-See [Statistical Methodology: Bootstrap](./bootstrap.md) for a detailed explanation of the hybrid methodology:
-*   **Hypothesis Testing (P-values)**: Uses *Detrended Residual Block Bootstrap* to generate a null distribution while preserving autocorrelation.
-*   **Confidence Intervals (Sen's Slope)**: Uses *Pairs Block Bootstrap* to avoid bias when "reconstructing" censored data values from residuals.
-
-### Performance
-
-Uncensored data, single core:
-
-| Dataset Size | Mode | Time | Slope accuracy |
-|--------------|------|------|----------|
-| 1,000 | Full | 0.2s | Exact |
-| 5,000 | Full | ~6s | Exact |
-| 10,000 | Fast | < 1s | ±0.3% (1 s.d.) |
-| 50,000 | Fast | < 1s | ±0.3% (1 s.d.) |
-| 100,000 | Aggregate* | – | Depends** |
-
-The Mann-Kendall test (S, Var(S), p) is exact in every mode; only the slope is sampled in fast mode.
-
-\* Aggregate to ~1000 points first
-\** Accuracy depends on aggregation method and trend pattern
+| Version | Highlights | Learn more |
+| :--- | :--- | :--- |
+| **0.6.1** | **Large data sets, robustly.** Censored data now scale like uncensored data (1,000,000 values in about a second); exact mode is 4–9× faster with a third to two-thirds of the memory; seasonal tests use every observation; a reliable fast-mode error estimate; fixes for missing dates and for bootstrap intervals on large data. | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) · [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md) |
+| **0.6.0** | **Correctness release**, audited against the LWP-TRENDS R code and NADA. Var(S) includes the tie and censoring corrections; censored slopes default to the Akritas–Theil–Sen estimator; results no longer depend on row order; exact `'full'` mode. | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) · [R parity suite](https://github.com/LukeAFullard/MannKS/tree/main/validation/r_parity) |
+| 0.5.0 | **Large data sets**: fast mode estimates the slope from a sample of pairs. | [Example 35](https://github.com/LukeAFullard/MannKS/tree/main/Examples/35_Large_Data_Trend) · [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md) |
+| 0.4.0 | **Segmented trends**: `segmented_trend_test` finds breakpoints, then estimates a robust slope for each segment. | [Example 32](https://github.com/LukeAFullard/MannKS/tree/main/Examples/32_Segmented_Regression) · [Segmented Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/segmented_trend_guide.md) |
+| 0.3.0 | **Rolling trends**: `rolling_trend_test` over moving windows, and `compare_periods` to test before vs. after an intervention. | [Example 31](https://github.com/LukeAFullard/MannKS/tree/main/Examples/31_Rolling_Trend_Analysis) · [Rolling Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/rolling_trend_guide.md) |
+| 0.2.0 | **Block bootstrap** for autocorrelated data (`autocorr_method='block_bootstrap'`). | [Example 29](https://github.com/LukeAFullard/MannKS/tree/main/Examples/29_Block_Bootstrap_Autocorrelation) · [Methodology](https://github.com/LukeAFullard/MannKS/blob/main/bootstrap.md) |
 
 ---
 
@@ -136,16 +103,16 @@ Confidence: 99.23%
 - **Unequal Spacing**: Uses actual time differences (not just rank order)
 - **Missing Data**: Automatically handles NaN values and missing seasons
 - **Temporal Aggregation**: Multiple strategies for high-frequency data
-- **Large Dataset Support**: Optimized algorithms for N > 10,000 (New in v0.5.0)
+- **Large Data Sets**: Exact test and fast slope estimation, tested up to 1,000,000 observations
 
 ### Statistical Features
 - **Continuous Confidence**: Reports likelihood ("Highly Likely Increasing") not just p-values
 - **Data Quality Checks**: Automatic warnings for tied values, long runs, insufficient data
 - **Robust Methods**: Akritas-Theil-Sen estimator for censored data (default)
 - **Flexible Testing**: Kendall's Tau-a or Tau-b, custom significance levels
-- **Rolling Trends** (New in v0.3.0): Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](./Examples/31_Rolling_Trend_Analysis).
-- **Segmented Trends** (New in v0.4.0): Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](./Examples/32_Segmented_Regression).
-- **Block Bootstrap** (New in v0.2.0): Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](./bootstrap.md) for details and [Example 29](./Examples/29_Block_Bootstrap_Autocorrelation).
+- **Rolling Trends**: Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](https://github.com/LukeAFullard/MannKS/tree/main/Examples/31_Rolling_Trend_Analysis).
+- **Segmented Trends**: Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](https://github.com/LukeAFullard/MannKS/tree/main/Examples/32_Segmented_Regression).
+- **Block Bootstrap**: Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](https://github.com/LukeAFullard/MannKS/blob/main/bootstrap.md) for details and [Example 29](https://github.com/LukeAFullard/MannKS/tree/main/Examples/29_Block_Bootstrap_Autocorrelation).
 
 
 ---
@@ -195,12 +162,35 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 
 ---
 
-## ⚠️ Important Limitations
+## 📈 Large Data Sets
 
-### Sample Size
-- **Fast mode** (default above n = 5,000) samples pairs for the slope and handles 50,000+ observations in about a second; the test itself stays exact.
-- **Exact slopes** (`large_dataset_mode='full'`) need all n(n-1)/2 pairs: practical up to about n = 10,000 on a typical machine (memory), hard limit n = 46,340.
-- For very large or high-frequency data, aggregate first with `agg_method`/`agg_period` (e.g. daily or monthly medians); `large_dataset_mode='aggregate'` only warns, it does not aggregate.
+```python
+result = trend_test(x_large, t_large)          # automatic: exact up to n = 5,000, fast above
+result = trend_test(x, t, large_dataset_mode='fast', max_pairs=500_000)   # more pairs, more accuracy
+print(result.computation_mode, result.approximation_error)
+```
+
+The Mann-Kendall test (S, Var(S), p) is **exact in every mode**, including for censored data and seasonal tests. Above 5,000 observations, only the slope and its confidence interval are estimated from a random sample of pairs (reproducible by default). `approximation_error` gives the 95% half-width of that sampling error.
+
+Single core, default settings:
+
+| Observations | Mode | Uncensored | 30% censored | Peak memory |
+| ---: | :--- | ---: | ---: | ---: |
+| 5,000 | Full (exact) | 1.2 s | 1.5 s | < 1 GB |
+| 50,000 | Fast | 0.1 s | 0.2 s | 0.2 GB |
+| 1,000,000 | Fast (with a warning recommending aggregation) | 1.0 s | 1.2 s | 0.5 GB |
+
+In simulations, fast-mode confidence intervals contained the true slope 95–96% of the time.
+
+- **Exact slopes** (`large_dataset_mode='full'`) need memory for all n(n-1)/2 pairs. They are practical up to about n = 20,000, and above n = 46,340 MannKS uses fast mode instead.
+- **High-frequency data**: aggregating first with `agg_method`/`agg_period` (e.g. daily or monthly medians) is usually better than analysing every value.
+- **Slower options at large n**: the block bootstrap (about 0.05 s per resample at n = 50,000) and the breakpoint search of `segmented_trend_test` (over a minute at n = 30,000).
+
+See the [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md) for details and accuracy measurements.
+
+---
+
+## ⚠️ Important Limitations
 
 ### Statistical Assumptions
 - **Independence**: Data points must be serially independent
@@ -214,18 +204,18 @@ print(f"Regional trend: {regional.DT}, confidence: {regional.CT:.2%}")
 ## 📚 Documentation
 
 ### Detailed Guides
-- **[Trend Test Parameters](./Examples/Detailed_Guides/trend_test_parameters_guide.md)** - Full parameter reference
-- **[Seasonal Analysis](./Examples/Detailed_Guides/seasonal_trend_test_parameters_guide.md)** - Season types and aggregation
-- **[Regional Tests](./Examples/Detailed_Guides/regional_test_guide/README.md)** - Multi-site aggregation
-- **[Analysis Notes](./Examples/Detailed_Guides/analysis_notes_guide.md)** - Interpreting data quality warnings
-- **[Trend Classification](./Examples/Detailed_Guides/trend_classification_guide.md)** - Understanding confidence levels
-- **[Bootstrap Methodology](./bootstrap.md)** - Block bootstrap for autocorrelated data
-- **[Rolling Trend Analysis](./Examples/Detailed_Guides/rolling_trend_guide.md)** - Moving window analysis
-- **[Segmented Trend Analysis](./Examples/Detailed_Guides/segmented_trend_guide.md)** - Structural breakpoint detection
-- **[Large Dataset Analysis](./Examples/Detailed_Guides/large_dataset_guide.md)** - Fast mode and stratification
+- **[Trend Test Parameters](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/trend_test_parameters_guide.md)** - Full parameter reference
+- **[Seasonal Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/seasonal_trend_test_parameters_guide.md)** - Season types and aggregation
+- **[Regional Tests](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/regional_test_guide/README.md)** - Multi-site aggregation
+- **[Analysis Notes](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/analysis_notes_guide.md)** - Interpreting data quality warnings
+- **[Trend Classification](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/trend_classification_guide.md)** - Understanding confidence levels
+- **[Bootstrap Methodology](https://github.com/LukeAFullard/MannKS/blob/main/bootstrap.md)** - Block bootstrap for autocorrelated data
+- **[Rolling Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/rolling_trend_guide.md)** - Moving window analysis
+- **[Segmented Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/segmented_trend_guide.md)** - Structural breakpoint detection
+- **[Large Dataset Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md)** - Fast mode, accuracy and performance
 
 ### Examples
-The [Examples](./Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.
+The [Examples](https://github.com/LukeAFullard/MannKS/blob/main/Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.
 
 ---
 
@@ -236,7 +226,7 @@ Validated against:
 - **NADA::cenken** (Akritas-Theil-Sen): agreement within NADA's own bisection tolerance (median 0.3%).
 - **Exact permutation distributions and Monte Carlo** (Type-I error, CI coverage, slope bias).
 
-See [validation/r_parity](./validation/r_parity) for the scripts, and [validation/](./validation/) for the scenario studies.
+See [validation/r_parity](https://github.com/LukeAFullard/MannKS/tree/main/validation/r_parity) for the scripts, and [validation/](https://github.com/LukeAFullard/MannKS/tree/main/validation) for the scenario studies.
 
 ---
 

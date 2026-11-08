@@ -111,7 +111,101 @@ Analysis with Alpha = 0.1 (90% Confidence)
 
 --- Method: Bagging ---
 Breakpoint Results:
-Error executing example: `Import tabulate` failed.  Use pip or conda to install the tabulate package.
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        53.76 |      47.76 |      57.61 |
+|        99.95 |      96.88 |     101.93 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3739 |     0.3503 |     0.4002 |
+|  0.0644 |     0.0222 |     0.1118 |
+|  0.5154 |     0.4887 |     0.5496 |
+Plot saved to segmented_plot_alpha_0.1_bagging.png
+
+--- Method: Standard OLS ---
+Breakpoint Results:
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        52.13 |      47.75 |      56.52 |
+|       101.13 |      98.12 |     104.15 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3761 |     0.3537 |     0.4042 |
+|  0.0804 |     0.0363 |     0.1189 |
+|  0.5161 |     0.4905 |     0.5538 |
+Plot saved to segmented_plot_alpha_0.1_ols.png
+
+============================================================
+Analysis with Alpha = 0.05 (95% Confidence)
+============================================================
+
+--- Method: Bagging ---
+Breakpoint Results:
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        51.65 |      47.51 |      59.35 |
+|       101.31 |      96.57 |     102.57 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3768 |     0.3484 |     0.4131 |
+|  0.0818 |     0.0322 |     0.1245 |
+|  0.5161 |     0.4855 |     0.5606 |
+Plot saved to segmented_plot_alpha_0.05_bagging.png
+
+--- Method: Standard OLS ---
+Breakpoint Results:
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        52.13 |      46.90 |      57.37 |
+|       101.13 |      97.53 |     104.73 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3761 |     0.3499 |     0.4100 |
+|  0.0804 |     0.0274 |     0.1245 |
+|  0.5161 |     0.4855 |     0.5606 |
+Plot saved to segmented_plot_alpha_0.05_ols.png
+
+============================================================
+Analysis with Alpha = 0.01 (99% Confidence)
+============================================================
+
+--- Method: Bagging ---
+Breakpoint Results:
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        53.48 |      46.28 |      61.38 |
+|       100.56 |      98.33 |     102.76 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3739 |     0.3337 |     0.4185 |
+|  0.0799 |     0.0062 |     0.1450 |
+|  0.5224 |     0.4771 |     0.5780 |
+Plot saved to segmented_plot_alpha_0.01_bagging.png
+
+--- Method: Standard OLS ---
+Breakpoint Results:
+|   Breakpoint |   Lower CI |   Upper CI |
+|-------------:|-----------:|-----------:|
+|        52.13 |      45.22 |      59.04 |
+|       101.13 |      96.38 |     105.89 |
+
+Segment Results:
+|   slope |   lower_ci |   upper_ci |
+|--------:|-----------:|-----------:|
+|  0.3761 |     0.3382 |     0.4257 |
+|  0.0804 |     0.0137 |     0.1397 |
+|  0.5161 |     0.4706 |     0.5745 |
+Plot saved to segmented_plot_alpha_0.01_ols.png
 
 ```
 

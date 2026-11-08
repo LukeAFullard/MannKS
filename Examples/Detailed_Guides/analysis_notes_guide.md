@@ -94,7 +94,7 @@ These notes are specific to the `seasonal_trend_test`.
 -   **What it means:** With a numeric `t`, seasons are `floor(t - min(t)) % period`, so `t` must be in season units (e.g. a month index with `period=12`). This note (with a warning) appears when the data span fewer than two cycles or the typical spacing is much smaller than one unit, as happens with decimal years. Check `t` and `period`, or use datetime `t` with `season_type`.
 
 ### `Large seasonal dataset: Used stratified sampling (max N obs/season)`
--   **What it means:** In fast mode with more than 10,000 observations, each season was randomly subsampled to at most `max_per_season` observations (see the Large Dataset Guide).
+-   **What it means:** You set `max_per_season`, and seasons with more observations were randomly subsampled to that many before the test (see the Large Dataset Guide). This only happens on request.
 
 ---
 
