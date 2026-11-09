@@ -96,14 +96,14 @@ Determining a trend when the highest values are unknown (just "greater than X") 
 ## The Methods
 
 ### 1. `mk_test_method='robust'` (Default)
-*   **How it works:** Uses a standard non-parametric ranking approach (adapted from the NADA package).
-*   **Behavior:** It is highly conservative. It does not assume that `>80` is necessarily significantly larger than `80` in a way that contributes to the trend score, often treating them as tied or ambiguous.
-*   **Consequence:** It may **underestimate** an increasing trend because it "plays it safe" with the unknown high values.
+*   **How it works:** Uses non-parametric interval comparison logic where right-censored values `>X` are represented as intervals $(X, \infty)$.
+*   **Behavior:** An interval $(X, \infty)$ is strictly greater than any observed value $\le X$ (contributing $+1$ to $S$). Overlapping right-censored intervals (e.g., two `>80` measurements) cannot be ordered and are treated as tied (contributing $0$ to $S$).
+*   **Consequence:** Robust interval scoring accurately recognizes upward trends that hit a ceiling ($S = 42.0, p = 0.0002$) without requiring arbitrary numerical substitution.
 
 ### 2. `mk_test_method='lwp'`
-*   **How it works:** Implements a heuristic from the LWP-TRENDS R script.
-*   **Behavior:** It finds the maximum right-censored value in the dataset (e.g., 80) and replaces all instances of `>80` with a slightly higher numeric value (e.g., `80.1`). It then treats these as **uncensored** real numbers.
-*   **Consequence:** It forces the test to recognize these points as the highest values in the series, typically resulting in a stronger trend signal (higher S-statistic).
+*   **How it works:** Implements the heuristic from the LWP-TRENDS R script.
+*   **Behavior:** It finds the maximum right-censored value in the dataset (e.g., 80) and replaces all instances of `>80` with a slightly higher numeric value (e.g., `80.1`), treating them as uncensored real numbers.
+*   **Consequence:** All `>80` measurements are ranked above $\le 80$ values, and ties among the substituted `80.1` values score 0, producing $S = 42.0, p = 0.0002$.
 
 ## The "How": Code Walkthrough
 
@@ -121,18 +121,17 @@ We simulate a dataset that hits a ceiling of 80.
 
 ## Interpreting the Results
 
-### The Difference in "S"
+### S-Statistic and Significance
 
-*   **Robust Method (S = {local_scope['result_robust'].s})**:
-    *   The test sees the clear increase from 10 to 60.
-    *   However, the transition involving censored values (like 80 to `>80`) is treated conservatively. In this implementation, standard rank comparisons for right-censored data can be ambiguous or even negatively ranked against uncensored values if the statistical assumptions (often designed for left-censoring) are not perfectly aligned with right-censored logic.
-    *   **Result**: The trend is barely significant (p={local_scope['result_robust'].p:.4f}), effectively treating the "ceiling" data as noise or ambiguity rather than a clear continuation of the trend.
+*   **Robust Method (S = {local_scope['result_robust'].s}, p = {local_scope['result_robust'].p:.4f})**:
+    *   The test correctly identifies that all measurements of `>80` are strictly greater than earlier measurements from 10 to 80.
+    *   The three `>80` values are mutually tied (contributing 0 to the score), giving $S = 42.0$ (out of a theoretical maximum of 45 for 10 unique values).
+    *   **Result**: Highly significant increasing trend ($p = {local_scope['result_robust'].p:.4f}$), confirming the physical reality that concentration was rising and then hit the sensor ceiling.
 
-*   **LWP Method (S = {local_scope['result_lwp'].s})**:
-    *   The method converts all `>80` values to `80.1`.
-    *   The trend from 10...60 to 80 to 80.1 is strictly increasing, adding maximum positive score for those pairs.
-    *   The three `80.1` values are tied with each other (contributing 0 to the score), which is why S is 42 instead of the theoretical maximum of 45 (for n=10 unique values).
-    *   **Result**: A highly significant increasing trend (p={local_scope['result_lwp'].p:.4f}), which correctly reflects the physical reality that the concentration was rising and then "maxed out".
+*   **LWP Method (S = {local_scope['result_lwp'].s}, p = {local_scope['result_lwp'].p:.4f})**:
+    *   The method substitutes `>80` with `80.1`.
+    *   The comparisons of $80.1$ against $10 \dots 80$ add positive score, while ties among $80.1$ contribute 0.
+    *   **Result**: Identical score ($S = 42.0, p = {local_scope['result_lwp'].p:.4f}$) and identical trend classification.
 
 ### Visual Comparison
 
@@ -140,11 +139,12 @@ We simulate a dataset that hits a ceiling of 80.
 | :---: | :---: |
 | ![Robust Plot](robust_plot.png) | ![LWP Plot](lwp_plot.png) |
 
-*Note: The trend lines (Sen's Slope) may look identical because `mk_test_method` only affects the significance test (p-value and S), not the slope calculation. The slope is determined by `sens_slope_method`.*
+*Note: The trend lines (Sen's Slope) look identical because `mk_test_method` only affects the significance test (p-value and S), not the slope calculation. The slope is determined by `sens_slope_method`.*
 
 ## Recommendation
-*   **Use `'robust'`** if you want to be statistically conservative and stick to standard non-parametric ranking rules, accepting that right-censored data might not contribute strongly to an increasing trend.
-*   **Use `'lwp'`** if you are confident that your right-censored values represent a true "exceedance" of the limit (e.g. saturation) and you want the trend test to credit that increase. This is often the preferred choice for handling instrumental upper limits.
+*   Both methods correctly detect increasing trends that hit an instrument ceiling ($p = 0.0002$).
+*   The default `'robust'` method is recommended for principled non-parametric interval scoring without arbitrary numerical constants.
+*   Use `mk_test_method='lwp'` when exact parity with legacy LWP-TRENDS R workflows is required.
 """
 
 with open(os.path.join(script_dir, 'README.md'), 'w') as f:

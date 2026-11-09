@@ -78,6 +78,81 @@ def main():
         print(f"  Segment {i + 1}: slope = {row['slope']:.4f}, CI = ({row['lower_ci']:.4f}, {row['upper_ci']:.4f})")
     print("True slopes: segment 1 = 1.0, segment 2 = -0.5")
 
+    # Generate 4-panel diagnostic figure
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    try:
+        sub = slice(0, n, 10)  # Subsample scatter for clean display
+
+        # 1. Linear trends
+        ax1 = axes[0, 0]
+        ax1.scatter(t[sub], x1[sub], alpha=0.2, s=8, color='steelblue', label='Data (m=0.5)')
+        ax1.scatter(t[sub], x2[sub], alpha=0.15, s=8, color='darkorange', label='Data (m=0.1)')
+        ax1.plot(t, res1.slope * t + res1.intercept, color='navy', linewidth=2,
+                 label=f'Fit (slope={res1.slope:.4f})')
+        ax1.plot(t, res2.slope * t + res2.intercept, color='darkred', linewidth=2,
+                 label=f'Fit (slope={res2.slope:.4f})')
+        ax1.set_title('1-2. Linear Trends in Fast Mode (n=12,000)')
+        ax1.set_xlabel('Index (t)')
+        ax1.set_ylabel('Value')
+        ax1.legend(loc='upper left', fontsize=9)
+        ax1.grid(True, alpha=0.3)
+
+        # 2. Censored data
+        ax2 = axes[0, 1]
+        uncensored_mask = (x3 >= 1000)
+        ax2.scatter(t[uncensored_mask & (np.arange(n) % 10 == 0)],
+                    x3[uncensored_mask & (np.arange(n) % 10 == 0)],
+                    alpha=0.3, s=8, color='seagreen', label='Observed (>=1000)')
+        ax2.scatter(t[~uncensored_mask & (np.arange(n) % 10 == 0)],
+                    np.full((~uncensored_mask & (np.arange(n) % 10 == 0)).sum(), 1000),
+                    alpha=0.4, s=12, color='crimson', marker='x', label='Censored (<1000)')
+        ax2.axhline(1000, color='red', linestyle='--', linewidth=1, label='Detection Limit (1000)')
+        ax2.plot(t, res3.slope * t + res3.intercept, color='darkgreen', linewidth=2,
+                 label=f'ATS Fit (slope={res3.slope:.4f})')
+        ax2.set_title(f'3. Censored Data (Prop Censored: {res3.prop_censored:.0%})')
+        ax2.set_xlabel('Index (t)')
+        ax2.set_ylabel('Value')
+        ax2.legend(loc='upper left', fontsize=9)
+        ax2.grid(True, alpha=0.3)
+
+        # 3. Seasonal trend
+        ax3 = axes[1, 0]
+        ax3.scatter(dates[sub], x4[sub], alpha=0.2, s=8, color='purple', label='Hourly Data (Sampled)')
+        ts_sec = dates.astype('datetime64[s]').astype('int64').to_numpy()
+        y_seas = res4.slope_per_second * ts_sec + res4.intercept
+        ax3.plot(dates, y_seas, color='darkmagenta', linewidth=2,
+                 label=f'Seasonal Sen (slope={res4.slope:.4f} /hr)')
+        ax3.set_title('4. Seasonal Trend (24 Hourly Seasons, n=12,000)')
+        ax3.set_xlabel('Date')
+        ax3.set_ylabel('Value')
+        ax3.legend(loc='upper left', fontsize=9)
+        ax3.grid(True, alpha=0.3)
+
+        # 4. Segmented trend
+        ax4 = axes[1, 1]
+        ax4.scatter(t[sub], x5[sub], alpha=0.2, s=8, color='dimgray', label='Data')
+        bp = res5.breakpoints[0]
+        ax4.axvline(bp, color='red', linestyle='--', linewidth=1.5,
+                    label=f'Detected Breakpoint ({bp:.0f})')
+        for i, row in res5.segments.iterrows():
+            t_seg = np.array([0, bp]) if i == 0 else np.array([bp, n - 1])
+            y_seg = row['slope'] * t_seg + row['intercept']
+            ax4.plot(t_seg, y_seg, linewidth=2.5,
+                     label=f"Seg {i+1} (slope={row['slope']:.2f})")
+        ax4.set_title('5. Segmented Trend & Breakpoint Detection')
+        ax4.set_xlabel('Index (t)')
+        ax4.set_ylabel('Value')
+        ax4.legend(loc='lower left', fontsize=9)
+        ax4.grid(True, alpha=0.3)
+
+        fig.tight_layout()
+        fig_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'large_data_trends.png')
+        fig.savefig(fig_path, dpi=200, bbox_inches='tight')
+        print(f"Plot saved to {fig_path}")
+    finally:
+        plt.close(fig)
+
 
 CODE = '''import numpy as np
 import pandas as pd
@@ -131,6 +206,10 @@ Timings depend on the machine.
 ```text
 {output}```
 
+## Visual Diagnostics
+
+![Large Dataset Trends](large_data_trends.png)
+
 ## Interpretation & Insights
 
 1.  **Speed**: each fast-mode test on 12,000 points takes a fraction of a second. Exact mode would need all 72 million pairwise slopes (several seconds and gigabytes of memory).
@@ -152,3 +231,4 @@ if __name__ == "__main__":
     readme = INTRO.replace('{code}', CODE).replace('{output}', output)
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'README.md'), 'w') as f:
         f.write(readme)
+

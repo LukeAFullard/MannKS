@@ -189,13 +189,13 @@ We will simulate data with strong autocorrelation (AR1 process) but **no trend**
 
 ### 2. Yue & Wang Correction (Parametric)
 *   In Test 2, `autocorr_method='yue_wang'` was used.
-*   It reduced the **Effective Sample Size** (e.g., from 100 down to ~15-20), reflecting that highly correlated data contains less independent information.
-*   The p-value increases, and the confidence interval widens, correctly identifying 'no trend'.
+*   It reduced the **Effective Sample Size** from 100 down to 50.0, reflecting that serial correlation reduces the amount of independent information.
+*   The p-value increased from 0.0003 to 0.0228, moving in the right direction. However, under strong persistence ($\phi \approx 0.8$), the parametric AR(1) variance adjustment alone is not always sufficient to eliminate the false positive ($p = 0.0228 < 0.05$, Significant = True).
 
 ### 3. Block Bootstrap (Non-Parametric)
 *   In Test 3, `autocorr_method='block_bootstrap'` was used.
-*   This method builds the null distribution by shuffling blocks of data.
-*   The **Confidence Interval** is estimated directly from the bootstrap distribution. It should be wide enough to include zero, correctly indicating no significant trend.
+*   This method builds the empirical null distribution by shuffling contiguous blocks of data, preserving the empirical serial dependence without assuming a strict AR(1) parametric form.
+*   The resulting p-value ($p \approx 0.16 > 0.05$) correctly identifies **no significant trend** (Significant = False), successfully eliminating the false positive that persisted under the parametric test.
 
 ### 4. Seasonal Application
 *   Test 4 shows how to apply this to seasonal data using `seasonal_trend_test`.

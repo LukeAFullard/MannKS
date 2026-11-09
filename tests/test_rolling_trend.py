@@ -209,3 +209,29 @@ def test_compare_periods_seasonal():
     # Significant change
     assert comparison['significant_change'] == True
     assert comparison['slope_difference'] > 3.0
+
+
+def test_plot_rolling_trend_span_modes(tmp_path):
+    """Test plot_rolling_trend with 'step', 'window', and float trend_line_span options."""
+    n = 60
+    t = pd.date_range('2010-01-01', periods=n, freq='ME')
+    x = 0.1 * np.arange(n) + np.random.normal(0, 0.5, n)
+    df = pd.DataFrame({'time': t, 'val': x})
+
+    results = rolling_trend_test(df['val'], df['time'], window='2YE', step='6ME', min_size=6)
+
+    # 1. Step mode (default)
+    p_step = tmp_path / "rolling_step.png"
+    plot_rolling_trend(results, data=df, time_col='time', value_col='val', trend_line_span='step', save_path=p_step)
+    assert p_step.exists()
+
+    # 2. Window mode
+    p_win = tmp_path / "rolling_win.png"
+    plot_rolling_trend(results, data=df, time_col='time', value_col='val', trend_line_span='window', save_path=p_win)
+    assert p_win.exists()
+
+    # 3. Fraction mode
+    p_frac = tmp_path / "rolling_frac.png"
+    plot_rolling_trend(results, data=df, time_col='time', value_col='val', trend_line_span=0.3, save_path=p_frac)
+    assert p_frac.exists()
+

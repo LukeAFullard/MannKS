@@ -92,12 +92,17 @@ Conf. interval:  (0.199972, 0.200027)
 Trend: increasing, p = 0
 
 --- 5. Segmented trend ---
-Time: 4.68s
+Time: 4.97s
 Breakpoint: 5999.9 (true: 6000)
   Segment 1: slope = 1.0000, CI = (1.0000, 1.0001)
   Segment 2: slope = -0.5000, CI = (-0.5000, -0.4999)
 True slopes: segment 1 = 1.0, segment 2 = -0.5
+Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/35_Large_Data_Trend/large_data_trends.png
 ```
+
+## Visual Diagnostics
+
+![Large Dataset Trends](large_data_trends.png)
 
 ## Interpretation & Insights
 

@@ -116,6 +116,8 @@ print(res.data['time_increment'].iloc[0])
 
 ## Understanding the Output Plots
 
+![Inspection Diagnostic Plot](inspection_plot.png)
+
 The function generates a figure with four panels:
 
 1.  **Time Series Plot (Top Left):** Shows values over time. Censored data is typically distinguished (e.g., open circles vs. filled circles). Look for trends, seasonality, and outliers.

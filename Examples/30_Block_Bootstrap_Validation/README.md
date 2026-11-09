@@ -7,21 +7,28 @@ Bootstrap is applied *after* temporal aggregation. This is crucial for high-freq
 ```python
 mk.trend_test(..., agg_method='median', agg_period='month', autocorr_method='block_bootstrap')
 ```
+
 ## Scenario 2: High Censoring + Bootstrap
 Ensures `hicensor` preprocessing works correctly before the bootstrap resampling step.
 ```python
 mk.trend_test(..., hicensor=True, autocorr_method='block_bootstrap')
 ```
+
 ## Scenario 3: Seasonal Bootstrap
 Validates that the seasonal test bootstraps entire seasonal cycles (e.g., years) to preserve seasonality.
 ```python
 mk.seasonal_trend_test(..., autocorr_method='block_bootstrap', block_size='auto')
 ```
+
 ## Scenario 4: ATS Slope + Bootstrap P-value
 Combines the robust ATS estimator for the slope/CI with the Block Bootstrap for the p-value.
 ```python
 mk.trend_test(..., sens_slope_method='ats', autocorr_method='block_bootstrap')
 ```
+
+## Visual Diagnostics
+
+![Bootstrap Validation Scenarios](bootstrap_validation_scenarios.png)
 
 ## Execution Output
 ```text
