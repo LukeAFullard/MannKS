@@ -94,45 +94,73 @@ def _kendall_s(x, y):
     return int(round(tau_b * denom))
 
 
-def _censored_s_and_ties(dupx, dupy, cx):
+def _cross_s_and_ambig(x_lo, y_lo, s_lo, x_hi, y_hi, s_hi):
+    """Contribution to S and ambiguous pair count between a lower group (x_lo)
+    and an upper group (x_hi), where a pair is unambiguous iff x_lo < x_hi."""
+    n_lo, n_hi = len(x_lo), len(x_hi)
+    if n_lo == 0 or n_hi == 0:
+        return 0, 0
+    k = _kendall_s(np.concatenate([x_lo, x_hi]), np.concatenate([y_lo, y_hi])) - s_lo - s_hi
+    ys = np.sort(y_hi)
+    above = n_hi - np.searchsorted(ys, y_lo, side='right')
+    below = np.searchsorted(ys, y_lo, side='left')
+    t_sum = int(np.sum(above) - np.sum(below))
+    s_cross = (t_sum + k) // 2
+    ambig = int(np.sum(np.searchsorted(np.sort(x_hi), x_lo, side='left')))
+    return s_cross, ambig
+
+
+def _censored_s_and_ties(dupx, dupy, cx, lt_mask=None, gt_mask=None):
     """S and the Tau-b tie counts (tt, uu) of the censored Kendall statistic
-    in O(n log n).  Gives exactly the pairwise rules of the O(n^2) path:
+    in O(n log n).  Gives_exactly the pairwise rules of the O(n^2) path:
 
     * uncensored-uncensored pairs score sign(dx) * sign(dy);
-    * a censored-uncensored pair scores sign(y_u - y_c) when the censored
-      value lies below the uncensored one, and 0 (ambiguous) otherwise;
-    * censored-censored pairs score 0.
+    * a left-censored observation (<L) is unambiguously below an uncensored
+      or right-censored observation when dupx_lt < dupx_other, and 0 otherwise;
+    * a right-censored observation (>R) is unambiguously above an uncensored
+      or left-censored observation when dupx_gt > dupx_other, and 0 otherwise;
+    * pairs of two left-censored or two right-censored observations score 0.
 
-    The censored-uncensored sum over pairs with x_u > x_c equals (T + K) / 2,
-    where T = sum of sign(y_u - y_c) and K = sum of sign(x_u - x_c) *
-    sign(y_u - y_c) over all censored-uncensored pairs, and K is the S of the
-    whole sample minus the S of each group.  ``dupy`` (time) is never
-    censored.  Returns None if a censored and an uncensored value are exactly
-    equal after the tie-break shift (the identity needs x_u != x_c); the
-    caller then uses the pairwise path.
+    ``dupy`` (time) is never censored.  Returns None if any two groups share an
+    identical ``dupx`` value after the tie-break shift; the caller then uses
+    the pairwise path.
     """
     cx = np.asarray(cx, dtype=bool)
-    xu, yu = dupx[~cx], dupy[~cx]
-    xc, yc = dupx[cx], dupy[cx]
-    nu, nc = len(xu), len(xc)
-    if nu and nc and np.intersect1d(xu, xc).size:
+    if lt_mask is None:
+        lt_mask = cx
+    else:
+        lt_mask = np.asarray(lt_mask, dtype=bool)
+    if gt_mask is None:
+        gt_mask = np.zeros_like(cx, dtype=bool)
+    else:
+        gt_mask = np.asarray(gt_mask, dtype=bool)
+    u_mask = ~(lt_mask | gt_mask)
+
+    xu, yu = dupx[u_mask], dupy[u_mask]
+    xl, yl = dupx[lt_mask], dupy[lt_mask]
+    xg, yg = dupx[gt_mask], dupy[gt_mask]
+    nu, nl, ng = len(xu), len(xl), len(xg)
+
+    if (nu and nl and np.intersect1d(xu, xl).size) or \
+       (nu and ng and np.intersect1d(xu, xg).size) or \
+       (nl and ng and np.intersect1d(xl, xg).size):
         return None
 
     s_u = _kendall_s(xu, yu)
-    kenS = s_u
-    cix_count = 0
-    if nu and nc:
-        k = _kendall_s(dupx, dupy) - _kendall_s(xc, yc) - s_u
-        ys = np.sort(yu)
-        above = nu - np.searchsorted(ys, yc, side='right')
-        below = np.searchsorted(ys, yc, side='left')
-        t_sum = int(np.sum(above) - np.sum(below))
-        kenS = s_u + (t_sum + k) // 2
-        # Ambiguous pairs: censored value above the uncensored one.
-        cix_count = int(np.sum(np.searchsorted(np.sort(xu), xc, side='left')))
+    s_l = _kendall_s(xl, yl) if (nl and (nu or ng)) else 0
+    s_g = _kendall_s(xg, yg) if (ng and (nu or nl)) else 0
 
-    tplus = nc * (nc - 1) // 2 - _tie_pairs(xc)
-    tt = _tie_pairs(dupx) + cix_count + tplus
+    s_lu, ambig_lu = _cross_s_and_ambig(xl, yl, s_l, xu, yu, s_u)
+    s_ug, ambig_ug = _cross_s_and_ambig(xu, yu, s_u, xg, yg, s_g)
+    s_lg, ambig_lg = _cross_s_and_ambig(xl, yl, s_l, xg, yg, s_g)
+
+    kenS = s_u + s_lu + s_ug + s_lg
+    tt = (
+        _tie_pairs(xu)
+        + nl * (nl - 1) // 2
+        + ng * (ng - 1) // 2
+        + ambig_lu + ambig_ug + ambig_lg
+    )
     uu = _tie_pairs(dupy)
     return float(kenS), float(tt), float(uu)
 
@@ -165,6 +193,9 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
         xx[gt_mask] = max_gt_val
         cx[gt_mask] = False
 
+    gt_mask = cx & (cen_type == 'gt')
+    lt_mask = cx & ~gt_mask
+
     # Time is treated as uncensored.  Equal times share a rank, so pairs with
     # tied times contribute 0 to S (as in LWP-TRENDS, which ranks by
     # season-year).
@@ -179,8 +210,13 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     delx = _tie_break_delta(_get_min_positive_diff(np.unique(xx)), n, tie_break_method)
     dely = _tie_break_delta(_get_min_positive_diff(np.unique(yy)), n, tie_break_method)
 
-    dupx = xx - delx * cx
+    dupx = xx - delx * lt_mask + delx * gt_mask
     dupy = yy - dely * cy
+
+    # Interval bounds for x: uncensored [dupx, dupx], left-censored (-inf, dupx],
+    # right-censored [dupx, +inf).
+    a_x = np.where(lt_mask, -np.inf, dupx)
+    b_x = np.where(gt_mask, np.inf, dupx)
 
     # 4. S-statistic.  Large samples use an exact O(n log n) algorithm;
     # small ones (and the rare case it does not cover) the pairwise rules.
@@ -188,7 +224,7 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     tt = 0
     uu = 0
 
-    fast = _censored_s_and_ties(dupx, dupy, cx) if n > _FAST_S_MIN_N else None
+    fast = _censored_s_and_ties(dupx, dupy, cx, lt_mask, gt_mask) if n > _FAST_S_MIN_N else None
     use_fast_path = fast is not None
     use_chunking = n > _FAST_S_MIN_N and not use_fast_path
     # Rows per chunk, so that each (rows x n) temporary stays ~16 MB.
@@ -202,14 +238,14 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
         for start_i in range(0, n, chunk_size):
             end_i = min(start_i + chunk_size, n)
 
-            # chunk_dupx: shape (chunk_size,)
-            chunk_dupx = dupx[start_i:end_i]
+            chunk_a_x = a_x[start_i:end_i, np.newaxis]
+            chunk_b_x = b_x[start_i:end_i, np.newaxis]
             chunk_dupy = dupy[start_i:end_i]
-            chunk_cx = cx[start_i:end_i]
             chunk_cy = cy[start_i:end_i]
 
-            # Broadcast against full arrays
-            diffx = dupx[np.newaxis, :] - chunk_dupx[:, np.newaxis]
+            # Pair (i, j) is strictly increasing in x iff a_x[j] > b_x[i],
+            # and strictly decreasing in x iff b_x[j] < a_x[i].
+            sign_x = (a_x[np.newaxis, :] > chunk_b_x).astype(float) - (b_x[np.newaxis, :] < chunk_a_x).astype(float)
             diffy = dupy[np.newaxis, :] - chunk_dupy[:, np.newaxis]
 
             # Create mask for i < j
@@ -220,36 +256,11 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
             if not np.any(triu_mask):
                 continue
 
-            signyx = np.sign(diffy * diffx)
-
-            diffcx = cx[np.newaxis, :].astype(int) - chunk_cx[:, np.newaxis].astype(int)
-            cix = np.sign(diffcx) * np.sign(diffx)
-            cix[cix <= 0] = 0
-            signyx *= (1 - cix)
-
-            xplus = (cx[np.newaxis, :].astype(int) + chunk_cx[:, np.newaxis].astype(int))
-            xplus[xplus <= 1] = 0
-            xplus[xplus > 1] = 1
-
-            # Apply triu mask to select valid pairs
-            valid_signyx = signyx * triu_mask
-            valid_xplus = xplus * triu_mask
-
-            kenS += np.sum(valid_signyx * (1 - valid_xplus))
+            signyx = np.sign(diffy) * sign_x
+            kenS += np.sum(signyx * triu_mask)
 
             if tau_method != 'a':
-                # Term 1: Ties in x
-                term1 = (1 - np.abs(np.sign(diffx))) * triu_mask
-                tt += np.sum(term1)
-
-                # Term 2: cix sum
-                cix_valid = cix * triu_mask
-                tt += np.sum(cix_valid)
-
-                # Term 3: tplus
-                tplus = xplus * np.abs(np.sign(diffx))
-                tplus_valid = tplus * triu_mask
-                tt += np.sum(tplus_valid)
+                tt += np.sum((sign_x == 0) * triu_mask)
 
                 # uu: ties in y
                 diffcy = cy[np.newaxis, :].astype(int) - chunk_cy[:, np.newaxis].astype(int)
@@ -270,29 +281,19 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
                 uu += np.sum(uplus_valid)
 
     else:
-        # Original vectorized implementation
-        diffx = dupx[:, np.newaxis] - dupx
+        # Vectorized pairwise implementation
+        # Note: diffx = dupx[:, np.newaxis] - dupx has row i - col j, and diffy = dupy[:, np.newaxis] - dupy
+        # also has row i - col j, so their product sign(diffy * diffx) is invariant to (i - j) vs (j - i).
+        sign_x = (a_x[:, np.newaxis] > b_x[np.newaxis, :]).astype(float) - (b_x[:, np.newaxis] < a_x[np.newaxis, :]).astype(float)
         diffy = dupy[:, np.newaxis] - dupy
-        signyx = np.sign(diffy * diffx)
+        signyx = np.sign(diffy) * sign_x
 
-        diffcx = cx[:, np.newaxis].astype(int) - cx.astype(int)
-        cix = np.sign(diffcx) * np.sign(diffx)
-        cix[cix <= 0] = 0
-        signyx *= (1 - cix)
-
-        xplus = (cx[:, np.newaxis].astype(int) + cx.astype(int))
-        xplus[xplus <= 1] = 0
-        xplus[xplus > 1] = 1
-        tplus = xplus * np.abs(np.sign(diffx))
-
-        itot = np.sum(np.triu(signyx * (1 - xplus), k=1))
+        itot = np.sum(np.triu(signyx, k=1))
         kenS = itot
 
         if tau_method != 'a':
-            # tt
-            tt = (np.sum(1 - np.abs(np.sign(diffx))) - n) / 2.0
-            tt += np.sum(cix) / 2.0
-            tt += np.sum(tplus) / 2.0
+            # tt: pairs (i < j) that are tied or ambiguous in x
+            tt = float(np.sum(np.triu(sign_x == 0, k=1)))
 
             # uu
             diffcy = cy[:, np.newaxis].astype(int) - cy.astype(int)
@@ -323,6 +324,8 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     dorder_x = np.argsort(dupx).astype(np.intp, copy=False)
     dxx = dupx[dorder_x]
     dcx = cx[dorder_x]
+    dcx_lt = lt_mask[dorder_x]
+    dcx_gt = gt_mask[dorder_x]
 
     dorder_y = np.argsort(dupy).astype(np.intp, copy=False)
     dyy = dupy[dorder_y]
@@ -363,9 +366,11 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     x4 = np.sum(_lc * (_lv - 1))
     _lv, _lc = np.unique(rylng, return_counts=True)
     y4 = np.sum(_lc * (_lv - 1))
-    tmpx_uc = intg * dcx - 1
-    tmpx_uc[tmpx_uc < 0] = 0
-    nrxlng_uc = np.sum(tmpx_uc)
+    tmpx_uc_lt = intg * dcx_lt - 1
+    tmpx_uc_lt[tmpx_uc_lt < 0] = 0
+    tmpx_uc_gt = (n + 1 - intg) * dcx_gt - 1
+    tmpx_uc_gt[tmpx_uc_gt < 0] = 0
+    nrxlng_uc = np.sum(tmpx_uc_lt) + np.sum(tmpx_uc_gt)
     x1_uc = nrxlng_uc * 2 * 1 * (2 * 2 + 5)
     x2_uc = 0
     x3_uc = nrxlng_uc * 2 * 1
@@ -382,7 +387,7 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     deluc = (x1_uc + y1_uc) / 18.0 - term2_uc - term3_uc - (x4 + y4)
 
     # delu: Correction for ties between two censored values.
-    dxx_u = dxx - intg * dcx * delx
+    dxx_u = dxx - intg * dcx_lt * delx + intg * dcx_gt * delx
     dyy_u = dyy - intg * dcy * dely
     rxlng_u = _rle_lengths(rankdata(dxx_u, method='average'))
     rylng_u = _rle_lengths(rankdata(dyy_u, method='average'))
@@ -514,7 +519,7 @@ def _sens_estimator_unequal_spacing(x, t):
     k = 0
     for i, j in _iter_triu_blocks(n):
         dt = t[j] - t[i]
-        m = np.abs(dt) > 1e-10   # equal times: no defined slope
+        m = dt != 0.0   # equal times: no defined slope
         v = (x[j][m] - x[i][m]) / dt[m]
         out[k:k + len(v)] = v
         k += len(v)
@@ -629,7 +634,7 @@ def _censored_pair_slopes(x, t, code, i, j, lt_mult=DEFAULT_LT_MULTIPLIER,
     i = np.asarray(i, dtype=np.intp)
     j = np.asarray(j, dtype=np.intp)
     dt = t[j] - t[i]
-    valid = np.abs(dt) > 1e-10
+    valid = dt != 0.0
     later_first = dt >= 0
     late = np.where(later_first, j, i)
     early = np.where(later_first, i, j)
@@ -693,16 +698,18 @@ def _confidence_intervals(slopes, var_s, alpha, method='direct', total_pairs=Non
     """
     Confidence interval for Sen's slope (Gilbert 1987, section 16.5).
 
-    The ranks of the limits among the N usable slopes are
-    ``(N -/+ Z_{1-alpha/2} * sqrt(Var(S))) / 2``.
+    The 1-based ranks of the limits among the N usable slopes are
+    ``M1 = (N - Z_{1-alpha/2} * sqrt(Var(S))) / 2`` and
+    ``M2 = (N + Z_{1-alpha/2} * sqrt(Var(S))) / 2 + 1`` (Gilbert 1987, eq. 16.8;
+    LWP-TRENDS omits the +1 on ``M2`` when interpolating over 1..N).
 
     Args:
         slopes: Array of slopes (all pairs, or a random sample of pairs).
             NaN entries (ambiguous censored pairs) are ignored.
         var_s: Variance of the Mann-Kendall S statistic.
         alpha: Significance level (two-sided interval of level 1 - alpha).
-        method: 'direct' (nearest rank) or 'lwp' (linear interpolation
-            between ranks, as in LWP-TRENDS).
+        method: 'direct' (nearest rank, symmetric Gilbert 1987 M1/M2) or 'lwp'
+            (linear interpolation between LWP-TRENDS RL and RU ranks).
         total_pairs: Number of possible pairs when ``slopes`` is a random
             sample; None when ``slopes`` holds every pair.
     """
@@ -740,8 +747,11 @@ def _confidence_intervals(slopes, var_s, alpha, method='direct', total_pairs=Non
             return (hi_v - lo_v) * (r - (a + 1)) + lo_v
         lower_ci, upper_ci = interp(r1, a1, b1), interp(r2, a2, b2)
     else:
+        # Gilbert (1987) eq. 16.8: 1-based M2 = (N + C)/2 + 1 -> 0-based index
+        # is round(rank2), symmetric with lower_idx = round(rank1 - 1) so that
+        # lower_idx + upper_idx == n_sample - 1.
         lower_idx = int(np.clip(np.round(rank1 - 1), 0, n_sample - 1))
-        upper_idx = int(np.clip(np.round(rank2 - 1), 0, n_sample - 1))
+        upper_idx = int(np.clip(np.round(rank2), 0, n_sample - 1))
         valid_slopes.partition(sorted({lower_idx, upper_idx}))
         lower_ci = valid_slopes[lower_idx]
         upper_ci = valid_slopes[upper_idx]

@@ -94,6 +94,8 @@ def _slope(x, t, censored, cen_type, method='ats', lt_mult=0.5, gt_mult=1.1,
 
 def _resample_seed(random_state, k):
     """Seed for pair sampling in bootstrap resample k (deterministic)."""
+    if isinstance(random_state, np.random.Generator):
+        return random_state
     base = random_state if isinstance(random_state, (int, np.integer)) else 0
     return int(base) + 1 + k
 
@@ -145,8 +147,9 @@ def block_bootstrap_mann_kendall(x, t, censored, cen_type,
         x, t, censored, cen_type, tau_method=tau_method,
         mk_test_method=mk_test_method, tie_break_method=tie_break_method)
 
+    seed0 = random_state if isinstance(random_state, (int, np.integer, np.random.Generator)) else None
     b = _slope(x, t, censored, cen_type, sens_slope_method, lt_mult, gt_mult,
-               max_pairs, random_state if isinstance(random_state, (int, np.integer)) else None)
+               max_pairs, seed0)
     if not np.isfinite(b):
         b = 0.0
     x_detrended = x - b * (t - np.median(t))
@@ -194,7 +197,7 @@ def block_bootstrap_confidence_intervals(x, t, censored, cen_type,
     cen_type = np.asarray(cen_type)
     n = len(x)
 
-    seed0 = random_state if isinstance(random_state, (int, np.integer)) else None
+    seed0 = random_state if isinstance(random_state, (int, np.integer, np.random.Generator)) else None
     slope_obs = _slope(x, t, censored, cen_type, method, lt_mult, gt_mult, max_pairs, seed0)
 
     if block_size == 'auto':

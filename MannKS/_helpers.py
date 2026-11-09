@@ -32,7 +32,7 @@ def _missing_values_analysis(x, method='skip'):
     return x, len(x)
 
 
-def _aggregate_censored_median(group, is_datetime):
+def _aggregate_censored_median(group, is_datetime, return_dict=False):
     """
     Computes a robust median for a group of observations which may contain
     censored data, following the LWP-TRENDS R script logic.
@@ -50,6 +50,8 @@ def _aggregate_censored_median(group, is_datetime):
     """
     n = len(group)
     if n == 0:
+        if return_dict:
+            return {}
         return pd.DataFrame({
             'value': [], 'censored': [], 'cen_type': [],
             't_original': [], 't': []
@@ -81,7 +83,7 @@ def _aggregate_censored_median(group, is_datetime):
 
     row_data = {
         'value': median_val,
-        'censored': is_censored,
+        'censored': bool(is_censored),
         'cen_type': cen_type,
     }
 
@@ -89,6 +91,8 @@ def _aggregate_censored_median(group, is_datetime):
     row_data['t_original'] = group['t_original'].median() if is_datetime else np.median(group['t_original'])
     row_data['t'] = np.median(group['t'])
 
+    if return_dict:
+        return row_data
     return pd.DataFrame([row_data])
 
 
@@ -210,11 +214,13 @@ def _value_for_time_increment(df: DataFrame, group_key: pd.Series, period: str) 
     return df.loc[keep].reset_index(drop=True)
 
 
-def _aggregate_by_group(group, agg_method, is_datetime, period=None):
+def _aggregate_by_group(group, agg_method, is_datetime, period=None, return_dict=False):
     """
     Aggregates a group of data points using the specified method.
     """
     if len(group) <= 1:
+        if return_dict:
+            return group.iloc[0].to_dict() if len(group) == 1 else {}
         return group
 
     if agg_method == 'median':
@@ -225,7 +231,7 @@ def _aggregate_by_group(group, agg_method, is_datetime, period=None):
                 "which may not be statistically robust. Consider using 'robust_median' for "
                 "more accurate censored data aggregation.", UserWarning)
         median_val = group['value'].median()
-        is_censored = median_val <= group[group['censored']]['value'].max() if group['censored'].any() else False
+        is_censored = bool(median_val <= group[group['censored']]['value'].max()) if group['censored'].any() else False
 
         new_row = {
             'value': median_val,
@@ -234,25 +240,26 @@ def _aggregate_by_group(group, agg_method, is_datetime, period=None):
             'censored': is_censored,
             'cen_type': group.loc[group['censored'], 'cen_type'].mode()[0] if is_censored else 'not'
         }
-        return pd.DataFrame([new_row])
+        return new_row if return_dict else pd.DataFrame([new_row])
     elif agg_method == 'robust_median':
-        return _aggregate_censored_median(group, is_datetime)
+        return _aggregate_censored_median(group, is_datetime, return_dict=return_dict)
     elif agg_method == 'middle':
         t_numeric_group = group['t'].to_numpy()
-        closest_idx = np.argmin(np.abs(t_numeric_group - np.mean(t_numeric_group)))
-        return group.iloc[[closest_idx]]
+        closest_idx = int(np.argmin(np.abs(t_numeric_group - np.mean(t_numeric_group))))
+        return group.iloc[closest_idx].to_dict() if return_dict else group.iloc[[closest_idx]]
     elif agg_method == 'middle_lwp':
         if not is_datetime:
             # For numeric time, 'middle_lwp' is equivalent to 'middle'
             t_numeric_group = group['t'].to_numpy()
-            closest_idx = np.argmin(np.abs(t_numeric_group - np.mean(t_numeric_group)))
-            return group.iloc[[closest_idx]]
+            closest_idx = int(np.argmin(np.abs(t_numeric_group - np.mean(t_numeric_group))))
+            return group.iloc[closest_idx].to_dict() if return_dict else group.iloc[[closest_idx]]
         else:
             # Observation closest to the mid-point of the time increment
             # (LWP-TRENDS rule) when the increment is known; otherwise the
             # mid-point of the group's time range.
-            return group.loc[[_closest_to_midpoint(group, period)]]
-    return group
+            label = _closest_to_midpoint(group, period)
+            return group.loc[label].to_dict() if return_dict else group.loc[[label]]
+    return group.iloc[0].to_dict() if return_dict else group
 
 
 def _get_slope_scaling_factor(unit: str) -> float:

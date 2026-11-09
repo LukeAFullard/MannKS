@@ -106,7 +106,7 @@ Trend: increasing
 Classification: Highly Likely Increasing
 p-value: 0.0000
 Sen's Slope: 0.5111 units/year
-Confidence Interval: [0.4850, 0.5389]
+Confidence Interval: [0.4850, 0.5391]
 
 ```
 
@@ -120,7 +120,7 @@ Confidence Interval: [0.4850, 0.5389]
 ### 2. Seasonal Trend Test (`mk.seasonal_trend_test`)
 *   **Trend (Increasing)**: After accounting for the seasonal "wobble", the underlying trend is upward.
 *   **Sen's Slope (0.5111 units/year)**: This is very close to the "true" trend of 0.5 we added to the synthetic data. This shows the method correctly recovered the trend despite the strong seasonal noise.
-*   **Confidence Interval**: The range `[0.4850, 0.5389]` includes the true value (0.5), validating the accuracy.
+*   **Confidence Interval**: The range `[0.4850, 0.5391]` includes the true value (0.5), validating the accuracy.
 
 ### 3. Visual Results (`seasonal_plot.png`)
 The function generated this plot:

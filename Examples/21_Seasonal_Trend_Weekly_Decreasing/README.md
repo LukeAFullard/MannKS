@@ -102,7 +102,7 @@ Trend: decreasing
 Classification: Highly Likely Decreasing
 p-value: 0.0000
 Sen's Slope: -4.9343 units/year
-Confidence Interval: [-5.0037, -4.8685]
+Confidence Interval: [-5.0037, -4.8684]
 
 ```
 

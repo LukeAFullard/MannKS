@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.3 — code audit & correctness release
+
+Comprehensive audit release addressing statistical correctness, memory management, performance optimizations, and regression testing while preserving 100% compatibility with LWP-TRENDS R outputs.
+
+### Statistical Correctness & Integrity
+* **Confidence interval indexing (`method='direct'`)**: Corrected an off-by-one indexing error where `upper_idx` had an unnecessary double decrement (`rank2 - 1` followed by floor/offset), violating Gilbert (1987) Eq. 16.8 ($M_2 = \frac{N+C}{2} + 1$). The upper and lower ranks (`lower_idx + upper_idx == n_sample - 1`) are now strictly symmetric around the median rank. `ci_method='lwp'` remains unchanged.
+* **Robust right-censored interval scoring (`mk_test_method='robust'`)**: Implemented full interval ordering for right-censored observations (`>DL`), correctly evaluating pairs against uncensored and left-censored values via $O(n \log n)$ cross-scoring and variance tie corrections. Pairs such as $(60, 60) < (80, \infty)$ are now properly recognized as strictly concordant (+1). `mk_test_method='lwp'` remains unchanged.
+* **Autocorrelation pre-whitening & detrending (`_autocorr.py`)**: `detrend`, `effective_sample_size`, and `should_apply_correction` now use `_sens_estimator_adaptive` with `max_pairs` and `random_state` for safe and scalable evaluation on large series.
+* **Seasonal trend test result fields alignment**: Aligned the field ordering of `_RESULT_FIELDS` in `seasonal_trend_test.py` with `trend_test.py`, ensuring consistent tuple unpacking and field-by-name access across both APIs.
+* **Exact time comparisons**: Replaced arbitrary float epsilon (`1e-10`) with exact equality checks (`dt != 0.0`) in unequal spacing Sen's slope and pair estimators.
+
+### Performance & Memory Robustness
+* **Plotting memory leaks**: Refactored plotting routines (`plot_seasonal_distribution`, `plot_inspection_data`, `plot_trend`, `plot_residuals`, `plot_rolling_trend`, `plot_segmented_trend`) to use explicit object-oriented Figure/Axes lifecycles with guaranteed cleanup in `try ... finally: plt.close(fig)`.
+* **Rolling trend performance & bounded execution**: Implemented $O(\log N)$ binary search window slicing (`np.searchsorted`) for monotonic series and added `max_windows` parameter (default 10,000) with positive step validation.
+* **Aggregation memory efficiency**: Vectorized single-row aggregations in `_aggregate_by_group` and `_aggregate_censored_median` with `return_dict=True` to eliminate $O(N^2)$ DataFrame concatenation overhead.
+* **Pair sampling memory scaling**: Replaced dense `np.triu_indices` allocations in `_sample_pairs` with an $O(n)$ row-start search, preventing memory exhaustion on large datasets.
+* **Regional reindexing**: Used `pd.DataFrame.reindex(columns=...)` in `regional_test` to guard against missing site columns.
+* **Modern random API**: Updated block bootstrap routines to accept `np.random.Generator` in addition to legacy integer seeds and `RandomState`.
+* **Immutable category maps**: Encapsulated `DEFAULT_CATEGORY_MAP` in `types.MappingProxyType` to prevent accidental in-place mutation.
+
+### Compatibility & Regression Testing
+* **100% LWP-TRENDS Parity Preserved**: All existing parity tests against verified LWP fixtures (`tests/test_lwp_parity.py`) pass without changes.
+* **New regression suite**: Added `tests/test_audit_fixes.py` with 13 focused regression tests covering all audit items.
+
 ## 0.6.2 — 32-bit / Pyodide compatibility
 
 * **Fixed `TypeError: Cannot cast array data from dtype('int64') to dtype('int32') according to the rule 'safe'` on 32-bit platforms** (such as Pyodide / WebAssembly in Streamlit) and with mixed-width integer inputs. Internal pair-indexing, run-length, and bootstrap index arrays (`_iter_triu_blocks`, `_sample_pairs`, `_moving_block_bootstrap_indices`, `_rle_lengths`, and related helpers) now use pointer-sized integers (`dtype=np.intp`) instead of hardcoded `int64` or unconstrained default integer types.

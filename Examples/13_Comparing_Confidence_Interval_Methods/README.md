@@ -127,8 +127,8 @@ Values: [12.   11.27  8.08 10.59 11.73  9.92 11.6  11.56 11.61 11.54 12.65 14.  
 
 --- Method 1: ci_method='direct' (Default) ---
 Sen's Slope: 0.1705
-Confidence Interval: [-0.0354, 0.5216]
-Interval Width: 0.5570
+Confidence Interval: [-0.0354, 0.5459]
+Interval Width: 0.5814
 
 --- Method 2: ci_method='lwp' ---
 Sen's Slope: 0.1705
@@ -137,7 +137,7 @@ Interval Width: 0.5651
 
 --- Comparison ---
 Difference in Lower CI: 0.000971
-Difference in Upper CI: 0.007099
+Difference in Upper CI: 0.017283
 
 Plot saved to 'ci_comparison_plot.png'
 
@@ -147,8 +147,8 @@ Plot saved to 'ci_comparison_plot.png'
 
 ### 1. Numerical Difference
 *   **Lower CI Difference**: 0.000971
-*   **Upper CI Difference**: 0.007099
-*   **LWP Method**: Produced a wider interval in this case, due to interpolation between ranks.
+*   **Upper CI Difference**: 0.017283
+*   **Direct Method**: Produced a wider interval in this case. It picked specific slopes from the ranked list.
 *   **Significance**: In large datasets (n > 50), these two methods usually converge and the difference becomes negligible. In small datasets (n < 20), the difference can be noticeable, though rarely changes the overall conclusion of the test.
 
 ### 2. Visual Comparison

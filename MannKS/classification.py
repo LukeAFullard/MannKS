@@ -3,17 +3,18 @@ This module provides functionality to classify trend analysis results into
 descriptive categories based on confidence levels.
 """
 
-DEFAULT_CATEGORY_MAP = {
+from types import MappingProxyType
+import numpy as np
+from typing import Optional, Dict, Mapping, NamedTuple
+
+DEFAULT_CATEGORY_MAP: Mapping[float, str] = MappingProxyType({
     0.95: "Highly Likely",
     0.90: "Very Likely",
     0.67: "Likely",
     0.0:  "As Likely as Not"
-}
+})
 
-import numpy as np
-from typing import Optional, Dict, NamedTuple
-
-def classify_trend(result: NamedTuple, category_map: Optional[Dict[float, str]] = None) -> str:
+def classify_trend(result: NamedTuple, category_map: Optional[Mapping[float, str]] = None) -> str:
     """
     Classifies a trend result into a descriptive category.
 

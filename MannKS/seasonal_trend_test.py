@@ -40,8 +40,8 @@ _RESULT_FIELDS = [
     'lower_ci', 'upper_ci', 'C', 'Cd', 'classification', 'analysis_notes',
     'sen_probability', 'sen_probability_max', 'sen_probability_min',
     'prop_censored', 'prop_unique', 'n_censor_levels',
-    'slope_per_second', 'scaled_slope', 'slope_units',
-    'lower_ci_per_second', 'upper_ci_per_second',
+    'slope_per_second', 'lower_ci_per_second', 'upper_ci_per_second',
+    'scaled_slope', 'slope_units',
     'acf1', 'n_effective', 'block_size_used', 'warnings',
     'computation_mode', 'pairs_used', 'approximation_error'
 ]
@@ -220,8 +220,9 @@ def seasonal_trend_test(
                 captured_warnings.append(str(w.message))
             return res('no trend', False, np.nan, 0, 0, 0, 0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
                        'insufficient data', analysis_notes,
-                       np.nan, np.nan, np.nan, 0, 0, 0, np.nan, np.nan, '',
-                       np.nan, np.nan, np.nan, np.nan, None, captured_warnings,
+                       np.nan, np.nan, np.nan, 0, 0, 0,
+                       np.nan, np.nan, np.nan, np.nan, '',
+                       np.nan, np.nan, None, captured_warnings,
                        'insufficient', None, None)
 
         def assign_seasons(df):
@@ -261,10 +262,10 @@ def seasonal_trend_test(
                                       index=data_filtered.index)
                 data_filtered = _value_for_time_increment(data_filtered, group_key, period_alias)
             else:
-                data_filtered = pd.concat(
-                    [_aggregate_by_group(g, agg_method, is_datetime, period=period_alias)
-                     for _, g in data_filtered.groupby(['cycle', 'season'], sort=True)],
-                    ignore_index=True)
+                data_filtered = pd.DataFrame(
+                    [_aggregate_by_group(g, agg_method, is_datetime, period=period_alias, return_dict=True)
+                     for _, g in data_filtered.groupby(['cycle', 'season'], sort=True)]
+                )
             data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
 
         seasons, cycles = assign_seasons(data_filtered)
@@ -523,8 +524,8 @@ def seasonal_trend_test(
     results = res(trend, h, p, z, Tau, s, var_s, scaled_slope, intercept, scaled_lower_ci, scaled_upper_ci, C, Cd,
                   '', [], sen_prob, sen_prob_max, sen_prob_min,
                   prop_censored, prop_unique, n_censor_levels,
-                  slope_per_second, scaled_slope, slope_units,
-                  lower_ci_per_second, upper_ci_per_second,
+                  slope_per_second, lower_ci_per_second, upper_ci_per_second,
+                  scaled_slope, slope_units,
                   np.nan, np.nan, block_size_used, captured_warnings,
                   computation_mode, pairs_used, approximation_error)
 

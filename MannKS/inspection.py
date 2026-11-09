@@ -120,7 +120,7 @@ def inspect_trend_data(
     df_filtered['bi-month'] = (df_filtered['month'] - 1) // 2 + 1
     df_filtered['bi-annual'] = (df_filtered['month'] - 1) // 6 + 1
     df_filtered['week'] = df_filtered[time_col].dt.isocalendar().week
-    df_filtered['day'] = df_filtered[time_col].dt.dayofyear
+    df_filtered['day'] = df_filtered[time_col].dt.day_of_year
 
 
     increment_map = {

@@ -83,7 +83,7 @@ Basic Trend: increasing
 Classification: Highly Likely Increasing
 p-value: 0.0000
 Sen's Slope: 1.9255 (mg/L per year)
-Confidence Interval: [1.7517, 2.1133]
+Confidence Interval: [1.7517, 2.1162]
 
 (For comparison) Raw Slope: 0.0000000610 (units/second)
 
@@ -101,7 +101,7 @@ The `slope_scaling='year'` parameter saves you from doing manual conversion math
 ### 2. Statistical Results
 *   **p-value (0.0000)**: Highly significant. We are confident there is a trend.
 *   **Sen's Slope (1.9255)**: Our synthetic data was designed to increase by 2.0 per year. The test recovered this value very accurately (1.9255), despite the added noise.
-*   **Confidence Interval [1.75, 2.11]**: We are 90% confident (default alpha) that the true rate of change is between 1.75 and 2.11 mg/L per year.
+*   **Confidence Interval [1.75, 2.12]**: We are 90% confident (default alpha) that the true rate of change is between 1.75 and 2.12 mg/L per year.
 
 ### 3. Visual Results (`trend_plot.png`)
 The plot x-axis now correctly handles dates:

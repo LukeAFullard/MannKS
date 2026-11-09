@@ -94,6 +94,11 @@ def check_seasonality(
     """
     res = namedtuple('Seasonality_Test', ['h_statistic', 'p_value', 'is_seasonal', 'seasons_tested', 'seasons_skipped'])
 
+    x_arr = np.asarray(x) if not isinstance(x, pd.DataFrame) else x
+    t_arr = np.asarray(t)
+    if len(x_arr) != len(t_arr):
+        raise ValueError(f"Input vectors `x` and `t` must have the same length. Got {len(x_arr)} and {len(t_arr)}.")
+
     data, is_datetime = _prepare_data(x, t, hicensor)
 
     valid_agg = ['none', 'median', 'robust_median', 'middle', 'middle_lwp', 'lwp']
@@ -122,10 +127,10 @@ def check_seasonality(
             agg_col = np.floor(data['t'] / agg_period)
 
         data = data.assign(_agg_key=np.asarray(agg_col)).sort_values('t', kind='stable')
-        data = pd.concat(
-            [_aggregate_by_group(grp.drop(columns='_agg_key'), method, is_datetime, period=freq)
-             for _, grp in data.groupby('_agg_key', sort=True)],
-            ignore_index=True)
+        data = pd.DataFrame(
+            [_aggregate_by_group(grp.drop(columns='_agg_key'), method, is_datetime, period=freq, return_dict=True)
+             for _, grp in data.groupby('_agg_key', sort=True)]
+        )
 
     if len(data) < 2:
         return res(np.nan, np.nan, False, [], [])

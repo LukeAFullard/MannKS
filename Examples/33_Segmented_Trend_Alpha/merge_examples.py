@@ -1,5 +1,6 @@
 
 import os
+import sys
 import subprocess
 import io
 
@@ -9,7 +10,7 @@ def merge_examples():
     # Run Bagging Script
     print("Running Bagging Example...")
     bagging_output = subprocess.check_output(
-        ['python', 'run_example_bagging.py'],
+        [sys.executable, 'run_example_bagging.py'],
         cwd=cwd,
         env={**os.environ, 'PYTHONPATH': os.path.join(cwd, '../../')}
     ).decode('utf-8')
@@ -17,7 +18,7 @@ def merge_examples():
     # Run OLS Script
     print("Running OLS Example...")
     ols_output = subprocess.check_output(
-        ['python', 'run_example_ols.py'],
+        [sys.executable, 'run_example_ols.py'],
         cwd=cwd,
         env={**os.environ, 'PYTHONPATH': os.path.join(cwd, '../../')}
     ).decode('utf-8')
