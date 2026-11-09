@@ -151,7 +151,7 @@ Trend: increasing
 p-value: 0.0013
 Significant? True
 Slope: 0.2300 units per year
-Confidence Interval (95%): [0.0917, 0.3704]
+Confidence Interval (95%): [0.0917, 0.3714]
 Note: If p < 0.05, this is a False Positive caused by autocorrelation.
 
 --- Test 2: Yue & Wang (2004) Correction ---
@@ -159,7 +159,7 @@ Trend: increasing
 p-value: 0.0228
 Significant? True
 Slope: 0.2300 units per year
-Confidence Interval (95%): [0.0322, 0.4362]
+Confidence Interval (95%): [0.0322, 0.4364]
 Effective Sample Size: 50.0 (vs 100 original)
 
 --- Test 3: Block Bootstrap Mann-Kendall ---

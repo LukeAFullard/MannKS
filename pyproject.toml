@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mannks"
-version = "0.6.2"
+version = "0.6.3"
 description = "Non-parametric trend analysis for unequally spaced time series with censored data and large dataset support"
 authors = ["Luke Fullard"]
 license = "MIT"

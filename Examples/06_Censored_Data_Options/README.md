@@ -109,7 +109,7 @@ print(f"Sen's Slope: {result_lwp.slope:.4f}")
 
 --- Method A: Robust (Default) ---
 Trend: increasing
-S-statistic: 29.0
+S-statistic: 34.0
 Sen's Slope: 0.2667
 
 
@@ -131,11 +131,11 @@ Sen's Slope: 0.2500
 ### Key Differences Observed
 
 1.  **The S-Statistic (Trend Strength)**
-    *   **Robust (S=29.0)**: The test calculates the score by comparing ranks. Comparisons involving `>1.5` and `1.8` are treated as ambiguous (tied), so they don't contribute to the score. This effectively bases the trend on the clear, unambiguous signal in the data.
+    *   **Robust (S=34.0)**: The test calculates the score by comparing ranks. Comparisons involving `>1.5` and `1.8` are treated as ambiguous (tied), so they don't contribute to the score. This effectively bases the trend on the clear, unambiguous signal in the data.
     *   **LWP (S=26.0)**: The algorithm forces *all* right-censored values (`>1.5`, `>2.2`, `>3.5`) to the same high number (approx `3.1`).
         *   Because the early `>1.5` is replaced by `3.1`, it becomes larger than many subsequent values (like `1.8`, `2.0`, `2.5`).
         *   This creates artificial "decreasing" pairs (e.g., `3.1` vs `1.8`) that penalize the score.
-        *   As a result, the S-statistic is **lower** (26.0 vs 29.0) than the robust method, underestimating the trend strength.
+        *   As a result, the S-statistic is **lower** (26.0 vs 34.0) than the robust method, underestimating the trend strength.
 
 2.  **Sen's Slope (Magnitude)**
     *   **Robust**: Calculates slopes only for valid pairs. If a pair is ambiguous (e.g., `>1.5` vs `1.8`), it is excluded. This tends to preserve the true slope of the underlying data.

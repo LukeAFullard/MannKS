@@ -244,10 +244,10 @@ def trend_test(
             else:
                 helper_method = agg_method.replace('lwp_', '')
                 data_filtered = data_filtered.assign(period_group=group_key.values)
-                data_filtered = pd.concat(
-                    [_aggregate_by_group(g, helper_method, is_datetime, period=period_freq)
-                     for _, g in data_filtered.groupby('period_group', sort=True)],
-                    ignore_index=True).drop(columns=['period_group'], errors='ignore')
+                data_filtered = pd.DataFrame(
+                    [_aggregate_by_group(g, helper_method, is_datetime, period=period_freq, return_dict=True)
+                     for _, g in data_filtered.groupby('period_group', sort=True)]
+                ).drop(columns=['period_group'], errors='ignore')
 
         elif len(data_filtered['t']) != len(np.unique(data_filtered['t'])):
             if agg_method == 'none':
@@ -255,10 +255,10 @@ def trend_test(
             else:
                 if data_filtered['censored'].any() and agg_method not in ['robust_median']:
                     analysis_notes.append(f"'{agg_method}' aggregation used with censored data")
-                data_filtered = pd.concat(
-                    [_aggregate_by_group(g, agg_method, is_datetime)
-                     for _, g in data_filtered.groupby('t')],
-                    ignore_index=True)
+                data_filtered = pd.DataFrame(
+                    [_aggregate_by_group(g, agg_method, is_datetime, return_dict=True)
+                     for _, g in data_filtered.groupby('t')]
+                )
 
         data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
         x_filtered = data_filtered['value'].to_numpy(dtype=float)
@@ -288,13 +288,17 @@ def trend_test(
 
         if autocorr_method == 'auto':
             from ._autocorr import should_apply_correction
-            needs_correction, acf1, n_eff = should_apply_correction(x_filtered, t_filtered)
+            needs_correction, acf1, n_eff = should_apply_correction(
+                x_filtered, t_filtered, max_pairs=pair_cap, random_state=random_state
+            )
             if needs_correction:
                 analysis_notes.append(f'Autocorrelation detected (ACF1={acf1:.3f}), applying block bootstrap')
                 autocorr_method = 'block_bootstrap'
         elif autocorr_method in ('block_bootstrap', 'yue_wang'):
             from ._autocorr import effective_sample_size
-            n_eff, acf1 = effective_sample_size(x_filtered, t_filtered)
+            n_eff, acf1 = effective_sample_size(
+                x_filtered, t_filtered, max_pairs=pair_cap, random_state=random_state
+            )
 
         s, var_s, D, Tau = _mk_score_and_var_censored(
             x_filtered, t_filtered, censored_filtered, cen_type_filtered,

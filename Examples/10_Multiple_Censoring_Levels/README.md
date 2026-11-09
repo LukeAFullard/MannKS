@@ -134,10 +134,10 @@ Running Mann-Kendall Trend Test...
 --- Trend Test Results ---
 Basic Trend: decreasing
 Classification: Highly Likely Decreasing (Confidence: 100.0%)
-Kendall's S: -373.0
+Kendall's S: -412.0
 p-value: 0.0000
 Sen's Slope: -3.3147 units per year
-Confidence Interval: [-4.9628, -2.2003]
+Confidence Interval: [-4.9688, -2.1997]
 Proportion Censored: 42.5%
 Number of Censor Levels: 8
 
@@ -147,7 +147,7 @@ Number of Censor Levels: 8
 
 ### 1. Statistical Results
 *   **Classification (Highly Likely Decreasing)**: Despite the messy data, the test identified a highly likely decreasing trend.
-*   **Kendall's S (-373.0)**: A strongly negative score indicates that as time goes on, values tend to get lower.
+*   **Kendall's S (-412.0)**: A strongly negative score indicates that as time goes on, values tend to get lower.
 *   **Proportion Censored (42.5%)**: A significant portion of the data is censored. Standard regression would fail here.
 *   **Number of Censor Levels (8)**: We successfully handled 8 different thresholds.
 

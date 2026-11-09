@@ -59,25 +59,29 @@ def estimate_acf(x, max_lag=None):
     return acf, significant_lag
 
 
-def detrend(x, t):
+def detrend(x, t, max_pairs=None, random_state=None):
     """
     Residuals after removing the Sen's slope trend, ``x - b * (t - median(t))``.
     Autocorrelation must be estimated on detrended data: a monotonic trend
     otherwise produces large positive sample autocorrelations.
     """
-    from ._stats import _sens_estimator_unequal_spacing
+    from ._stats import _sens_estimator_adaptive
+    from ._large_dataset import MAX_EXACT_N, DEFAULT_MAX_PAIRS
     x = np.asarray(x, dtype=float)
     t = np.asarray(t, dtype=float)
     if len(x) < 3:
         return x - np.nanmean(x)
-    slopes = _sens_estimator_unequal_spacing(x, t)
+    effective_max_pairs = max_pairs
+    if effective_max_pairs is None and len(x) > MAX_EXACT_N:
+        effective_max_pairs = DEFAULT_MAX_PAIRS
+    slopes = _sens_estimator_adaptive(x, t, max_pairs=effective_max_pairs, random_state=random_state)
     b = np.nanmedian(slopes) if len(slopes) else 0.0
     if not np.isfinite(b):
         b = 0.0
     return x - b * (t - np.median(t))
 
 
-def effective_sample_size(x, t=None, method='yue'):
+def effective_sample_size(x, t=None, method='yue', max_pairs=None, random_state=None):
     """
     Effective sample size accounting for serial correlation.
 
@@ -89,6 +93,8 @@ def effective_sample_size(x, t=None, method='yue'):
             ``1 + 2 * sum_k (1 - k/n) rho_k``, using only lags whose sample
             autocorrelation is significant at the 5% level) or 'bayley'
             (AR(1) approximation ``n (1 - rho_1) / (1 + rho_1)``).
+        max_pairs: Optional cap on pairwise slopes evaluated during detrending.
+        random_state: Optional seed for sampled pairwise slopes.
 
     Returns:
         (n_eff, acf1): effective sample size, capped to the range [3, n] so
@@ -104,7 +110,7 @@ def effective_sample_size(x, t=None, method='yue'):
     if t is not None:
         t = np.asarray(t, dtype=float)
         keep = ~np.isnan(x)
-        x = detrend(x[keep], t[keep])
+        x = detrend(x[keep], t[keep], max_pairs=max_pairs, random_state=random_state)
     else:
         x = x[~np.isnan(x)]
     n = len(x)
@@ -127,7 +133,7 @@ def effective_sample_size(x, t=None, method='yue'):
     return float(min(max(n_eff, 3), n)), acf1
 
 
-def should_apply_correction(x, t=None, threshold=0.1):
+def should_apply_correction(x, t=None, threshold=0.1, max_pairs=None, random_state=None):
     """
     Decide whether serial-correlation correction is needed.
 
@@ -142,7 +148,7 @@ def should_apply_correction(x, t=None, threshold=0.1):
     if t is not None:
         t = np.asarray(t, dtype=float)
         keep = ~np.isnan(x)
-        r = detrend(x[keep], t[keep])
+        r = detrend(x[keep], t[keep], max_pairs=max_pairs, random_state=random_state)
     else:
         r = x[~np.isnan(x)]
 

@@ -251,7 +251,7 @@ Model Selection Summary (Censored):
 |               2 | -421.626 | -442.51  |   36.1201 | True        |
 
 Best Model (Censored): 2 Breakpoints
-Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored.png
+Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored.png
 
 --- SCENARIO B: Uncensored Data Analysis (Hypothetical) ---
 Running Model Selection (0-2 breakpoints) on Uncensored Data...
@@ -264,16 +264,16 @@ Model Selection Summary (Uncensored):
 |               2 | -322.515 | -343.398 |    54.5879 | True        |
 
 Best Model (Uncensored): 1 Breakpoints
-Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored.png
+Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored.png
 
 --- CI Comparison: Bootstrap vs Standard OLS ---
 Censored (Bootstrap): 2010-05-25 22:14:02.896479845 (CI: 2010-05-03 12:09:42.807063818 to 2010-06-12 15:38:21.830445528)
 Censored (Standard OLS): 2010-05-25 01:55:24.474270582 (CI: 2010-05-03 16:04:51.965868235 to 2010-06-15 11:45:56.982672930)
-Standard OLS Censored Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored_ols.png
+Standard OLS Censored Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored_ols.png
 
-Uncensored (Bootstrap): 2010-06-02 10:04:44.404549837 (CI: 2010-05-24 18:39:56.929932117 to 2010-06-16 17:12:08.454396486)
+Uncensored (Bootstrap): 2010-06-02 10:04:44.404549837 (CI: 2010-05-24 18:39:56.929931879 to 2010-06-16 17:12:08.454396248)
 Uncensored (Standard OLS): 2010-05-30 18:27:04.428439379 (CI: 2010-05-11 23:17:11.799437761 to 2010-06-18 13:36:57.057440996)
-Standard OLS Uncensored Plot saved to /home/user/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored_ols.png
+Standard OLS Uncensored Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored_ols.png
 Uncensored: Probability change occurred in 2010: 100.0%
 Censored: Probability change occurred in 2010: 100.0%
 

@@ -72,20 +72,20 @@ Value Range: 10.07 to 20.06
 --- Analysis with alpha = 0.05 (95% CI) ---
 Trend Classification: Highly Likely Increasing
 Sen's Slope: 3.3062 units/year
-Confidence Interval: [2.4519, 4.0832]
-Width of Interval: 1.6312
+Confidence Interval: [2.4519, 4.0877]
+Width of Interval: 1.6358
 
 --- Analysis with alpha = 0.2 (80% CI) ---
 Trend Classification: Highly Likely Increasing
 Sen's Slope: 3.3062 units/year
-Confidence Interval: [2.8099, 3.8816]
-Width of Interval: 1.0717
+Confidence Interval: [2.8099, 3.8911]
+Width of Interval: 1.0813
 
 --- Analysis with alpha = 0.4 (60% CI) ---
 Trend Classification: Highly Likely Increasing
 Sen's Slope: 3.3062 units/year
-Confidence Interval: [2.9892, 3.7039]
-Width of Interval: 0.7147
+Confidence Interval: [2.9892, 3.7261]
+Width of Interval: 0.7369
 
 ```
 

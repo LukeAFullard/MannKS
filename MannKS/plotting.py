@@ -48,18 +48,20 @@ def plot_seasonal_distribution(x, t, period=12, season_type='month', plot_path='
 
     df = pd.DataFrame({'Value': x, 'Season': seasons})
 
-    plt.figure(figsize=(10, 6))
-    # orient='v' is implied by x/y, but explicit setting helps silence some matplotlib warnings
-    sns.boxplot(x='Season', y='Value', data=df, hue='Season', legend=False, orient='v')
-    plt.title('Distribution of Values Across Seasons')
-    plt.xlabel('Season')
-    plt.ylabel('Value')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    try:
+        # orient='v' is implied by x/y, but explicit setting helps silence some matplotlib warnings
+        sns.boxplot(x='Season', y='Value', data=df, hue='Season', legend=False, orient='v', ax=ax)
+        ax.set_title('Distribution of Values Across Seasons')
+        ax.set_xlabel('Season')
+        ax.set_ylabel('Value')
 
-    if hasattr(plot_path, 'write'):
-        plt.savefig(plot_path, format='png')
-    else:
-        plt.savefig(plot_path)
-    plt.close()
+        if hasattr(plot_path, 'write'):
+            fig.savefig(plot_path, format='png')
+        else:
+            fig.savefig(plot_path)
+    finally:
+        plt.close(fig)
 
     return plot_path
 
@@ -76,91 +78,93 @@ def plot_inspection_data(data, plot_path, value_col, time_col, time_increment, i
         )
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    fig.suptitle(f"Data Inspection (Time Increment: {time_increment})", fontsize=16)
+    try:
+        fig.suptitle(f"Data Inspection (Time Increment: {time_increment})", fontsize=16)
 
-    # Plot 1: Time series plot (consistent with plot_trend)
-    ax1 = axes[0, 0]
-    is_datetime = _is_datetime_like(data[time_col].values)
-    x_axis = pd.to_datetime(data[time_col]) if is_datetime else data[time_col]
+        # Plot 1: Time series plot (consistent with plot_trend)
+        ax1 = axes[0, 0]
+        is_datetime = _is_datetime_like(data[time_col].values)
+        x_axis = pd.to_datetime(data[time_col]) if is_datetime else data[time_col]
 
-    censored_mask = data['censored']
-    ax1.scatter(x_axis[~censored_mask], data.loc[~censored_mask, value_col],
-                color='blue', label='Non-censored', marker='o', alpha=0.7)
-    if censored_mask.any():
-        ax1.scatter(x_axis[censored_mask], data.loc[censored_mask, value_col],
-                    color='red', label='Censored', marker='x')
-    ax1.set_title('Time Series Plot')
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Value')
-    ax1.legend()
-    ax1.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
+        censored_mask = data['censored']
+        ax1.scatter(x_axis[~censored_mask], data.loc[~censored_mask, value_col],
+                    color='blue', label='Non-censored', marker='o', alpha=0.7)
+        if censored_mask.any():
+            ax1.scatter(x_axis[censored_mask], data.loc[censored_mask, value_col],
+                        color='red', label='Censored', marker='x')
+        ax1.set_title('Time Series Plot')
+        ax1.set_xlabel('Time')
+        ax1.set_ylabel('Value')
+        ax1.legend()
+        ax1.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
 
-    # Get season and cycle columns for matrix plots
-    season_col = increment_map.get(time_increment)
+        # Get season and cycle columns for matrix plots
+        season_col = increment_map.get(time_increment)
 
-    if season_col is None or time_increment == 'none' or not is_datetime:
-        plot_title = "Cannot generate matrix plots.\n"
-        if not is_datetime:
-            plot_title += "Matrix plots require datetime-like time column."
+        if season_col is None or time_increment == 'none' or not is_datetime:
+            plot_title = "Cannot generate matrix plots.\n"
+            if not is_datetime:
+                plot_title += "Matrix plots require datetime-like time column."
+            else:
+                plot_title += "No suitable time increment found."
+
+            for ax in [axes[0, 1], axes[1, 0], axes[1, 1]]:
+                ax.text(0.5, 0.5, plot_title, ha='center', va='center', fontsize=12)
+                ax.set_xticks([])
+                ax.set_yticks([])
         else:
-            plot_title += "No suitable time increment found."
+            plot_df = data.copy()
+            # Dynamically determine the cycle (e.g., year for monthly, week for daily)
+            plot_df['cycle'] = _get_cycle_identifier(plot_df[time_col], time_increment)
 
-        for ax in [axes[0, 1], axes[1, 0], axes[1, 1]]:
-            ax.text(0.5, 0.5, plot_title, ha='center', va='center', fontsize=12)
-            ax.set_xticks([])
-            ax.set_yticks([])
-    else:
-        plot_df = data.copy()
-        # Dynamically determine the cycle (e.g., year for monthly, week for daily)
-        plot_df['cycle'] = _get_cycle_identifier(plot_df[time_col], time_increment)
+            # Plot 2: Value matrix
+            ax2 = axes[0, 1]
+            try:
+                data_pivot = plot_df.pivot_table(
+                    values=value_col, index='cycle', columns=season_col, aggfunc='median')
+                sns.heatmap(data_pivot, cmap='viridis', ax=ax2, cbar_kws={'label': 'Median Value'})
+                ax2.set_title(f'Median Value ({season_col.capitalize()} vs. Cycle)')
+                ax2.set_xlabel(season_col.capitalize())
+                ax2.set_ylabel('Cycle')
+            except Exception as e:
+                ax2.text(0.5, 0.5, f"Could not generate value matrix:\n{e}", ha='center', va='center')
 
-        # Plot 2: Value matrix
-        ax2 = axes[0, 1]
-        try:
-            data_pivot = plot_df.pivot_table(
-                values=value_col, index='cycle', columns=season_col, aggfunc='median')
-            sns.heatmap(data_pivot, cmap='viridis', ax=ax2, cbar_kws={'label': 'Median Value'})
-            ax2.set_title(f'Median Value ({season_col.capitalize()} vs. Cycle)')
-            ax2.set_xlabel(season_col.capitalize())
-            ax2.set_ylabel('Cycle')
-        except Exception as e:
-            ax2.text(0.5, 0.5, f"Could not generate value matrix:\n{e}", ha='center', va='center')
+            # Plot 3: Censoring matrix
+            ax3 = axes[1, 0]
+            try:
+                cens_pivot = plot_df.pivot_table(
+                    values='censored', index='cycle', columns=season_col,
+                    aggfunc='any', fill_value=False)
+                sns.heatmap(cens_pivot.astype(int), cmap='coolwarm', ax=ax3,
+                           cbar_kws={'label': 'Censored (1=True)'}, vmin=0, vmax=1)
+                ax3.set_title('Censoring Status')
+                ax3.set_xlabel(season_col.capitalize())
+                ax3.set_ylabel('Cycle')
+            except Exception as e:
+                ax3.text(0.5, 0.5, f"Could not generate censoring matrix:\n{e}", ha='center', va='center')
 
-        # Plot 3: Censoring matrix
-        ax3 = axes[1, 0]
-        try:
-            cens_pivot = plot_df.pivot_table(
-                values='censored', index='cycle', columns=season_col,
-                aggfunc='any', fill_value=False)
-            sns.heatmap(cens_pivot.astype(int), cmap='coolwarm', ax=ax3,
-                       cbar_kws={'label': 'Censored (1=True)'}, vmin=0, vmax=1)
-            ax3.set_title('Censoring Status')
-            ax3.set_xlabel(season_col.capitalize())
-            ax3.set_ylabel('Cycle')
-        except Exception as e:
-            ax3.text(0.5, 0.5, f"Could not generate censoring matrix:\n{e}", ha='center', va='center')
+            # Plot 4: Sample count matrix
+            ax4 = axes[1, 1]
+            try:
+                count_pivot = plot_df.pivot_table(
+                    values=value_col, index='cycle', columns=season_col,
+                    aggfunc='count', fill_value=0)
+                sns.heatmap(count_pivot, cmap='Blues', ax=ax4,
+                           cbar_kws={'label': 'Sample Count'}, annot=True, fmt='g')
+                ax4.set_title('Sample Count')
+                ax4.set_xlabel(season_col.capitalize())
+                ax4.set_ylabel('Cycle')
+            except Exception as e:
+                ax4.text(0.5, 0.5, f"Could not generate count matrix:\n{e}", ha='center', va='center')
 
-        # Plot 4: Sample count matrix
-        ax4 = axes[1, 1]
-        try:
-            count_pivot = plot_df.pivot_table(
-                values=value_col, index='cycle', columns=season_col,
-                aggfunc='count', fill_value=0)
-            sns.heatmap(count_pivot, cmap='Blues', ax=ax4,
-                       cbar_kws={'label': 'Sample Count'}, annot=True, fmt='g')
-            ax4.set_title('Sample Count')
-            ax4.set_xlabel(season_col.capitalize())
-            ax4.set_ylabel('Cycle')
-        except Exception as e:
-            ax4.text(0.5, 0.5, f"Could not generate count matrix:\n{e}", ha='center', va='center')
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    if hasattr(plot_path, 'write'):
-        plt.savefig(plot_path, format='png', dpi=300, bbox_inches='tight')
-    else:
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if hasattr(plot_path, 'write'):
+            fig.savefig(plot_path, format='png', dpi=300, bbox_inches='tight')
+        else:
+            fig.savefig(plot_path, dpi=300, bbox_inches='tight')
+    finally:
+        plt.close(fig)
 
     return plot_path
 
@@ -180,150 +184,148 @@ def plot_trend(data, results, save_path, alpha, seasonal_coloring=False):
     if save_path is None:
         return
 
-    fig = plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
+    try:
+        # Determine x-axis values (datetime or numeric)
+        is_datetime = 't_original' in data.columns and _is_datetime_like(data['t_original'].values)
+        x_axis = pd.to_datetime(data['t_original']) if is_datetime else data['t']
 
-    # Determine x-axis values (datetime or numeric)
-    is_datetime = 't_original' in data.columns and _is_datetime_like(data['t_original'].values)
-    x_axis = pd.to_datetime(data['t_original']) if is_datetime else data['t']
+        # Scatter plot with potential seasonal coloring
+        if seasonal_coloring and 'season' in data.columns:
+            # Get unique seasons for colormap mapping
+            unique_seasons = sorted(data['season'].unique())
+            cmap = plt.get_cmap('tab10')
+            colors = {season: cmap(i % 10) for i, season in enumerate(unique_seasons)}
 
-    # Scatter plot with potential seasonal coloring
-    if seasonal_coloring and 'season' in data.columns:
-        # Get unique seasons for colormap mapping
-        unique_seasons = sorted(data['season'].unique())
-        cmap = plt.get_cmap('tab10')
-        colors = {season: cmap(i % 10) for i, season in enumerate(unique_seasons)}
+            # Plot non-censored data (circles)
+            non_censored_data = data[~data['censored']]
+            if not non_censored_data.empty:
+                for season in unique_seasons:
+                    season_mask = non_censored_data['season'] == season
+                    if season_mask.any():
+                        ax.scatter(
+                            x_axis[non_censored_data[season_mask].index],
+                            non_censored_data.loc[season_mask, 'value'],
+                            color=colors[season],
+                            label=f'Season {season}',
+                            marker='o'
+                        )
 
-        # Plot non-censored data (circles)
-        non_censored_data = data[~data['censored']]
-        if not non_censored_data.empty:
-            for season in unique_seasons:
-                season_mask = non_censored_data['season'] == season
-                if season_mask.any():
-                    plt.scatter(
-                        x_axis[non_censored_data[season_mask].index],
-                        non_censored_data.loc[season_mask, 'value'],
-                        color=colors[season],
-                        label=f'Season {season}',
-                        marker='o'
-                    )
-
-        # Plot censored data (x markers)
-        censored_data = data[data['censored']]
-        if not censored_data.empty:
-            for season in unique_seasons:
-                season_mask = censored_data['season'] == season
-                if season_mask.any():
-                    # For legend clarity, we might not label every censored season individually
-                    # if we already labeled the non-censored ones.
-                    # But to keep it simple, we plot them with the same color scheme.
-                    plt.scatter(
-                        x_axis[censored_data[season_mask].index],
-                        censored_data.loc[season_mask, 'value'],
-                        color=colors[season],
-                        marker='x'
-                    )
-    else:
-        # Standard coloring (Blue=Observed, Red=Censored)
-        censored_data = data[data['censored']]
-        non_censored_data = data[~data['censored']]
-
-        plt.scatter(x_axis[non_censored_data.index], non_censored_data['value'],
-                    color='blue', label='Non-censored', marker='o')
-
-        if 'cen_type' in data.columns:
-            # Differentiate between left ('lt') and right ('gt') censored data
-            lt_censored = censored_data[censored_data['cen_type'] == 'lt']
-            gt_censored = censored_data[censored_data['cen_type'] == 'gt']
-            other_censored = censored_data[~censored_data['cen_type'].isin(['lt', 'gt'])]
-
-            if not lt_censored.empty:
-                plt.scatter(x_axis[lt_censored.index], lt_censored['value'],
-                            color='red', label='Left-Censored', marker='v')
-            if not gt_censored.empty:
-                plt.scatter(x_axis[gt_censored.index], gt_censored['value'],
-                            color='blue', label='Right-Censored', marker='^')
-            if not other_censored.empty:
-                plt.scatter(x_axis[other_censored.index], other_censored['value'],
-                            color='red', label='Censored (Other)', marker='x')
+            # Plot censored data (x markers)
+            censored_data = data[data['censored']]
+            if not censored_data.empty:
+                for season in unique_seasons:
+                    season_mask = censored_data['season'] == season
+                    if season_mask.any():
+                        # For legend clarity, we might not label every censored season individually
+                        # if we already labeled the non-censored ones.
+                        # But to keep it simple, we plot them with the same color scheme.
+                        ax.scatter(
+                            x_axis[censored_data[season_mask].index],
+                            censored_data.loc[season_mask, 'value'],
+                            color=colors[season],
+                            marker='x'
+                        )
         else:
-            plt.scatter(x_axis[censored_data.index], censored_data['value'],
-                        color='red', label='Censored', marker='x')
+            # Standard coloring (Blue=Observed, Red=Censored)
+            censored_data = data[data['censored']]
+            non_censored_data = data[~data['censored']]
 
-    # Trend line and confidence intervals
-    if pd.notna(results.slope):
-        t_numeric = data['t'].values
-        t_min, t_max = t_numeric.min(), t_numeric.max()
+            ax.scatter(x_axis[non_censored_data.index], non_censored_data['value'],
+                       color='blue', label='Non-censored', marker='o')
 
-        # ALWAYS use unscaled slope/CI for internal plotting calculations
-        plot_slope = getattr(results, 'slope_per_second', results.slope)
-        plot_lower_ci = getattr(results, 'lower_ci_per_second', results.lower_ci)
-        plot_upper_ci = getattr(results, 'upper_ci_per_second', results.upper_ci)
+            if 'cen_type' in data.columns:
+                # Differentiate between left ('lt') and right ('gt') censored data
+                lt_censored = censored_data[censored_data['cen_type'] == 'lt']
+                gt_censored = censored_data[censored_data['cen_type'] == 'gt']
+                other_censored = censored_data[~censored_data['cen_type'].isin(['lt', 'gt'])]
 
-        # All lines (trend and CI) must be pivoted around the median data point
-        # to be correct when dealing with large timestamp values.
-        ymed = np.nanmedian(data['value'])
-        tmed = np.nanmedian(data['t'])
+                if not lt_censored.empty:
+                    ax.scatter(x_axis[lt_censored.index], lt_censored['value'],
+                               color='red', label='Left-Censored', marker='v')
+                if not gt_censored.empty:
+                    ax.scatter(x_axis[gt_censored.index], gt_censored['value'],
+                               color='blue', label='Right-Censored', marker='^')
+                if not other_censored.empty:
+                    ax.scatter(x_axis[other_censored.index], other_censored['value'],
+                               color='red', label='Censored (Other)', marker='x')
+            else:
+                ax.scatter(x_axis[censored_data.index], censored_data['value'],
+                           color='red', label='Censored', marker='x')
 
-        # Correctly calculate intercept for the main trend line
-        intercept_trend = ymed - plot_slope * tmed
-        trend_line = plot_slope * np.array([t_min, t_max]) + intercept_trend
+        # Trend line and confidence intervals
+        if pd.notna(results.slope):
+            t_numeric = data['t'].values
+            t_min, t_max = t_numeric.min(), t_numeric.max()
 
-        # Confidence interval lines
-        intercept_lower = ymed - plot_lower_ci * tmed
-        intercept_upper = ymed - plot_upper_ci * tmed
+            # ALWAYS use unscaled slope/CI for internal plotting calculations
+            plot_slope = getattr(results, 'slope_per_second', results.slope)
+            plot_lower_ci = getattr(results, 'lower_ci_per_second', results.lower_ci)
+            plot_upper_ci = getattr(results, 'upper_ci_per_second', results.upper_ci)
 
-        lower_line = plot_lower_ci * np.array([t_min, t_max]) + intercept_lower
-        upper_line = plot_upper_ci * np.array([t_min, t_max]) + intercept_upper
+            # All lines (trend and CI) must be pivoted around the median data point
+            # to be correct when dealing with large timestamp values.
+            ymed = np.nanmedian(data['value'])
+            tmed = np.nanmedian(data['t'])
 
-        x_line = pd.to_datetime([t_min, t_max], unit='s') if is_datetime else [t_min, t_max]
+            # Correctly calculate intercept for the main trend line
+            intercept_trend = ymed - plot_slope * tmed
+            trend_line = plot_slope * np.array([t_min, t_max]) + intercept_trend
 
-        plt.plot(x_line, trend_line, color='black', linestyle='--', label="Sen's Slope")
-        ci_label = f'{int((1 - alpha) * 100)}% CI'
-        plt.fill_between(x_line, lower_line, upper_line, color='gray', alpha=0.3, label=ci_label)
+            # Confidence interval lines
+            intercept_lower = ymed - plot_lower_ci * tmed
+            intercept_upper = ymed - plot_upper_ci * tmed
 
+            lower_line = plot_lower_ci * np.array([t_min, t_max]) + intercept_lower
+            upper_line = plot_upper_ci * np.array([t_min, t_max]) + intercept_upper
 
-    # Add statistics text box
-    slope_str = f"{results.slope:.4f}"
-    if results.slope_units:
-        slope_str += f" ({results.slope_units})"
+            x_line = pd.to_datetime([t_min, t_max], unit='s') if is_datetime else [t_min, t_max]
 
-    # Use classification for the "Trend" line if available (Continuous Confidence mode),
-    # otherwise fall back to the basic trend string.
-    trend_display = getattr(results, 'classification', results.trend)
+            ax.plot(x_line, trend_line, color='black', linestyle='--', label="Sen's Slope")
+            ci_label = f'{int((1 - alpha) * 100)}% CI'
+            ax.fill_between(x_line, lower_line, upper_line, color='gray', alpha=0.3, label=ci_label)
 
-    stats_text = (f"Trend: {trend_display}\n"
-                  f"Tau: {results.Tau:.4f}\n"
-                  f"Slope: {slope_str}\n"
-                  f"P-value: {results.p:.4f}")
-    plt.gca().text(0.05, 0.95, stats_text, transform=plt.gca().transAxes,
-                   fontsize=10, verticalalignment='top',
-                   bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+        # Add statistics text box
+        slope_str = f"{results.slope:.4f}"
+        if results.slope_units:
+            slope_str += f" ({results.slope_units})"
 
-    # Add annotation for Sen's slope interpretation
-    annotation_text = "Trend line is the Sen's slope (median of all pairwise slopes)."
-    plt.figtext(0.99, 0.01, annotation_text, ha="right", fontsize=8, style='italic')
+        # Use classification for the "Trend" line if available (Continuous Confidence mode),
+        # otherwise fall back to the basic trend string.
+        trend_display = getattr(results, 'classification', results.trend)
 
+        stats_text = (f"Trend: {trend_display}\n"
+                      f"Tau: {results.Tau:.4f}\n"
+                      f"Slope: {slope_str}\n"
+                      f"P-value: {results.p:.4f}")
+        ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
+                fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-    plt.title('Trend Analysis')
-    plt.xlabel('Time')
-    plt.ylabel('Value')
-    plt.legend()
-    plt.grid(True)
+        # Add annotation for Sen's slope interpretation
+        annotation_text = "Trend line is the Sen's slope (median of all pairwise slopes)."
+        fig.text(0.99, 0.01, annotation_text, ha="right", fontsize=8, style='italic')
 
-    # Manually set y-limits to override matplotlib's auto-scaling, which can
-    # fail with the large float values of Unix timestamps on the x-axis.
-    min_val = np.nanmin(data['value'])
-    max_val = np.nanmax(data['value'])
-    padding = (max_val - min_val) * 0.1
-    plt.ylim(min_val - padding, max_val + padding)
+        ax.set_title('Trend Analysis')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        ax.legend()
+        ax.grid(True)
 
+        # Manually set y-limits to override matplotlib's auto-scaling, which can
+        # fail with the large float values of Unix timestamps on the x-axis.
+        min_val = np.nanmin(data['value'])
+        max_val = np.nanmax(data['value'])
+        padding = (max_val - min_val) * 0.1
+        ax.set_ylim(min_val - padding, max_val + padding)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
-    if hasattr(save_path, 'write'):
-        plt.savefig(save_path, format='png')
-    else:
-        plt.savefig(save_path)
-    plt.close()
+        fig.tight_layout(rect=[0, 0.03, 1, 1])
+        if hasattr(save_path, 'write'):
+            fig.savefig(save_path, format='png')
+        else:
+            fig.savefig(save_path)
+    finally:
+        plt.close(fig)
 
 
 def plot_residuals(data, results, save_path):
@@ -366,40 +368,41 @@ def plot_residuals(data, results, save_path):
     x_axis = pd.to_datetime(data['t_original']) if is_datetime else data['t']
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    try:
+        # --- Subplot 1: Residuals vs Time ---
+        non_censored = ~data['censored']
+        censored = data['censored']
 
-    # --- Subplot 1: Residuals vs Time ---
-    non_censored = ~data['censored']
-    censored = data['censored']
+        ax1.scatter(x_axis[non_censored], residuals[non_censored],
+                    color='blue', alpha=0.7, label='Residuals (Observed)')
+        if censored.any():
+            ax1.scatter(x_axis[censored], residuals[censored],
+                        color='red', marker='x', alpha=0.7, label='Residuals (Censored)')
 
-    ax1.scatter(x_axis[non_censored], residuals[non_censored],
-                color='blue', alpha=0.7, label='Residuals (Observed)')
-    if censored.any():
-        ax1.scatter(x_axis[censored], residuals[censored],
-                    color='red', marker='x', alpha=0.7, label='Residuals (Censored)')
+        ax1.axhline(0, color='black', linestyle='--', linewidth=1)
+        ax1.set_title('Residuals vs. Time')
+        ax1.set_xlabel('Time')
+        ax1.set_ylabel('Residual')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        if is_datetime:
+            plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
 
-    ax1.axhline(0, color='black', linestyle='--', linewidth=1)
-    ax1.set_title('Residuals vs. Time')
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Residual')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    if is_datetime:
-        plt.setp(ax1.get_xticklabels(), rotation=30, ha='right')
+        # --- Subplot 2: Histogram of Residuals ---
+        ax2.hist(residuals, bins='auto', color='green', alpha=0.6, edgecolor='black')
+        ax2.axvline(0, color='black', linestyle='--', linewidth=1)
+        ax2.set_title('Distribution of Residuals')
+        ax2.set_xlabel('Residual')
+        ax2.set_ylabel('Frequency')
 
-    # --- Subplot 2: Histogram of Residuals ---
-    ax2.hist(residuals, bins='auto', color='green', alpha=0.6, edgecolor='black')
-    ax2.axvline(0, color='black', linestyle='--', linewidth=1)
-    ax2.set_title('Distribution of Residuals')
-    ax2.set_xlabel('Residual')
-    ax2.set_ylabel('Frequency')
-
-    plt.suptitle(f"Residual Diagnostics (Slope: {results.slope:.4g} {getattr(results, 'slope_units', '')})")
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    if hasattr(save_path, 'write'):
-        plt.savefig(save_path, format='png')
-    else:
-        plt.savefig(save_path)
-    plt.close()
+        fig.suptitle(f"Residual Diagnostics (Slope: {results.slope:.4g} {getattr(results, 'slope_units', '')})")
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if hasattr(save_path, 'write'):
+            fig.savefig(save_path, format='png')
+        else:
+            fig.savefig(save_path)
+    finally:
+        plt.close(fig)
 
 def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None,
                       highlight_significant=True, show_global_trend=False,
@@ -420,191 +423,191 @@ def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None
         figsize: Figure size
     """
     fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    try:
+        # Determine if datetime based on window_center column
+        is_datetime = pd.api.types.is_datetime64_any_dtype(rolling_results['window_center'])
 
-    # Determine if datetime based on window_center column
-    is_datetime = pd.api.types.is_datetime64_any_dtype(rolling_results['window_center'])
+        # --- Panel 1: Original data with rolling trend lines ---
+        ax1 = axes[0]
 
-    # --- Panel 1: Original data with rolling trend lines ---
-    ax1 = axes[0]
+        if data is not None and time_col and value_col:
+            # Check if time column in data is datetime
+            data_is_datetime = pd.api.types.is_datetime64_any_dtype(data[time_col])
+            if is_datetime and not data_is_datetime:
+                # Try converting if possible
+                try:
+                    x_data = pd.to_datetime(data[time_col])
+                except (ValueError, TypeError):
+                    x_data = data[time_col]
+            else:
+                x_data = data[time_col]
 
-    if data is not None and time_col and value_col:
-        # Check if time column in data is datetime
-        data_is_datetime = pd.api.types.is_datetime64_any_dtype(data[time_col])
-        if is_datetime and not data_is_datetime:
-             # Try converting if possible
-             try:
-                 x_data = pd.to_datetime(data[time_col])
-             except:
-                 x_data = data[time_col]
+            ax1.scatter(x_data, data[value_col],
+                       alpha=0.3, s=20, color='gray', label='Data')
+
+        # Plot each window's trend line
+        # Only if we have the necessary columns
+        has_intercept = 'intercept' in rolling_results.columns
+        has_unscaled = 'slope_per_second' in rolling_results.columns
+
+        for idx, row in rolling_results.iterrows():
+            # Skip failed windows (NaN slope)
+            if pd.isna(row['slope']):
+                continue
+
+            if has_intercept and has_unscaled and pd.notna(row['intercept']):
+                # Robust plotting with intercept and unscaled slope
+                # If datetime, convert bounds to timestamps for calculation
+                t_start = row['window_start']
+                t_end = row['window_end']
+
+                if is_datetime:
+                    # Convert to numeric timestamp for y = mx + c
+                    ts_start = pd.to_datetime(t_start).timestamp()
+                    ts_end = pd.to_datetime(t_end).timestamp()
+                    x_num = np.array([ts_start, ts_end])
+                else:
+                    x_num = np.array([t_start, t_end])
+
+                # Calculate y values
+                # slope_per_second is unscaled (e.g. units/sec or units/unit_t)
+                slope_raw = row['slope_per_second']
+                y_vals = slope_raw * x_num + row['intercept']
+
+                # Plot segment
+                # For x-axis, if datetime, convert back to datetime for matplotlib
+                if is_datetime:
+                    x_plot_seg = [t_start, t_end]
+                else:
+                    x_plot_seg = [t_start, t_end]
+
+                # Highlight significant trend lines in red.
+                color = 'red' if (highlight_significant and row.get('h', False)) else 'black'
+                alpha_line = 0.5 if (highlight_significant and row.get('h', False)) else 0.2
+                width = 2 if (highlight_significant and row.get('h', False)) else 1
+
+                ax1.plot(x_plot_seg, y_vals, color=color, alpha=alpha_line, linewidth=width)
+
+        if show_global_trend and global_result:
+            # Here we have global slope and intercept usually.
+            # But trend_test returns 'intercept'.
+            if hasattr(global_result, 'intercept') and pd.notna(global_result.intercept):
+                # We need t_min/t_max from data or results
+                if data is not None and time_col:
+                    t_min = data[time_col].min()
+                    t_max = data[time_col].max()
+                else:
+                    t_min = rolling_results['window_start'].min()
+                    t_max = rolling_results['window_end'].max()
+
+                # Unscaled slope
+                g_slope = getattr(global_result, 'slope_per_second', global_result.slope)
+
+                if is_datetime:
+                    ts_min = pd.to_datetime(t_min).timestamp()
+                    ts_max = pd.to_datetime(t_max).timestamp()
+                    x_num_g = np.array([ts_min, ts_max])
+                else:
+                    x_num_g = np.array([t_min, t_max])
+
+                y_g = g_slope * x_num_g + global_result.intercept
+
+                if is_datetime:
+                    x_g = [t_min, t_max]
+                else:
+                    x_g = [t_min, t_max]
+
+                ax1.plot(x_g, y_g, color='blue', linestyle='--', linewidth=2, label='Global Trend')
+
+
+        ax1.set_ylabel('Value')
+        ax1.set_title('Original Data with Rolling Trend Lines')
+        if data is not None:
+            ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # --- Panel 2: Rolling slope with confidence intervals ---
+        ax2 = axes[1]
+
+        x_plot = rolling_results['window_center']
+
+        # Color by significance (h)
+        if highlight_significant and 'h' in rolling_results.columns:
+            sig_mask = rolling_results['h'].astype(bool)
+            if sig_mask.any():
+                ax2.scatter(x_plot[sig_mask], rolling_results.loc[sig_mask, 'slope'],
+                           color='red', s=30, label='Significant', zorder=3)
+            if (~sig_mask).any():
+                ax2.scatter(x_plot[~sig_mask], rolling_results.loc[~sig_mask, 'slope'],
+                           color='gray', s=30, alpha=0.5, label='Not significant', zorder=3)
         else:
-             x_data = data[time_col]
+            ax2.scatter(x_plot, rolling_results['slope'], s=30, zorder=3)
 
-        ax1.scatter(x_data, data[value_col],
-                   alpha=0.3, s=20, color='gray', label='Data')
+        # Confidence intervals
+        if 'lower_ci' in rolling_results.columns and 'upper_ci' in rolling_results.columns:
+            ax2.fill_between(x_plot,
+                             rolling_results['lower_ci'],
+                             rolling_results['upper_ci'],
+                             alpha=0.2, color='blue', label='95% CI')
 
-    # Plot each window's trend line
-    # Only if we have the necessary columns
-    has_intercept = 'intercept' in rolling_results.columns
-    has_unscaled = 'slope_per_second' in rolling_results.columns
+        # Zero line
+        ax2.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
 
-    for idx, row in rolling_results.iterrows():
-        # Skip failed windows (NaN slope)
-        if pd.isna(row['slope']):
-            continue
+        # Change points
+        if change_points:
+            for cp in change_points:
+                ax2.axvline(cp, color='orange', linestyle=':', linewidth=2, alpha=0.7)
 
-        if has_intercept and has_unscaled and pd.notna(row['intercept']):
-            # Robust plotting with intercept and unscaled slope
-            # If datetime, convert bounds to timestamps for calculation
-            t_start = row['window_start']
-            t_end = row['window_end']
+        ax2.set_ylabel('Slope')
+        ax2.set_title('Rolling Sen\'s Slope')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
 
-            if is_datetime:
-                # Convert to numeric timestamp for y = mx + c
-                ts_start = pd.to_datetime(t_start).timestamp()
-                ts_end = pd.to_datetime(t_end).timestamp()
-                x_num = np.array([ts_start, ts_end])
+        # --- Panel 3: P-values and confidence ---
+        ax3 = axes[2]
+        ax3_twin = ax3.twinx()
+
+        # P-values (log scale)
+        if 'p_value' in rolling_results.columns:
+            # Handle p=0 for log scale
+            p_safe = rolling_results['p_value'].replace(0, 1e-10)
+            ax3.semilogy(x_plot, p_safe,
+                        color='purple', marker='o', linestyle='', label='P-value', markersize=3, alpha=0.6)
+            ax3.axhline(0.05, color='red', linestyle='--', linewidth=1, label='α=0.05')
+
+        ax3.set_ylabel('P-value', color='purple')
+        ax3.tick_params(axis='y', labelcolor='purple')
+
+        # Confidence in direction
+        if 'C' in rolling_results.columns:
+            ax3_twin.plot(x_plot, rolling_results['C'],
+                         color='green', marker='s', linestyle='', label='Confidence', markersize=3, alpha=0.6)
+            ax3_twin.set_ylabel('Confidence (C)', color='green')
+            ax3_twin.tick_params(axis='y', labelcolor='green')
+            ax3_twin.set_ylim([0.4, 1.0])
+
+        ax3.set_xlabel('Time (Window Center)')
+        ax3.set_title('Statistical Significance & Confidence')
+        ax3.grid(True, alpha=0.3)
+
+        # Format x-axis for datetime
+        if is_datetime:
+            for ax in axes:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                # Locator depends on data span, letting auto handle it is usually safest
+                # ax.xaxis.set_major_locator(mdates.YearLocator())
+
+        fig.tight_layout()
+
+        if save_path:
+            if hasattr(save_path, 'write'):
+                fig.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
             else:
-                x_num = np.array([t_start, t_end])
-
-            # Calculate y values
-            # slope_per_second is unscaled (e.g. units/sec or units/unit_t)
-            slope_raw = row['slope_per_second']
-            y_vals = slope_raw * x_num + row['intercept']
-
-            # Plot segment
-            # For x-axis, if datetime, convert back to datetime for matplotlib
-            if is_datetime:
-                x_plot_seg = [t_start, t_end]
-            else:
-                x_plot_seg = [t_start, t_end]
-
-            # Highlight significant trend lines in red.
-            color = 'red' if (highlight_significant and row.get('h', False)) else 'black'
-            alpha_line = 0.5 if (highlight_significant and row.get('h', False)) else 0.2
-            width = 2 if (highlight_significant and row.get('h', False)) else 1
-
-            ax1.plot(x_plot_seg, y_vals, color=color, alpha=alpha_line, linewidth=width)
-
-    if show_global_trend and global_result:
-        # Here we have global slope and intercept usually.
-        # But trend_test returns 'intercept'.
-        if hasattr(global_result, 'intercept') and pd.notna(global_result.intercept):
-            # We need t_min/t_max from data or results
-            if data is not None and time_col:
-                t_min = data[time_col].min()
-                t_max = data[time_col].max()
-            else:
-                t_min = rolling_results['window_start'].min()
-                t_max = rolling_results['window_end'].max()
-
-            # Unscaled slope
-            g_slope = getattr(global_result, 'slope_per_second', global_result.slope)
-
-            if is_datetime:
-                ts_min = pd.to_datetime(t_min).timestamp()
-                ts_max = pd.to_datetime(t_max).timestamp()
-                x_num_g = np.array([ts_min, ts_max])
-            else:
-                x_num_g = np.array([t_min, t_max])
-
-            y_g = g_slope * x_num_g + global_result.intercept
-
-            if is_datetime:
-                x_g = [t_min, t_max]
-            else:
-                x_g = [t_min, t_max]
-
-            ax1.plot(x_g, y_g, color='blue', linestyle='--', linewidth=2, label='Global Trend')
-
-
-    ax1.set_ylabel('Value')
-    ax1.set_title('Original Data with Rolling Trend Lines')
-    if data is not None:
-        ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # --- Panel 2: Rolling slope with confidence intervals ---
-    ax2 = axes[1]
-
-    x_plot = rolling_results['window_center']
-
-    # Color by significance (h)
-    if highlight_significant and 'h' in rolling_results.columns:
-        sig_mask = rolling_results['h'].astype(bool)
-        if sig_mask.any():
-            ax2.scatter(x_plot[sig_mask], rolling_results.loc[sig_mask, 'slope'],
-                       color='red', s=30, label='Significant', zorder=3)
-        if (~sig_mask).any():
-            ax2.scatter(x_plot[~sig_mask], rolling_results.loc[~sig_mask, 'slope'],
-                       color='gray', s=30, alpha=0.5, label='Not significant', zorder=3)
-    else:
-        ax2.scatter(x_plot, rolling_results['slope'], s=30, zorder=3)
-
-    # Confidence intervals
-    if 'lower_ci' in rolling_results.columns and 'upper_ci' in rolling_results.columns:
-        ax2.fill_between(x_plot,
-                         rolling_results['lower_ci'],
-                         rolling_results['upper_ci'],
-                         alpha=0.2, color='blue', label='95% CI')
-
-    # Zero line
-    ax2.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-
-    # Change points
-    if change_points:
-        for cp in change_points:
-            ax2.axvline(cp, color='orange', linestyle=':', linewidth=2, alpha=0.7)
-
-    ax2.set_ylabel('Slope')
-    ax2.set_title('Rolling Sen\'s Slope')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-
-    # --- Panel 3: P-values and confidence ---
-    ax3 = axes[2]
-    ax3_twin = ax3.twinx()
-
-    # P-values (log scale)
-    if 'p_value' in rolling_results.columns:
-        # Handle p=0 for log scale
-        p_safe = rolling_results['p_value'].replace(0, 1e-10)
-        ax3.semilogy(x_plot, p_safe,
-                    color='purple', marker='o', linestyle='', label='P-value', markersize=3, alpha=0.6)
-        ax3.axhline(0.05, color='red', linestyle='--', linewidth=1, label='α=0.05')
-
-    ax3.set_ylabel('P-value', color='purple')
-    ax3.tick_params(axis='y', labelcolor='purple')
-
-    # Confidence in direction
-    if 'C' in rolling_results.columns:
-        ax3_twin.plot(x_plot, rolling_results['C'],
-                     color='green', marker='s', linestyle='', label='Confidence', markersize=3, alpha=0.6)
-        ax3_twin.set_ylabel('Confidence (C)', color='green')
-        ax3_twin.tick_params(axis='y', labelcolor='green')
-        ax3_twin.set_ylim([0.4, 1.0])
-
-    ax3.set_xlabel('Time (Window Center)')
-    ax3.set_title('Statistical Significance & Confidence')
-    ax3.grid(True, alpha=0.3)
-
-    # Format x-axis for datetime
-    if is_datetime:
-        for ax in axes:
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-            # Locator depends on data span, letting auto handle it is usually safest
-            # ax.xaxis.set_major_locator(mdates.YearLocator())
-
-    plt.tight_layout()
-
-    if save_path:
-        if hasattr(save_path, 'write'):
-            plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
+                fig.savefig(save_path, dpi=300, bbox_inches='tight')
         else:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    else:
-        plt.show()
-
-    plt.close()
+            plt.show()
+    finally:
+        plt.close(fig)
 
 def _create_segments(t, breakpoints):
     """Internal helper to split time vector into segments"""
@@ -652,107 +655,108 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
     ci_percent = int((1 - alpha_val) * 100)
 
     fig, ax = plt.subplots(figsize=(10, 6))
+    try:
+        # Prepare data for plotting
+        t_numeric = _to_numeric_time(t_data)
+        is_datetime = result.is_datetime
 
-    # Prepare data for plotting
-    t_numeric = _to_numeric_time(t_data)
-    is_datetime = result.is_datetime
+        x_axis = pd.to_datetime(t_data) if is_datetime else t_data
 
-    x_axis = pd.to_datetime(t_data) if is_datetime else t_data
-
-    # Plot raw data
-    if censored_mask is not None and censored_mask.any():
-        x_axis_arr = np.asarray(x_axis)
-        ax.scatter(x_axis_arr[~censored_mask], x_data[~censored_mask], color='gray', alpha=0.5,
-                   label='Observations')
-        ax.scatter(x_axis_arr[censored_mask], x_data[censored_mask], color='red', marker='v',
-                   alpha=0.6, label='Censored (limit)')
-    else:
-        ax.scatter(x_axis, x_data, color='gray', alpha=0.5, label='Observations')
-
-    # Re-create segments to get boundaries
-    if is_datetime:
-        bp_numeric = _to_numeric_time(result.breakpoints)
-    else:
-        bp_numeric = result.breakpoints
-
-    segments = _create_segments(t_numeric, bp_numeric)
-
-    # Iterate through segments dataframe in result
-    for i, (start, end) in enumerate(segments):
-        if i >= len(result.segments):
-            break
-
-        row = result.segments.iloc[i]
-
-        # Calculate trend line
-        slope = getattr(row, 'slope_per_second', row.slope)
-        intercept = row.intercept
-
-        if pd.isna(slope) or pd.isna(intercept):
-            continue
-
-        # Define x-range for segment.
-        # Segments are plotted individually to respect the discontinuous nature of the piecewise Sen's slope.
-        x_seg_numeric = np.array([start, end])
-        y_seg = slope * x_seg_numeric + intercept
-
-        if is_datetime:
-            x_seg_plot = pd.to_datetime(x_seg_numeric, unit='s')
+        # Plot raw data
+        if censored_mask is not None and censored_mask.any():
+            x_axis_arr = np.asarray(x_axis)
+            ax.scatter(x_axis_arr[~censored_mask], x_data[~censored_mask], color='gray', alpha=0.5,
+                       label='Observations')
+            ax.scatter(x_axis_arr[censored_mask], x_data[censored_mask], color='red', marker='v',
+                       alpha=0.6, label='Censored (limit)')
         else:
-            x_seg_plot = x_seg_numeric
+            ax.scatter(x_axis, x_data, color='gray', alpha=0.5, label='Observations')
 
-        ax.plot(x_seg_plot, y_seg, linewidth=2, label=f'Segment {i+1}')
+        # Re-create segments to get boundaries
+        if is_datetime:
+            bp_numeric = _to_numeric_time(result.breakpoints)
+        else:
+            bp_numeric = result.breakpoints
 
-        # Plot Slope CIs (if available)
-        if hasattr(row, 'lower_ci_per_second') and pd.notna(row.lower_ci_per_second):
-            # Calculate CI band.
-            # To plot the band correctly, we need the pivot point (t_center, y_center)
-            # of the segment data, as the intercepts are defined relative to this point.
-            # We re-calculate the pivot point for the segment data.
+        segments = _create_segments(t_numeric, bp_numeric)
 
-            is_last = i == len(segments) - 1
-            mask = (t_numeric >= start) & ((t_numeric <= end) if is_last else (t_numeric < end))
-            if np.sum(mask) > 0:
-                t_seg = t_numeric[mask]
-                x_seg = x_data[mask]
+        # Iterate through segments dataframe in result
+        for i, (start, end) in enumerate(segments):
+            if i >= len(result.segments):
+                break
 
-                # Ensure data is numeric for median calculation.
-                if np.issubdtype(np.asarray(x_seg).dtype, np.number):
-                    t_center = np.median(t_seg)
-                    x_center = np.nanmedian(x_seg)
+            row = result.segments.iloc[i]
 
-                    slope_lower = row.lower_ci_per_second
-                    slope_upper = row.upper_ci_per_second
+            # Calculate trend line
+            slope = getattr(row, 'slope_per_second', row.slope)
+            intercept = row.intercept
 
-                    # CI lines passing through (t_center, x_center)
-                    y_lower = x_center + slope_lower * (x_seg_numeric - t_center)
-                    y_upper = x_center + slope_upper * (x_seg_numeric - t_center)
+            if pd.isna(slope) or pd.isna(intercept):
+                continue
 
-                    ax.fill_between(x_seg_plot, y_lower, y_upper, alpha=0.2, label=f'{ci_percent}% CI (Seg {i+1})')
+            # Define x-range for segment.
+            # Segments are plotted individually to respect the discontinuous nature of the piecewise Sen's slope.
+            x_seg_numeric = np.array([start, end])
+            y_seg = slope * x_seg_numeric + intercept
+
+            if is_datetime:
+                x_seg_plot = pd.to_datetime(x_seg_numeric, unit='s')
+            else:
+                x_seg_plot = x_seg_numeric
+
+            ax.plot(x_seg_plot, y_seg, linewidth=2, label=f'Segment {i+1}')
+
+            # Plot Slope CIs (if available)
+            if hasattr(row, 'lower_ci_per_second') and pd.notna(row.lower_ci_per_second):
+                # Calculate CI band.
+                # To plot the band correctly, we need the pivot point (t_center, y_center)
+                # of the segment data, as the intercepts are defined relative to this point.
+                # We re-calculate the pivot point for the segment data.
+
+                is_last = i == len(segments) - 1
+                mask = (t_numeric >= start) & ((t_numeric <= end) if is_last else (t_numeric < end))
+                if np.sum(mask) > 0:
+                    t_seg = t_numeric[mask]
+                    x_seg = x_data[mask]
+
+                    # Ensure data is numeric for median calculation.
+                    if np.issubdtype(np.asarray(x_seg).dtype, np.number):
+                        t_center = np.median(t_seg)
+                        x_center = np.nanmedian(x_seg)
+
+                        slope_lower = row.lower_ci_per_second
+                        slope_upper = row.upper_ci_per_second
+
+                        # CI lines passing through (t_center, x_center)
+                        y_lower = x_center + slope_lower * (x_seg_numeric - t_center)
+                        y_upper = x_center + slope_upper * (x_seg_numeric - t_center)
+
+                        ax.fill_between(x_seg_plot, y_lower, y_upper, alpha=0.2, label=f'{ci_percent}% CI (Seg {i+1})')
 
 
-    # Plot Breakpoints and their CIs
-    for i, bp in enumerate(result.breakpoints):
-        ax.axvline(bp, color='black', linestyle='--', label='Breakpoint')
+        # Plot Breakpoints and their CIs
+        for i, bp in enumerate(result.breakpoints):
+            ax.axvline(bp, color='black', linestyle='--', label='Breakpoint')
 
-        # Plot Breakpoint CI if available
-        if hasattr(result, 'breakpoint_cis') and i < len(result.breakpoint_cis):
-            ci_low, ci_high = result.breakpoint_cis[i]
-            # Add shaded region
-            if pd.notna(ci_low) and pd.notna(ci_high):
-                ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label=f'Breakpoint {ci_percent}% CI')
+            # Plot Breakpoint CI if available
+            if hasattr(result, 'breakpoint_cis') and i < len(result.breakpoint_cis):
+                ci_low, ci_high = result.breakpoint_cis[i]
+                # Add shaded region
+                if pd.notna(ci_low) and pd.notna(ci_high):
+                    ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label=f'Breakpoint {ci_percent}% CI')
 
-    ax.set_title('Segmented Trend Analysis')
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Value')
+        ax.set_title('Segmented Trend Analysis')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
 
-    # Deduplicate legend labels
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys())
+        # Deduplicate legend labels
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
 
-    if hasattr(save_path, 'write'):
-        plt.savefig(save_path, format='png')
-    else:
-        plt.savefig(save_path)
-    plt.close()
+        if hasattr(save_path, 'write'):
+            fig.savefig(save_path, format='png')
+        else:
+            fig.savefig(save_path)
+    finally:
+        plt.close(fig)

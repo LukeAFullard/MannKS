@@ -125,7 +125,7 @@ Trend: decreasing
 Classification: Highly Likely Decreasing
 p-value: 0.0000
 Sen's Slope: -1.9965 units/year
-Confidence Interval: [-2.0679, -1.9232]
+Confidence Interval: [-2.0679, -1.9231]
 
 ```
 
@@ -145,7 +145,7 @@ Before running statistics, we visualize the data. The `plot_seasonal_distributio
 ### 3. Seasonal Trend Test
 *   **Trend (Decreasing)**: The test correctly identifies the downward trend.
 *   **Sen's Slope (-1.9965 units/year)**: The estimated slope is very close to the true generated trend of -2.0.
-*   **Confidence Interval**: [-2.0679, -1.9232].
+*   **Confidence Interval**: [-2.0679, -1.9231].
 *   **Comparison**: By comparing "Mondays to Mondays" and "Sundays to Sundays", the test removes the noise caused by the weekly jumps, providing a clean estimate of the long-term decline.
 
 ### 4. Trend Plot (`trend_plot.png`)

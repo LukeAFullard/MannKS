@@ -69,12 +69,12 @@ def _get_dt_prop(dt, prop):
 _SEASON_SPECS = {
     'year': (1, lambda dt: _get_dt_prop(dt, 'year')),
     'month': (12, lambda dt: _get_dt_prop(dt, 'month')),
-    'day_of_week': (7, lambda dt: _get_dt_prop(dt, 'dayofweek')),
+    'day_of_week': (7, lambda dt: _get_dt_prop(dt, 'day_of_week')),
     'quarter': (4, lambda dt: _get_dt_prop(dt, 'quarter')),
     'hour': (24, lambda dt: _get_dt_prop(dt, 'hour')),
     'week_of_year': ([52, 53], lambda dt: _get_dt_prop(dt, 'isocalendar')().week),
     'biweekly': ([26, 27], lambda dt: (_get_dt_prop(dt, 'isocalendar')().week - 1) // 2),
-    'day_of_year': (None, lambda dt: _get_dt_prop(dt, 'dayofyear')),
+    'day_of_year': (None, lambda dt: _get_dt_prop(dt, 'day_of_year')),
     'minute': (60, lambda dt: _get_dt_prop(dt, 'minute')),
     'second': (60, lambda dt: _get_dt_prop(dt, 'second')),
 }

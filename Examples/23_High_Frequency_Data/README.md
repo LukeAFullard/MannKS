@@ -109,7 +109,7 @@ Confidence Interval: [0.4997, 0.5008]
 Detected Trend: increasing
 Sen's Slope: 0.0895 (units per day)
 Expected Slope: 0.1000
-Confidence Interval: [0.0652, 0.1139]
+Confidence Interval: [0.0652, 0.1149]
 
 ```
 

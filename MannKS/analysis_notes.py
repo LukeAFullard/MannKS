@@ -153,7 +153,7 @@ def get_sens_slope_analysis_note(slopes, t, cen_type):
     any_cen, all_both = False, True
     pos = 0
     for i, j in _iter_triu_blocks(n):
-        valid = np.abs(t[j] - t[i]) > 1e-10
+        valid = t[j] != t[i]
         i, j = i[valid], j[valid]
         a, b = np.searchsorted(idx, [pos, pos + len(i)])
         if b > a:

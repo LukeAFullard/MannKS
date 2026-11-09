@@ -31,6 +31,7 @@ def rolling_trend_test(
     large_dataset_mode: str = 'auto',
     max_pairs: Optional[int] = None,
     random_state: Optional[int] = None,
+    max_windows: int = 10000,
     **kwargs
 ) -> pd.DataFrame:
     """
@@ -70,6 +71,8 @@ def rolling_trend_test(
             Maximum number of pairs to sample in fast mode.
         random_state : int, optional
             Random seed for reproducible results in fast mode.
+        max_windows : int, default 10000
+            Maximum number of sliding windows allowed before raising a ValueError.
         **kwargs: Additional arguments passed to `trend_test` or `seasonal_trend_test`.
 
     Returns:
@@ -134,7 +137,7 @@ def rolling_trend_test(
             except (ValueError, TypeError):
                 raise ValueError(f"Invalid window '{window}' for datetime data. Use a pandas frequency string (e.g., '365D', '10YE').")
 
-        if step:
+        if step is not None:
             try:
                 step_val = pd.Timedelta(step)
             except ValueError:
@@ -158,7 +161,7 @@ def rolling_trend_test(
         except (ValueError, TypeError):
              raise ValueError(f"Invalid window '{window}' for numeric data. Must be a number.")
 
-        if step:
+        if step is not None:
              try:
                 step_val = float(step)
              except (ValueError, TypeError):
@@ -167,24 +170,36 @@ def rolling_trend_test(
             step_val = window_val / 2
 
     # Generate windows
-    windows = _generate_windows(t_series, window_val, step_val, is_datetime)
+    windows = _generate_windows(t_series, window_val, step_val, is_datetime, max_windows=max_windows)
 
     # Calculate trends for each window
     results = []
+    t_index = pd.Index(t_series)
+    use_bisect = bool(t_index.is_monotonic_increasing) and not t_index.hasnans
 
     for win_start, win_end in windows:
-        # Select data in window [start, end)
-        mask = np.asarray((t_series >= win_start) & (t_series < win_end), dtype=bool)
-
-        if mask.sum() < min_size:
-            continue
-
-        # Extract window data
-        if isinstance(x, pd.DataFrame):
-            x_window = x[mask].reset_index(drop=True)
+        if use_bisect:
+            i_start = int(t_index.searchsorted(win_start, side='left'))
+            i_end = int(t_index.searchsorted(win_end, side='left'))
+            n_win = i_end - i_start
+            if n_win < min_size:
+                continue
+            if isinstance(x, pd.DataFrame):
+                x_window = x.iloc[i_start:i_end].reset_index(drop=True)
+            else:
+                x_window = x_arr[i_start:i_end]
+            t_window = t_arr[i_start:i_end]
         else:
-            x_window = x_arr[mask]
-        t_window = t_arr[mask]
+            # Select data in window [start, end)
+            mask = np.asarray((t_series >= win_start) & (t_series < win_end), dtype=bool)
+            n_win = int(mask.sum())
+            if n_win < min_size:
+                continue
+            if isinstance(x, pd.DataFrame):
+                x_window = x[mask].reset_index(drop=True)
+            else:
+                x_window = x_arr[mask]
+            t_window = t_arr[mask]
 
         # Run trend test
         try:
@@ -232,7 +247,7 @@ def rolling_trend_test(
                 'window_start': win_start,
                 'window_end': win_end,
                 'window_center': win_center,
-                'n_obs': int(mask.sum()),
+                'n_obs': n_win,
                 'slope': result.slope,
                 'lower_ci': result.lower_ci,
                 'upper_ci': result.upper_ci,
@@ -265,7 +280,7 @@ def rolling_trend_test(
     return pd.DataFrame(results)
 
 
-def _generate_windows(t_series, window_size, step_size, is_datetime):
+def _generate_windows(t_series, window_size, step_size, is_datetime, max_windows=10000):
     """Generate sliding window boundaries."""
     windows = []
 
@@ -276,13 +291,14 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
     t_max = t_series.max()
 
     if not is_datetime:
+         if step_size <= 0:
+             raise ValueError("`step` must be positive.")
          # Reduce floating point accumulation error for numeric data
          # Calculate number of steps
          try:
             n_steps = int((t_max - t_min) / step_size) + 2 # Add buffer
-         except (ValueError, TypeError, ZeroDivisionError):
-             # Catch potential overflow or invalid step sizes
-            n_steps = 10000
+         except (ValueError, TypeError, ZeroDivisionError, OverflowError):
+            n_steps = max_windows + 2
 
          for i in range(n_steps):
             current = t_min + i * step_size
@@ -291,9 +307,11 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
             win_end = current + window_size
             windows.append((current, win_end))
 
-            if len(windows) > 10000:
-                warnings.warn("Too many windows generated. Check window/step sizes.", UserWarning)
-                return []
+            if len(windows) > max_windows:
+                raise ValueError(
+                    f"Generated more than {max_windows} windows. "
+                    f"Increase `step` or `max_windows`."
+                )
     else:
         # Datetime uses Timedelta/Offset which is robust to accumulation usually
         # because it operates on calendar logic or fixed integers (nanoseconds)
@@ -301,11 +319,16 @@ def _generate_windows(t_series, window_size, step_size, is_datetime):
         while current <= t_max:
             win_end = current + window_size
             windows.append((current, win_end))
-            current += step_size
+            next_val = current + step_size
+            if next_val <= current:
+                raise ValueError("`step` must advance time forward.")
+            current = next_val
 
-            if len(windows) > 10000:
-                warnings.warn("Too many windows generated. Check window/step sizes.", UserWarning)
-                return []
+            if len(windows) > max_windows:
+                raise ValueError(
+                    f"Generated more than {max_windows} windows. "
+                    f"Increase `step` or `max_windows`."
+                )
 
     return windows
 

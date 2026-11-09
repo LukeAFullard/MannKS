@@ -118,11 +118,16 @@ def _sample_pairs(n, max_pairs, random_state):
     rng = np.random.default_rng(0 if random_state is None else random_state)
     n_pairs = n * (n - 1) // 2
     if n_pairs <= 20 * max_pairs and n_pairs <= 20_000_000:
-        # Small pool: sample distinct pairs without replacement.
-        k = np.asarray(rng.choice(n_pairs, size=min(max_pairs, n_pairs), replace=False), dtype=np.intp)
-        ii, jj = np.triu_indices(n, k=1)
+        # Small pool: sample distinct pairs without replacement and invert flat
+        # upper-triangular indices in O(n + max_pairs) memory instead of O(n^2).
+        k = np.asarray(rng.choice(n_pairs, size=min(max_pairs, n_pairs), replace=False), dtype=np.int64)
         idx = np.sort(k)
-        return np.asarray(ii[idx], dtype=np.intp), np.asarray(jj[idx], dtype=np.intp)
+        row_starts = np.empty(n, dtype=np.int64)
+        row_starts[0] = 0
+        np.cumsum(np.arange(n - 1, 0, -1, dtype=np.int64), out=row_starts[1:])
+        ii = np.searchsorted(row_starts, idx, side='right') - 1
+        jj = ii + 1 + (idx - row_starts[ii])
+        return np.asarray(ii, dtype=np.intp), np.asarray(jj, dtype=np.intp)
     i_idx = rng.integers(0, n, size=max_pairs)
     j_idx = rng.integers(0, n, size=max_pairs)
     lo = np.minimum(i_idx, j_idx).astype(np.int64)
@@ -184,7 +189,7 @@ def fast_sens_slope(x: np.ndarray,
     i, j = _sample_pairs(n, max_pairs, random_state)
     dt = t[j] - t[i]
     slopes = np.full(len(i), np.nan)
-    ok = np.abs(dt) > 1e-10
+    ok = dt != 0.0
     slopes[ok] = (x[j][ok] - x[i][ok]) / dt[ok]
     return slopes
 

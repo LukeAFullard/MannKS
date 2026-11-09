@@ -181,7 +181,7 @@ def regional_test(
 
         # Align columns with trend_results
         sites_in_common = results[site_col].unique()
-        ts_wide = ts_wide[sites_in_common]
+        ts_wide = ts_wide.reindex(columns=sites_in_common)
 
         if ts_wide.empty:
             warnings.warn("Time series pivot resulted in empty DataFrame. Check that timestamps align across sites.", UserWarning)

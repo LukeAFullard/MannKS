@@ -116,8 +116,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 with contextlib.redirect_stdout(output_buffer):
     local_scope = {}
     exec_globals = globals().copy()
-    exec_globals['__file__'] = __file__
-    exec(example_code, exec_globals, local_scope)
+    exec(example_code, exec_globals, exec_globals)
 
 captured_output = output_buffer.getvalue()
 

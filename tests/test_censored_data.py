@@ -164,17 +164,29 @@ def test_hicensor_numeric_seasonal_trend_test():
     assert result_hicensor_8.trend == 'indeterminate'
 
 def test_mk_test_method_lwp():
-    """Test the 'lwp' method for the Mann-Kendall test."""
-    # Data where the LWP method should produce a different result
-    x = [1, 2, 3, 4, '>5']
+    """Test the 'lwp' method for the Mann-Kendall test vs 'robust'."""
+    # 1. With unambiguous increasing right-censored data [1, 2, 3, 4, '>5'],
+    # both 'robust' and 'lwp' should detect an increasing trend.
+    x_unambig = [1, 2, 3, 4, '>5']
+    t_unambig = np.arange(len(x_unambig))
+    data_unambig = prepare_censored_data(x_unambig)
+    res_robust_unambig = trend_test(x=data_unambig, t=t_unambig, mk_test_method='robust', min_size=None)
+    res_lwp_unambig = trend_test(x=data_unambig, t=t_unambig, mk_test_method='lwp', min_size=None)
+    assert res_robust_unambig.s == 10
+    assert res_robust_unambig.h
+    assert res_lwp_unambig.s == 10
+    assert res_lwp_unambig.h
+
+    # 2. Data with ambiguous right-censored pairs where 'lwp' and 'robust' differ:
+    # (3, '>2') and ('>2', '>3') are ambiguous in 'robust' (S=8, not significant at alpha=0.05),
+    # whereas 'lwp' replaces all '>x' with max(x) + 0.1 = 3.1 (S=9, significant).
+    x = [1, 2, 3, '>2', '>3']
     t = np.arange(len(x))
     data = prepare_censored_data(x)
 
-    # The robust method should find no trend (or very weak)
     result_robust = trend_test(x=data, t=t, mk_test_method='robust', min_size=None)
     assert not result_robust.h
 
-    # The LWP method should find an increasing trend
     result_lwp = trend_test(x=data, t=t, mk_test_method='lwp', min_size=None)
     assert result_lwp.trend == 'increasing'
     assert result_lwp.classification == 'Highly Likely Increasing'

@@ -77,7 +77,7 @@ def _ci_reference(slopes, var_s, alpha, method, total_pairs):
     if method == 'lwp':
         return tuple(np.interp([r1, r2], np.arange(1, n_s + 1), v))
     return (v[int(np.clip(np.round(r1 - 1), 0, n_s - 1))],
-            v[int(np.clip(np.round(r2 - 1), 0, n_s - 1))])
+            v[int(np.clip(np.round(r2), 0, n_s - 1))])
 
 
 def test_ci_and_sen_probability_match_sorted_reference():
@@ -147,7 +147,7 @@ def test_sens_note_blockwise_matches_reference():
                 assert got == 'ok'
                 continue
             i, j = np.triu_indices(n, k=1)
-            ok = np.abs(t[j] - t[i]) > 1e-10
+            ok = (t[j] - t[i]) != 0.0
             i, j = i[ok], j[ok]
             d = np.abs(sl - med)
             idx = np.where(d == np.nanmin(d))[0]
@@ -169,7 +169,7 @@ def test_exact_slopes_blockwise_match_triu():
         x = rng.normal(size=n)
         t = np.sort(rng.integers(0, n, n)).astype(float)
         i, j = np.triu_indices(n, k=1)
-        ok = np.abs(t[j] - t[i]) > 1e-10
+        ok = (t[j] - t[i]) != 0.0
         np.testing.assert_array_equal(st._sens_estimator_unequal_spacing(x, t),
                                       (x[j] - x[i])[ok] / (t[j] - t[i])[ok])
 
