@@ -148,8 +148,8 @@ In our "Weak Trend" example:
 
 ### 2. Custom Classification
 You can see how the same result can get different labels:
-*   **Default:** "Likely Increasing" (because confidence was > 90% but maybe not high enough for the strictest tier depending on alpha defaults).
-*   **Custom Map:** "Significant Trend" (because we defined 0.90 as the cutoff for that label).
+*   **Default:** "Highly Likely Increasing" (because confidence $C = 96.78\%$ exceeds the 95% threshold for the default category mapping).
+*   **Custom Map:** "Significant Trend Increasing" (because we defined 0.90 as the cutoff for that label).
 
 This allows you to align the package's output with your specific regulatory or scientific reporting standards.
 

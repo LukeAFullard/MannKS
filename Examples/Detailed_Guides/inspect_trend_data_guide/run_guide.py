@@ -76,8 +76,14 @@ def generate_guide():
     """)
 
     f = io.StringIO()
-    with redirect_stdout(f):
-        exec(code_block)
+    guide_dir = os.path.dirname(os.path.abspath(__file__))
+    orig_cwd = os.getcwd()
+    os.chdir(guide_dir)
+    try:
+        with redirect_stdout(f):
+            exec(code_block)
+    finally:
+        os.chdir(orig_cwd)
     output_block = f.getvalue()
 
     # --- 3. Parameter Reference ---
@@ -138,6 +144,8 @@ def generate_guide():
     -   **Description:** Candidate increments and their number per year, chosen from `'daily'`, `'weekly'`, `'monthly'`, `'bi-monthly'`, `'quarterly'`, `'bi-annually'`, `'annually'`.
 
     ## Understanding the Output Plots
+
+    ![Inspection Diagnostic Plot](inspection_plot.png)
 
     The function generates a figure with four panels:
 

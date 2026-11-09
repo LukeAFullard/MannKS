@@ -407,7 +407,8 @@ def plot_residuals(data, results, save_path):
 def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None,
                       highlight_significant=True, show_global_trend=False,
                       global_result=None, change_points=None,
-                      save_path=None, figsize=(14, 8)):
+                      save_path=None, figsize=(14, 8),
+                      trend_line_span='step'):
     """
     Visualize rolling trend analysis results.
 
@@ -421,6 +422,14 @@ def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None
         change_points: List of detected change points (optional)
         save_path: Path to save figure
         figsize: Figure size
+        trend_line_span: How far each window's trend line extends on the x-axis.
+            Options:
+            - 'step' (default): Each line spans the window step interval centered
+              around the window center, forming a clean local tangent trace without
+              excessive overlap or overshooting beyond data boundaries.
+            - 'window': Each line spans the full [window_start, window_end] range
+              (clipped to data bounds).
+            - float: Fraction of window width (e.g. 0.2 for 20% of window length).
     """
     fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
     try:
@@ -430,11 +439,11 @@ def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None
         # --- Panel 1: Original data with rolling trend lines ---
         ax1 = axes[0]
 
+        # Determine data time boundaries for clipping trend lines
         if data is not None and time_col and value_col:
             # Check if time column in data is datetime
             data_is_datetime = pd.api.types.is_datetime64_any_dtype(data[time_col])
             if is_datetime and not data_is_datetime:
-                # Try converting if possible
                 try:
                     x_data = pd.to_datetime(data[time_col])
                 except (ValueError, TypeError):
@@ -445,77 +454,99 @@ def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None
             ax1.scatter(x_data, data[value_col],
                        alpha=0.3, s=20, color='gray', label='Data')
 
+            if is_datetime:
+                data_ts_min = pd.to_datetime(data[time_col]).min().timestamp()
+                data_ts_max = pd.to_datetime(data[time_col]).max().timestamp()
+            else:
+                data_ts_min = float(data[time_col].min())
+                data_ts_max = float(data[time_col].max())
+        else:
+            if is_datetime:
+                data_ts_min = pd.to_datetime(rolling_results['window_start']).min().timestamp()
+                data_ts_max = pd.to_datetime(rolling_results['window_end']).max().timestamp()
+            else:
+                data_ts_min = float(rolling_results['window_start'].min())
+                data_ts_max = float(rolling_results['window_end'].max())
+
         # Plot each window's trend line
-        # Only if we have the necessary columns
         has_intercept = 'intercept' in rolling_results.columns
         has_unscaled = 'slope_per_second' in rolling_results.columns
 
-        for idx, row in rolling_results.iterrows():
+        if is_datetime:
+            ts_centers = np.array([pd.to_datetime(c).timestamp() for c in rolling_results['window_center']])
+        else:
+            ts_centers = np.array(rolling_results['window_center'], dtype=float)
+
+        n_windows = len(rolling_results)
+
+        for idx, (row_idx, row) in enumerate(rolling_results.iterrows()):
             # Skip failed windows (NaN slope)
             if pd.isna(row['slope']):
                 continue
 
             if has_intercept and has_unscaled and pd.notna(row['intercept']):
-                # Robust plotting with intercept and unscaled slope
-                # If datetime, convert bounds to timestamps for calculation
                 t_start = row['window_start']
                 t_end = row['window_end']
+                ts_start = pd.to_datetime(t_start).timestamp() if is_datetime else float(t_start)
+                ts_end = pd.to_datetime(t_end).timestamp() if is_datetime else float(t_end)
+                ts_cen = ts_centers[idx]
 
-                if is_datetime:
-                    # Convert to numeric timestamp for y = mx + c
-                    ts_start = pd.to_datetime(t_start).timestamp()
-                    ts_end = pd.to_datetime(t_end).timestamp()
-                    x_num = np.array([ts_start, ts_end])
-                else:
-                    x_num = np.array([t_start, t_end])
+                if trend_line_span == 'window':
+                    seg_start = ts_start
+                    seg_end = ts_end
+                elif isinstance(trend_line_span, (int, float)):
+                    half_w = float(trend_line_span) * (ts_end - ts_start) / 2.0
+                    seg_start = ts_cen - half_w
+                    seg_end = ts_cen + half_w
+                else:  # default: 'step'
+                    if n_windows > 1:
+                        if idx == 0:
+                            half_step = (ts_centers[1] - ts_centers[0]) / 2.0
+                            seg_start = ts_cen - half_step
+                            seg_end = ts_cen + half_step
+                        elif idx == n_windows - 1:
+                            half_step = (ts_centers[-1] - ts_centers[-2]) / 2.0
+                            seg_start = ts_cen - half_step
+                            seg_end = ts_cen + half_step
+                        else:
+                            seg_start = (ts_centers[idx - 1] + ts_cen) / 2.0
+                            seg_end = (ts_cen + ts_centers[idx + 1]) / 2.0
+                    else:
+                        seg_start = ts_start
+                        seg_end = ts_end
 
-                # Calculate y values
-                # slope_per_second is unscaled (e.g. units/sec or units/unit_t)
+                # Clip segment to actual data bounds to prevent overshooting into future/past
+                seg_start = max(seg_start, data_ts_min)
+                seg_end = min(seg_end, data_ts_max)
+
+                if seg_end <= seg_start:
+                    continue
+
+                x_num = np.array([seg_start, seg_end])
                 slope_raw = row['slope_per_second']
                 y_vals = slope_raw * x_num + row['intercept']
 
-                # Plot segment
-                # For x-axis, if datetime, convert back to datetime for matplotlib
                 if is_datetime:
-                    x_plot_seg = [t_start, t_end]
+                    x_plot_seg = [pd.to_datetime(seg_start, unit='s'), pd.to_datetime(seg_end, unit='s')]
                 else:
-                    x_plot_seg = [t_start, t_end]
+                    x_plot_seg = [seg_start, seg_end]
 
-                # Highlight significant trend lines in red.
                 color = 'red' if (highlight_significant and row.get('h', False)) else 'black'
-                alpha_line = 0.5 if (highlight_significant and row.get('h', False)) else 0.2
-                width = 2 if (highlight_significant and row.get('h', False)) else 1
+                alpha_line = 0.8 if (highlight_significant and row.get('h', False)) else 0.4
+                width = 2.0 if (highlight_significant and row.get('h', False)) else 1.2
 
                 ax1.plot(x_plot_seg, y_vals, color=color, alpha=alpha_line, linewidth=width)
 
         if show_global_trend and global_result:
-            # Here we have global slope and intercept usually.
-            # But trend_test returns 'intercept'.
             if hasattr(global_result, 'intercept') and pd.notna(global_result.intercept):
-                # We need t_min/t_max from data or results
-                if data is not None and time_col:
-                    t_min = data[time_col].min()
-                    t_max = data[time_col].max()
-                else:
-                    t_min = rolling_results['window_start'].min()
-                    t_max = rolling_results['window_end'].max()
-
-                # Unscaled slope
                 g_slope = getattr(global_result, 'slope_per_second', global_result.slope)
-
-                if is_datetime:
-                    ts_min = pd.to_datetime(t_min).timestamp()
-                    ts_max = pd.to_datetime(t_max).timestamp()
-                    x_num_g = np.array([ts_min, ts_max])
-                else:
-                    x_num_g = np.array([t_min, t_max])
-
+                x_num_g = np.array([data_ts_min, data_ts_max])
                 y_g = g_slope * x_num_g + global_result.intercept
 
                 if is_datetime:
-                    x_g = [t_min, t_max]
+                    x_g = [pd.to_datetime(data_ts_min, unit='s'), pd.to_datetime(data_ts_max, unit='s')]
                 else:
-                    x_g = [t_min, t_max]
+                    x_g = [data_ts_min, data_ts_max]
 
                 ax1.plot(x_g, y_g, color='blue', linestyle='--', linewidth=2, label='Global Trend')
 
