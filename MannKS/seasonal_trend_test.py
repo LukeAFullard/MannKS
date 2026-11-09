@@ -60,7 +60,7 @@ def _seasonal_slope(data, seasons, sens_slope_method, lt_mult, gt_mult,
                                   compute_intercept=False)['beta']
     method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
     uniq = np.unique(seasons)
-    sizes = np.array([np.sum(seasons == s) for s in uniq])
+    sizes = np.array([np.sum(seasons == s) for s in uniq], dtype=np.intp)
     total = int(np.sum(sizes * (sizes - 1) // 2))
     out = []
     for s, size in zip(uniq, sizes):
@@ -230,9 +230,9 @@ def seasonal_trend_test(
                 return np.asarray(season_func(t_pd)), np.asarray(_get_cycle_identifier(t_pd, season_type))
             if not is_datetime:
                 t_norm = df['t'].to_numpy(dtype=float) - raw_data['t'].min()
-                return (np.floor(t_norm) % period).astype(int), np.floor(t_norm / period)
+                return (np.floor(t_norm) % period).astype(np.intp), np.floor(t_norm / period)
             t_pd = pd.to_datetime(df['t_original'])
-            return np.ones(len(df), dtype=int), np.asarray(_get_cycle_identifier(t_pd, season_type))
+            return np.ones(len(df), dtype=np.intp), np.asarray(_get_cycle_identifier(t_pd, season_type))
 
         if not is_datetime:
             t_vals = data_filtered['t'].to_numpy(dtype=float)

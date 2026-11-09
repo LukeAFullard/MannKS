@@ -87,6 +87,8 @@ def S_of_beta(beta, x, lower, upper):
 
 # ---------- exact score function ----------
 def _pair_thresholds(x, lower, upper, i, j):
+    i = np.asarray(i, dtype=np.intp)
+    j = np.asarray(j, dtype=np.intp)
     dx = x[j] - x[i]
     keep = dx != 0
     i, j, dx = i[keep], j[keep], dx[keep]
@@ -105,8 +107,8 @@ class _ATSScore:
 
     def __init__(self, x, lower, upper, groups=None, max_pairs=None, random_state=None):
         x = np.asarray(x, dtype=float)
-        groups = np.zeros(len(x), dtype=int) if groups is None else np.asarray(groups)
-        idx_by_group = [np.where(groups == g)[0] for g in np.unique(groups)]
+        groups = np.zeros(len(x), dtype=np.intp) if groups is None else np.asarray(groups)
+        idx_by_group = [np.where(groups == g)[0].astype(np.intp, copy=False) for g in np.unique(groups)]
         n_pairs = [len(ix) * (len(ix) - 1) // 2 for ix in idx_by_group]
         self.total_pairs = int(sum(n_pairs))
         sample = max_pairs is not None and self.total_pairs > max_pairs
@@ -300,7 +302,7 @@ def _ats_core(x, y, censored, cen_type, lod, groups, var_s, ci_alpha, max_pairs,
         result['approximation_error'] = float((score.solve(-c_s) - score.solve(c_s)) / 2.0)
 
     if var_s is None:
-        g = np.zeros(len(x), dtype=int) if groups is None else np.asarray(groups)
+        g = np.zeros(len(x), dtype=np.intp) if groups is None else np.asarray(groups)
         var_s = 0.0
         for gv in np.unique(g):
             m = g == gv

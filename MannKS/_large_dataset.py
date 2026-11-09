@@ -119,9 +119,10 @@ def _sample_pairs(n, max_pairs, random_state):
     n_pairs = n * (n - 1) // 2
     if n_pairs <= 20 * max_pairs and n_pairs <= 20_000_000:
         # Small pool: sample distinct pairs without replacement.
-        k = rng.choice(n_pairs, size=min(max_pairs, n_pairs), replace=False)
+        k = np.asarray(rng.choice(n_pairs, size=min(max_pairs, n_pairs), replace=False), dtype=np.intp)
         ii, jj = np.triu_indices(n, k=1)
-        return ii[np.sort(k)], jj[np.sort(k)]
+        idx = np.sort(k)
+        return np.asarray(ii[idx], dtype=np.intp), np.asarray(jj[idx], dtype=np.intp)
     i_idx = rng.integers(0, n, size=max_pairs)
     j_idx = rng.integers(0, n, size=max_pairs)
     lo = np.minimum(i_idx, j_idx).astype(np.int64)
@@ -129,7 +130,7 @@ def _sample_pairs(n, max_pairs, random_state):
     keep = lo < hi
     # Distinct pairs in (lo, hi) lexicographic order, via a 1-D key.
     key = np.unique(lo[keep] * np.int64(n) + hi[keep])
-    return key // n, key % n
+    return np.asarray(key // n, dtype=np.intp), np.asarray(key % n, dtype=np.intp)
 
 
 def sampled_median_error(slopes, z: float = 1.959964) -> Optional[float]:

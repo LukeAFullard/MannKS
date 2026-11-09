@@ -116,7 +116,7 @@ def effective_sample_size(x, t=None, method='yue'):
     acf1 = acf[1] if len(acf) > 1 else 0.0
 
     if method == 'yue':
-        k = np.arange(1, len(acf))
+        k = np.arange(1, len(acf), dtype=np.intp)
         rho = acf[1:]
         rho = np.where(np.abs(rho) > 1.96 / np.sqrt(n), rho, 0.0)
         factor = 1 + 2 * np.sum((1 - k / n) * rho)

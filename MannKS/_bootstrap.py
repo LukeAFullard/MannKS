@@ -55,9 +55,9 @@ def _moving_block_bootstrap_indices(n, block_size, rng=None):
     rng = _rng(rng)
     block_size = min(int(block_size), n)
     n_blocks = int(np.ceil(n / block_size))
-    starts = rng.integers(0, n, size=n_blocks)
-    idx = (starts[:, None] + np.arange(block_size)[None, :]) % n
-    return idx.ravel()[:n]
+    starts = rng.integers(0, n, size=n_blocks).astype(np.intp, copy=False)
+    idx = (starts[:, None] + np.arange(block_size, dtype=np.intp)[None, :]) % n
+    return idx.ravel()[:n].astype(np.intp, copy=False)
 
 
 def moving_block_bootstrap(x, block_size, random_state=None):

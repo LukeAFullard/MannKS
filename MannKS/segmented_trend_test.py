@@ -110,7 +110,7 @@ def _prepare_data(x, t, hicensor=False):
         else:
             raise ValueError("Input DataFrame must contain a 'value' column.")
     df, _ = _prepare_common(x, t, hicensor)
-    df['t'] = _to_numeric_time(np.asarray(t))[df.index.to_numpy()]
+    df['t'] = _to_numeric_time(np.asarray(t))[df.index.to_numpy(dtype=np.intp)]
     df = df.sort_values('t', kind='stable').reset_index(drop=True)
     return df, is_dt
 

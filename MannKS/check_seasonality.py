@@ -136,7 +136,7 @@ def check_seasonality(
     else:
         t_numeric = np.asarray(data['t'], dtype=np.float64)
         t_normalized = t_numeric - np.min(t_numeric)
-        seasons = (np.floor(t_normalized) % period).astype(int)
+        seasons = (np.floor(t_normalized) % period).astype(np.intp)
         uniq = np.unique(t_numeric)
         spacing = np.median(np.diff(uniq)) if len(uniq) > 1 else 1.0
         if np.ptp(t_numeric) < 2 * period or (period > 1 and spacing < 0.5):

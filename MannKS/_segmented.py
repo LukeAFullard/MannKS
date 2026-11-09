@@ -34,12 +34,12 @@ def _bootstrap_breakpoints(t, x, n_breakpoints, n_bootstrap=100, alpha_n=0.05, r
 
     for _ in range(n_bootstrap):
         # Bootstrap Resampling
-        indices = rng.choice(n, n, replace=True)
+        indices = rng.choice(n, n, replace=True).astype(np.intp, copy=False)
         t_boot = t[indices]
         x_boot = x[indices]
 
         # Sort for piecewise_regression
-        sort_idx = np.argsort(t_boot)
+        sort_idx = np.argsort(t_boot).astype(np.intp, copy=False)
         t_boot = t_boot[sort_idx]
         x_boot = x_boot[sort_idx]
 
@@ -190,7 +190,7 @@ class HybridSegmentedTrend:
         x = np.asarray(x)
 
         # Sort data
-        sort_idx = np.argsort(t)
+        sort_idx = np.argsort(t).astype(np.intp, copy=False)
         t = t[sort_idx]
         x = x[sort_idx]
 

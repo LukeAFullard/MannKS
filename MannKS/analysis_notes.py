@@ -144,7 +144,7 @@ def get_sens_slope_analysis_note(slopes, t, cen_type):
         return "ok"
 
     abs_diffs = np.abs(slopes - median_slope)
-    idx = np.flatnonzero(abs_diffs == np.nanmin(abs_diffs))
+    idx = np.flatnonzero(abs_diffs == np.nanmin(abs_diffs)).astype(np.intp, copy=False)
     del abs_diffs
 
     # Walk the pairs (np.triu_indices order, equal times removed) in blocks,
@@ -157,7 +157,7 @@ def get_sens_slope_analysis_note(slopes, t, cen_type):
         i, j = i[valid], j[valid]
         a, b = np.searchsorted(idx, [pos, pos + len(i)])
         if b > a:
-            sel = idx[a:b] - pos
+            sel = np.asarray(idx[a:b] - pos, dtype=np.intp)
             ci_blk, cj_blk = cen[i[sel]], cen[j[sel]]
             any_cen |= bool(np.any(ci_blk | cj_blk))
             all_both &= bool(np.all(ci_blk & cj_blk))

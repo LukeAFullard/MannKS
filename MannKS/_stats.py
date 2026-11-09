@@ -15,10 +15,10 @@ def _rle_lengths(a):
     Equivalent to R's `rle(x)$lengths`.
     """
     if len(a) == 0:
-        return np.array([], dtype=int)
+        return np.array([], dtype=np.intp)
     y = a[1:] != a[:-1]
-    i = np.append(np.where(y), len(a) - 1)
-    return np.diff(np.append(-1, i))
+    i = np.append(np.where(y)[0], len(a) - 1).astype(np.intp, copy=False)
+    return np.diff(np.append(np.intp(-1), i)).astype(np.intp, copy=False)
 
 
 def _get_min_positive_diff(arr):
@@ -64,17 +64,17 @@ def _tie_pairs(a):
 def _iter_triu_blocks(n, max_pairs_per_block=2_000_000):
     """Yield (i, j) index arrays for all pairs i < j, in ``np.triu_indices``
     order, a block of rows at a time so memory stays bounded."""
-    lens = np.arange(n - 1, -1, -1, dtype=np.int64)   # pairs in each row
+    lens = np.arange(n - 1, -1, -1, dtype=np.intp)   # pairs in each row
     row = 0
     while row < n - 1:
-        cum = np.cumsum(lens[row:])
+        cum = np.cumsum(lens[row:], dtype=np.intp)
         stop = row + max(1, int(np.searchsorted(cum, max_pairs_per_block, side='right')))
         stop = min(stop, n - 1)
-        rows = np.arange(row, stop, dtype=np.int64)
-        rl = lens[row:stop]
+        rows = np.arange(row, stop, dtype=np.intp)
+        rl = np.asarray(lens[row:stop], dtype=np.intp)
         i = np.repeat(rows, rl)
-        starts = np.repeat(np.cumsum(rl) - rl, rl)
-        j = np.arange(len(i), dtype=np.int64) - starts + i + 1
+        starts = np.repeat(np.cumsum(rl, dtype=np.intp) - rl, rl)
+        j = np.arange(len(i), dtype=np.intp) - starts + i + 1
         yield i, j
         row = stop
 
@@ -213,8 +213,8 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
             diffy = dupy[np.newaxis, :] - chunk_dupy[:, np.newaxis]
 
             # Create mask for i < j
-            row_indices = np.arange(start_i, end_i)[:, np.newaxis]
-            col_indices = np.arange(n)[np.newaxis, :]
+            row_indices = np.arange(start_i, end_i, dtype=np.intp)[:, np.newaxis]
+            col_indices = np.arange(n, dtype=np.intp)[np.newaxis, :]
             triu_mask = row_indices < col_indices
 
             if not np.any(triu_mask):
@@ -318,13 +318,13 @@ def _mk_score_and_var_censored(x, t, censored, cen_type, tau_method='b', mk_test
     # 6. Variance Calculation (adapted from NADA::cenken)
     varS = n * (n - 1) * (2 * n + 5) / 18.0
 
-    intg = np.arange(1, n + 1)
+    intg = np.arange(1, n + 1, dtype=np.intp)
 
-    dorder_x = np.argsort(dupx)
+    dorder_x = np.argsort(dupx).astype(np.intp, copy=False)
     dxx = dupx[dorder_x]
     dcx = cx[dorder_x]
 
-    dorder_y = np.argsort(dupy)
+    dorder_y = np.argsort(dupy).astype(np.intp, copy=False)
     dyy = dupy[dorder_y]
     dcy = cy[dorder_y]
 
@@ -626,6 +626,8 @@ def _censored_pair_slopes(x, t, code, i, j, lt_mult=DEFAULT_LT_MULTIPLIER,
     Returns (slopes, valid) where ``valid`` is False for pairs with
     (numerically) equal times.
     """
+    i = np.asarray(i, dtype=np.intp)
+    j = np.asarray(j, dtype=np.intp)
     dt = t[j] - t[i]
     valid = np.abs(dt) > 1e-10
     later_first = dt >= 0

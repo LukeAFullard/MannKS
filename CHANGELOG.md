@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 — 32-bit / Pyodide compatibility
+
+* **Fixed `TypeError: Cannot cast array data from dtype('int64') to dtype('int32') according to the rule 'safe'` on 32-bit platforms** (such as Pyodide / WebAssembly in Streamlit) and with mixed-width integer inputs. Internal pair-indexing, run-length, and bootstrap index arrays (`_iter_triu_blocks`, `_sample_pairs`, `_moving_block_bootstrap_indices`, `_rle_lengths`, and related helpers) now use pointer-sized integers (`dtype=np.intp`) instead of hardcoded `int64` or unconstrained default integer types.
+
 ## 0.6.1 — large data sets
 
 Bug fixes and performance work for large data sets. Results for data with up to 5,000 observations (after aggregation) are unchanged, except where noted.
