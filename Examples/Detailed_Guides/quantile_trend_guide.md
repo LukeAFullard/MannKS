@@ -35,13 +35,13 @@ MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 
 ### 1. Order-Statistic Blocking
 
-The time domain $T = [t_{min}, t_{max}]$ is partitioned into $B$ consecutive, non-overlapping blocks $b_1, b_2, \dots, b_B$ defined by `block_frequency` (e.g., annual `'YE'`, water year `'YS-OCT'`, or multi-year `'5YE'`).
+The time domain $T = [t_{\min}, t_{\max}]$ is partitioned into $B$ consecutive, non-overlapping blocks $b_1, b_2, \dots, b_B$ defined by `block_frequency` (e.g., annual `'YE'`, water year `'YS-OCT'`, or multi-year `'5YE'`).
 
 For each block $k \in \{1, \dots, B\}$:
 1. All valid observations $(x_{i, k}, t_{i, k})$ within the block are collected.
 2. The temporal coverage $C_k$ is computed:
-   $$C_k = \frac{\max(t_{i, k}) - \min(t_{i, k})}{\Delta t_{block}}$$
-   Blocks with $C_k < \text{min\_coverage}$ or $N_k < \text{min\_size\_per\_block}$ are rejected as incomplete.
+   $$C_k = \frac{\max(t_{i, k}) - \min(t_{i, k})}{\Delta t_{\text{block}}}$$
+   Blocks with coverage $C_k < C_{\min}$ (specified by `min_coverage`) or sample count $N_k < N_{\min}$ (specified by `min_size_per_block`) are rejected as incomplete.
 3. The remaining observations are sorted in ascending order to obtain the empirical order statistics:
    $$x_{(1), k} \le x_{(2), k} \le \dots \le x_{(n_k), k}$$
 
@@ -74,7 +74,7 @@ Testing $M$ individual quantiles simultaneously introduces a multiple testing ch
 When `field_significance=True`, MannKS computes an empirical permutation test of global field significance:
 1. Block indices are randomly permuted $P$ times (default 999), holding cross-quantile covariance fixed.
 2. In each permutation, the maximum test statistic across all quantiles is computed.
-3. The global field p-value ($p_{field}$) is calculated as the proportion of permuted maxima that exceed the observed maximum statistic.
+3. The global field p-value ($p_{\text{field}}$) is calculated as the proportion of permuted maxima that exceed the observed maximum statistic.
 
 ---
 
@@ -178,14 +178,14 @@ result = quantile_trend_test(
 | `block_origin` | str, Timestamp, or float | `None` | Fixed anchor for block boundaries. If `None`, anchored at data start or year boundary. |
 | `quantiles` | int, sequence, or str | `'auto'` | Quantile configuration. `'auto'` uses the minimum valid block size $N$. An integer specifies $M$ evenly spaced quantiles. A sequence of floats (e.g. `[0.1, 0.5, 0.9]`) specifies explicit non-exceedance probabilities. |
 | `standardization` | str | `'interpolate'` | Method for standardizing block lengths: `'interpolate'` (linear quantile interpolation) or `'egret'` (exact leap-year rank reduction). |
-| `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{min}, t_{max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
+| `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{\min}, t_{\max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
 | `min_size_per_block` | int | `10` | Minimum number of observations required to retain a block. |
 | `min_blocks` | int | `5` | Minimum number of valid blocks required to perform trend analysis. |
 | `equalize` | str or None | `'none' or None` | Subsampling strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (sub-samples blocks to uniform size), or `'aggregate'` (averages by sub-intervals). |
 | `transform` | str or None | `'none' or None` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. If `'log'`, Sen's slope is exponentiated and reported as percentage change per time unit (`slope_pct`). |
 | `censor_quantile_method` | str | `'propagate'` | Handling of censored observations during quantile standardization: `'propagate'` (preserves censoring flags for ATS), `'substitute'` (replaces with multiplier), or `'error'`. |
 | `hicensor` | bool or float | `False` | Recensors all observations to the highest detection limit to eliminate false trends from improving laboratory precision. |
-| `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles ($p_{field}$). |
+| `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles ($p_{\text{field}}$). |
 | `n_permutations` | int | `999` | Number of block permutations for field significance testing. |
 | `slope_scaling` | str or None | `'year'` | Time unit for slope scaling: `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`. Pass `None` for unscaled raw units. |
 | `x_unit` | str or None | `'units'` | Measurement unit for reporting (e.g. `'mg/L'`, `'m3/s'`). |
@@ -239,11 +239,11 @@ result = quantile_trend_test(
 
 * **`sampling_diagnostic` (dict):**
   Diagnostic metrics testing for sampling frequency drift:
-  * `flag`: Boolean indicator (`True` if $p < 0.10$ or $N_{max} / N_{min} > 1.5$).
+  * `flag`: Boolean indicator (`True` if $p < 0.10$ or $N_{\max} / N_{\min} > 1.5$).
   * `tau_n_vs_time`: Kendall's $\tau$ between block time and sample size.
   * `p_n_vs_time`: Significance of sample size change over time.
   * `n_min`, `n_max`: Minimum and maximum observation count per block.
-  * `ratio_max_min`: Ratio $N_{max} / N_{min}$.
+  * `ratio_max_min`: Ratio $N_{\max} / N_{\min}$.
 
 * **`field_significance` (dict or None):**
   Results of permutation field significance testing (`p_field`, `n_permutations`).

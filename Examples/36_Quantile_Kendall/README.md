@@ -389,7 +389,7 @@ plot_quantile_trend(
 | 4    | 0.7500   | 0.7500            | -0.0650 | 0.0000        | 2.920e-08 | Highly Likely Decreasing |
 | 5    | 0.9000   | 0.9000            | -0.0590 | 0.0000        | 4.319e-06 | Highly Likely Decreasing |
 
-**Key Takeaway:** The lower quantiles ($p = 0.10, 0.25$) are heavily censored ($prop\_censored > 0$), yet MannKS accurately preserves interval bounds and detects remediation progress across all detectable percentiles.
+**Key Takeaway:** The lower quantiles ($p = 0.10, 0.25$) are heavily censored (`prop_censored` > 0), yet MannKS accurately preserves interval bounds and detects remediation progress across all detectable percentiles.
 
 ---
 
@@ -403,7 +403,7 @@ A notorious trap in non-parametric quantile analysis occurs when monitoring freq
 Consequently, naive order-statistic trend tests report **spurious upward trends in high quantiles** and **spurious downward trends in low quantiles**, generating false alarms of climate or environmental shifts.
 
 MannKS automatically guards against this trap:
-1. **Sampling Diagnostic:** Computes Kendall's $\tau$ and the max/min sample size ratio between blocks. If $\tau \ne 0$ or $N_{max} / N_{min} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
+1. **Sampling Diagnostic:** Computes Kendall's $\tau$ and the max/min sample size ratio between blocks. If $\tau \ne 0$ or $N_{\max} / N_{\min} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
 2. **Equalization (`equalize='thin'`):** Uniformly sub-samples blocks to a common sample size, completely eliminating the artifact.
 
 ### Python Comparison
@@ -460,8 +460,8 @@ res_eq = quantile_trend_test(
 | 7    | 0.9500   | 0.2299  | 0.2300 | Likely Increasing        |
 
 #### Diagnostic Output
-- **Raw Diagnostic:** `flag = True`, ratio $N_{max}/N_{min} = 4.42$, $p = 2.1291e-04$
-- **Equalized Diagnostic:** `flag = False`, ratio $N_{max}/N_{min} = 1.00$
+- **Raw Diagnostic:** `flag = True`, ratio $N_{\max}/N_{\min} = 4.42$, $p = 2.1291e-04$
+- **Equalized Diagnostic:** `flag = False`, ratio $N_{\max}/N_{\min} = 1.00$
 
 ---
 
