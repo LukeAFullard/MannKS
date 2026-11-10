@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.7.0] — Generalized Quantile-Kendall release
+
+Major feature release introducing frequency-agnostic, censor-aware, and drift-protected **Generalized Quantile-Kendall Trend Analysis** (`quantile_trend_test`), generalizing the USGS EGRET methodology (*Hirsch et al., 2015*) to arbitrary time series frequencies, multi-year blocks, and ambient monitoring networks.
+
+### New Features & APIs
+* **Generalized Quantile-Kendall Test (`quantile_trend_test`)**:
+  - Partitions time series into temporal blocks (`block_frequency`, e.g. `'YE'`, `'5YE'`, `'QE'`).
+  - Standardizes order statistics using linear quantile interpolation (`'interpolate'`), exact USGS EGRET leap-year rank reduction (`'egret'`), or explicit non-exceedance percentiles (`quantiles=[0.05, 0.5, 0.95]`).
+  - Native handling of detection limits (`<DL`, `>DL`) with rank-based censor propagation and robust Akritas-Theil-Sen (ATS) slope estimation.
+  - Optional log-transformation (`transform='log'`) calculating exponentiated slopes as percentage change per time unit (`slope_pct`).
+  - Coverage filtering (`min_coverage`) to eliminate bias from partial blocks.
+* **Sampling Frequency Drift Protection**:
+  - Built-in diagnostic (`sampling_diagnostic`) evaluates Kendall's $\tau$ on sample size across time blocks and flags sampling frequency drift ($p < 0.10$ or $N_{max}/N_{min} > 1.5$).
+  - Equalization strategies (`equalize='thin'` and `equalize='aggregate'`) eliminate artificial tail order-statistic expansion caused by historical shifts in monitoring frequency.
+* **Permutation Field Significance**:
+  - Global matrix permutation test (`field_significance=True`) evaluates joint non-monotonicity across all quantiles while preserving empirical cross-quantile correlation.
+* **Diagnostic Visualization (`plot_quantile_trend` / `plot_quantile_kendall`)**:
+  - Dual normal Z / probability coordinates: plots on probit scale ($Z = \Phi^{-1}(p)$) with probability tick labels (`.001` to `.999`).
+  - Linear probability mode (`x_scale='linear'`).
+  - Flow Duration Curve overlay (`show_fdc=True`) displaying median concentration/flow on a secondary right-hand y-axis (`twinx`).
+  - Significance color bands (`color_by='p'`) matching EGRET color schemes, or IPCC/LWP category mapping (`color_by='classification'`).
+  - Confidence interval error whiskers (`show_ci=True`) and percentage slope labeling.
+* **Regime Summary Tool (`summarize_quantile_regimes`)**:
+  - Aggregates quantile slopes into intuitive low (0–25%), mid (25–75%), and high (75–100%) hydrological or water-quality regimes.
+
+### Documentation & Packaging
+* Added comprehensive deep-dive guide: `Examples/Detailed_Guides/quantile_trend_guide.md`.
+* Added four-part practical example: `Examples/36_Quantile_Kendall/` covering weekly nitrate, daily flow 5-year blocks, sparse irregular groundwater, and sampling frequency drift trap.
+* Exported `quantile_trend_test`, `QuantileTrendResult`, `summarize_quantile_regimes`, `plot_quantile_trend`, and `plot_quantile_kendall` in top-level `MannKS` namespace.
+
 ## 0.6.3 — code audit & correctness release
 
 Comprehensive audit release addressing statistical correctness, memory management, performance optimizations, and regression testing while preserving 100% compatibility with LWP-TRENDS R outputs.

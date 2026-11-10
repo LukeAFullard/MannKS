@@ -8,7 +8,13 @@ and plotting utilities.
 from .trend_test import trend_test
 from .seasonal_trend_test import seasonal_trend_test
 from .check_seasonality import check_seasonality
-from .plotting import plot_seasonal_distribution, plot_rolling_trend, plot_segmented_trend
+from .plotting import (
+    plot_seasonal_distribution,
+    plot_rolling_trend,
+    plot_segmented_trend,
+    plot_quantile_trend,
+    plot_quantile_kendall,
+)
 from .inspection import inspect_trend_data
 from .regional_test import regional_test
 from .classification import classify_trend
@@ -21,6 +27,11 @@ from .segmented_trend_test import (
     find_best_segmentation,
     calculate_breakpoint_probability
 )
+from .quantile_trend_test import (
+    quantile_trend_test,
+    QuantileTrendResult,
+    summarize_quantile_regimes,
+)
 
 __all__ = [
     'trend_test',
@@ -29,6 +40,8 @@ __all__ = [
     'plot_seasonal_distribution',
     'plot_rolling_trend',
     'plot_segmented_trend',
+    'plot_quantile_trend',
+    'plot_quantile_kendall',
     'inspect_trend_data',
     'regional_test',
     'classify_trend',
@@ -40,7 +53,10 @@ __all__ = [
     'segmented_trend_test',
     'SegmentedTrendResult',
     'find_best_segmentation',
-    'calculate_breakpoint_probability'
+    'calculate_breakpoint_probability',
+    'quantile_trend_test',
+    'QuantileTrendResult',
+    'summarize_quantile_regimes',
 ]
 
-__version__ = "0.6.3"
+__version__ = "0.7.0"
