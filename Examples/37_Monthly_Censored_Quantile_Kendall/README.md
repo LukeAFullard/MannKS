@@ -53,8 +53,8 @@ censored_df = prepare_censored_data(raw_data_strings)
 ```
 
 ### Step 2: Configure Parameters for Monthly Data
-For monthly data ($N \approx 12$ per block), choose parameters tailored to the monthly sampling frequency:
-- `quantiles=[0.10, 0.25, 0.50, 0.75, 0.90]`: 5 key percentiles provide optimal resolution.
+For monthly data ($N pprox 12$ per block), choose parameters tailored to the monthly sampling frequency, including regulatory NPS-FM percentiles:
+- `quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95]`: Spans baseflow (10th/25th), median (50th), storm runoff flush (75th/90th), and NPS-FM regulatory thresholds (92nd and 95th).
 - `standardization='interpolate'`: Uses robust linear percentile interpolation to estimate quantiles from 8–12 monthly points per block.
 - `min_size_per_block=8`: Requires at least 8 samples per year, allowing years with 1–4 missed months to be retained while dropping severely compromised years (e.g., 2012 with only 5 samples).
 - `min_blocks=10`: Ensures at least 10 valid annual blocks exist across the 20-year span.
@@ -66,7 +66,7 @@ result = quantile_trend_test(
     x=censored_df,
     t=dates,
     block_frequency='YE',               # Group by calendar year
-    quantiles=[0.10, 0.25, 0.50, 0.75, 0.90],
+    quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95],
     standardization='interpolate',       # Linear interpolation
     censor_quantile_method='propagate',  # Rigorous censor tracking
     sens_slope_method='ats',             # Akritas-Theil-Sen
@@ -88,11 +88,37 @@ result = quantile_trend_test(
 | **0.50** | -0.00202 | [-0.00310, -0.00084] | 6.5203e-04 | Highly Likely Decreasing | 0.0% | 18 |
 | **0.75** | +0.01275 | [+0.00683, +0.01948] | 8.5842e-04 | Highly Likely Increasing | 0.0% | 18 |
 | **0.90** | +0.01659 | [+0.01163, +0.02137] | 7.8377e-06 | Highly Likely Increasing | 0.0% | 18 |
+| **0.92** | +0.01698 | [+0.01261, +0.02062] | 2.6422e-06 | Highly Likely Increasing | 0.0% | 18 |
+| **0.95** | +0.01739 | [+0.01360, +0.02016] | 3.8175e-06 | Highly Likely Increasing | 0.0% | 18 |
 
 ### Key Findings
 1. **Low Quantiles ($p = 0.10, 0.25$)**: Exhibit significant downward slopes with non-zero censoring proportions (`prop_censored`). The Akritas-Theil-Sen estimator correctly accounts for changing detection limits without artificial step-trend artifacts.
 2. **Median ($p = 0.50$)**: Confirms steady baseline improvement ($p < 0.05$).
-3. **Upper Quantiles ($p = 0.75, 0.90$)**: 100% uncensored (`prop_censored = 0.0%`) and demonstrate a **positive slope**. The Quantile-Kendall test successfully reveals the divergent risk regime.
+3. **Upper Quantiles ($p = 0.75, 0.90, 0.92, 0.95$)**: 100% uncensored (`prop_censored = 0.0%`) and demonstrate strong **positive slopes**. The Quantile-Kendall test successfully reveals the worsening storm pulse flushes that dominate the regulatory extremes.
+
+---
+
+## NPS-FM Context: Calculating 92nd and 95th Percentiles on Monthly Records
+
+In water quality management under the **New Zealand National Policy Statement for Freshwater Management (NPS-FM 2020)**, attribute states and objective framework bands (e.g., *E. coli* primary contact recreation criteria, dissolved reactive phosphorus, toxic ammonia, and cyanobacteria) frequently rely on the **95th percentile** or **92nd percentile**.
+
+When applying Quantile-Kendall to monthly monitoring datasets over **10 to 20 years**:
+
+### 1. Order-Statistic Behavior for $N pprox 12$ Samples/Year
+Within an annual block of 12 monthly samples:
+- The 12th (highest) sample has non-exceedance probability $p pprox 0.92$ (Weibull $12/13$) or $p pprox 0.96$ (Hazen $(12 - 0.5)/12$).
+- The 11th (second-highest) sample has $p pprox 0.85$ to $0.88$.
+- **The 92nd percentile** is interpolated between the 11th and 12th samples, tracking the **second-highest monthly value** of the year.
+- **The 95th percentile** is interpolated halfway between the 11th and 12th samples ($12 	imes 0.95 = 11.4$), heavily tracking the **single annual maximum monthly flush**.
+
+In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests whether the **annual peak runoff events are intensifying** over time.
+
+### 2. Time Horizon Considerations (10 Years vs. 20 Years)
+- **20 Years ($N_{\text{blocks}} = 20$):** Very reliable. The 20 annual estimates provide sufficient degrees of freedom for the Mann-Kendall test ($S_{\max} = 190$) to filter out natural year-to-year storm variability and identify true monotonic trends in extreme flushes.
+- **10 Years ($N_{\text{blocks}} = 10$):** Feasible, but confidence intervals around the Sen's slope will naturally be wider. An isolated extreme storm year exerts higher leverage when only 10 blocks are present.
+
+### 3. Multi-Year Pooling Option (`block_frequency='2YE'`)
+If within-block percentile stabilization is desired, consecutive years can be pooled into 2-year blocks (`block_frequency='2YE'`, $N pprox 24$ samples per block), giving more empirical points above the 95th percentile.
 
 ---
 
@@ -117,7 +143,7 @@ plot_quantile_trend(
 
 | Scenario / Decision | Recommendation | Rationale |
 | :--- | :--- | :--- |
-| **Quantile Selection** | Use 3 to 5 quantiles (e.g. `[0.10, 0.25, 0.50, 0.75, 0.90]` or `[0.20, 0.50, 0.80]`) | $N=12$ samples per year cannot reliably estimate extreme tails ($p < 0.05$ or $p > 0.95$). |
+| **Quantile Selection** | Include median, quartiles, and regulatory percentiles: `[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95]` | Provides full distributional coverage while capturing critical NPS-FM regulatory thresholds. |
 | **Interpolation Method** | `standardization='interpolate'` (default) | Handles varying block sizes ($N=8$ to $12$) smoothly via linear percentile interpolation. |
 | **Missing Month Tolerance** | `min_size_per_block=8` (or 9) | Prevents losing entire years just because 1 or 2 monthly visits were missed. |
 | **Missing Year Spacing** | Supported natively | Mann-Kendall evaluates pairwise time differences $\Delta t = t_j - t_i$; missing years do not bias test statistics. |

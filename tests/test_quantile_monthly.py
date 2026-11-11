@@ -85,7 +85,7 @@ class TestMonthlyQuantileAnalysis:
             x=cens_df,
             t=dates,
             block_frequency="YE",
-            quantiles=[0.10, 0.25, 0.50, 0.75, 0.90],
+            quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95],
             min_size_per_block=10,
             censor_quantile_method="propagate",
             sens_slope_method="ats",
@@ -93,17 +93,21 @@ class TestMonthlyQuantileAnalysis:
         )
 
         df = res.to_frame()
-        assert len(df) == 5
+        assert len(df) == 7
 
         # Lowest quantile should have non-zero prop_censored
         assert df.loc[df["quantile"] == 0.10, "prop_censored"].iloc[0] > 0.0
 
-        # Upper quantiles (flushes) should be completely uncensored
+        # Upper quantiles (flushes including 92nd and 95th) should be completely uncensored
         assert df.loc[df["quantile"] == 0.90, "prop_censored"].iloc[0] == 0.0
+        assert df.loc[df["quantile"] == 0.92, "prop_censored"].iloc[0] == 0.0
+        assert df.loc[df["quantile"] == 0.95, "prop_censored"].iloc[0] == 0.0
 
         # Divergent trends: low quantiles decreasing, high quantiles increasing
         assert df.loc[df["quantile"] == 0.10, "slope"].iloc[0] < 0.0
         assert df.loc[df["quantile"] == 0.90, "slope"].iloc[0] > 0.0
+        assert df.loc[df["quantile"] == 0.92, "slope"].iloc[0] > 0.0
+        assert df.loc[df["quantile"] == 0.95, "slope"].iloc[0] > 0.0
 
         # Regimes summary
         regimes = summarize_quantile_regimes(res)
