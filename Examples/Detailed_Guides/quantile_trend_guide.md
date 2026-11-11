@@ -289,4 +289,14 @@ Naive substitution of non-detects (e.g., replacing `< 1.0` with `0.5`) before so
 ### 4. Zero-Flow and Dry-Bed Ties
 In ephemeral or arid streams, the hydrograph may record zero discharge for 30–60% of the year. All lower quantiles will equal exactly zero in every block.
 
-**Remedy:** When a quantile series is constant ($S = 0$, $\text{Var}(S) = 0$), MannKS safely identifies the invariant rank, reports `slope = 0.0`, `p = 1.0`, and assigns `'As Likely as Not Indeterminate'` (or `'No Trend'` when `continuous_confidence=False`) without numerical exceptions.
+**Remedy:** When a quantile series is constant ($S = 0$, $\operatorname{Var}(S) = 0$), MannKS safely identifies the invariant rank, reports `slope = 0.0`, `p = 1.0`, and assigns `'As Likely as Not Indeterminate'` (or `'No Trend'` when `continuous_confidence=False`) without numerical exceptions.
+
+### 5. Analyzing Monthly Sampled Datasets (10–25 Years with Censoring and Missing Values)
+A very common practical configuration in water quality and environmental monitoring is **monthly sampling** over 10 to 25 years (120 to 300 observations). In these datasets:
+- **Sample Size per Block**: With $N \approx 12$ samples per year, high-density order statistics cannot be estimated reliably. Select **3 to 5 quantiles** (e.g., quartiles `[0.25, 0.50, 0.75]` or quintiles `[0.10, 0.25, 0.50, 0.75, 0.90]`).
+- **Missing Visits**: Weather, frozen rivers, or equipment downtime often result in 8 to 11 samples per year instead of 12. Set `min_size_per_block=8` (or 9) to preserve years with a few missed visits while dropping severely incomplete years.
+- **Missing Annual Blocks**: If an entire year is skipped due to station outage, Mann-Kendall handles unequally spaced time differences ($\Delta t = t_j - t_i$) between annual block centers natively without bias.
+- **Censored Detection Limits**: Use `prepare_censored_data` to parse detection limits (e.g. `< 0.05 mg/L`), `censor_quantile_method='propagate'` to tag lower ranks without artificial plateaus, and `sens_slope_method='ats'` for robust Akritas-Theil-Sen slope estimation.
+- **Quantile-Kendall vs Seasonal Mann-Kendall**: Use **Seasonal MK** (`seasonal_trend_test`) when testing whether specific calendar months are changing (e.g., *"Is July getting drier?"*). Use **Quantile-Kendall** (`quantile_trend_test`) when testing whether the distribution extremes are shifting (e.g., *"Are annual drought baseflows declining or peak storm runoff pulses intensifying?"*), regardless of which calendar month the extremes fall into.
+
+See [Example 37](../37_Monthly_Censored_Quantile_Kendall/README.md) for a complete, executable demonstration.

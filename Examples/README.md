@@ -95,6 +95,8 @@ To run the examples yourself, install the package and `tabulate` (used to print 
     *   **Goal:** Demonstrate how to efficiently analyze large datasets (n > 5,000) using fast stochastic estimators and stratified sampling.
 *   [**Example 36: Generalized Quantile-Kendall Trend Analysis**](./36_Quantile_Kendall/README.md)
     *   **Goal:** Learn how to detect divergent trends across distribution quantiles (flood peaks vs drought baseflows, winter runoff pulses) and protect against sampling frequency drift traps.
+*   [**Example 37: Monthly Sampled Data with Missing Values & Censoring**](./37_Monthly_Censored_Quantile_Kendall/README.md)
+    *   **Goal:** Apply Quantile-Kendall to real-world monthly monitoring datasets (10–25 years), handling missing sampling visits, incomplete block dropping, changing detection limits, and divergent risk regimes.
 
 ## Detailed Guides
 
