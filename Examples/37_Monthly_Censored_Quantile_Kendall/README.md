@@ -29,7 +29,20 @@ In this example, we evaluate a 20-year dissolved phosphorus record (2005–2024)
 
 ---
 
-## The Danger of Classical Median Analysis
+## 1. Visualizing the Original Monitoring Data
+
+Before decomposing the distribution into quantiles, we inspect the full monthly time series. The plot below illustrates the dataset:
+- **Observed non-censored concentrations** (solid blue circles)
+- **Left-censored values** (red inverted triangles plotted at the detection limit)
+- **Laboratory detection limit transitions** (dashed red step line at $0.05$ mg/L from 2005–2014, improving to $0.02$ mg/L from 2015–2024)
+- **Station outage** (shaded grey band during 2012 when only 5 samples were collected and subsequently dropped by `min_size_per_block=8`)
+- **Divergent trend trajectories**: The **50th percentile (median) trend** is steadily decreasing (green line), while the **95th percentile storm pulse trend** is rapidly increasing (orange line).
+
+![Raw Monthly Water Quality Time Series](monthly_time_series.png)
+
+---
+
+## 2. The Danger of Classical Median Analysis
 
 Running a classical monotonic trend test (e.g., Mann-Kendall or Seasonal Mann-Kendall on the median) yields:
 - **Sen's Slope**: `-0.00157 mg/L/year`

@@ -152,7 +152,12 @@ def run_monthly_example():
     print("\nQuantile Regimes Summary:")
     print(regimes.to_string(index=False))
 
-    # Step 3: Diagnostic Visualization
+    # Step 3: Diagnostic Visualizations
+    # 3A. Time series plot of original data with censored points and divergent trends
+    ts_plot_path = os.path.join(OUT_DIR, "monthly_time_series.png")
+    plot_original_time_series(dates, cens_df, res_qk, ts_plot_path)
+
+    # 3B. Quantile-Kendall diagnostic plot across quantiles
     plot_path = os.path.join(OUT_DIR, "monthly_censored_qk.png")
     plot_quantile_trend(
         res_qk,
@@ -163,7 +168,7 @@ def run_monthly_example():
         color_by='p',
         title="Example 37: Monthly Quantile-Kendall (2005–2024, Censored & Missing Months)",
     )
-    print(f"\nGenerated diagnostic plot: {plot_path}")
+    print(f"Generated quantile spectrum plot: {plot_path}")
 
     # Generate Markdown Table for README
     return {
@@ -176,6 +181,73 @@ def run_monthly_example():
         'qk_df': df_qk,
         'regimes': regimes,
     }
+
+
+def plot_original_time_series(dates, cens_df, res_qk, save_path: str):
+    """
+    Plots the raw monthly monitoring time series, highlighting censored values,
+    historical detection limit steps, station outages, and divergent quantile slopes.
+    """
+    fig, ax = plt.subplots(figsize=(11, 5.5), dpi=150)
+    uncens_mask = ~cens_df['censored']
+    cens_mask = cens_df['censored']
+
+    # Scatter of observed uncensored values
+    ax.scatter(dates[uncens_mask], cens_df.loc[uncens_mask, 'value'],
+               color='#1f77b4', s=35, alpha=0.85, label='Observed (Uncensored)', zorder=4)
+
+    # Scatter of left-censored values
+    ax.scatter(dates[cens_mask], cens_df.loc[cens_mask, 'value'],
+               color='#d62728', marker='v', s=45, label='Left-Censored (< Detection Limit)', zorder=5)
+
+    # Detection limit timeline
+    dl_dates = [pd.Timestamp('2005-01-01'), pd.Timestamp('2014-12-31'),
+                pd.Timestamp('2015-01-01'), pd.Timestamp('2024-12-31')]
+    dl_values = [0.05, 0.05, 0.02, 0.02]
+    ax.step(dl_dates, dl_values, where='post', color='#d62728', linestyle='--', linewidth=1.5,
+            alpha=0.75, label='Laboratory Detection Limit')
+
+    # Shaded band for excluded 2012 station outage (< 8 samples)
+    ax.axvspan(pd.Timestamp('2012-01-01'), pd.Timestamp('2012-12-31'),
+               color='gray', alpha=0.18, label='2012 Station Outage (< 8 samples, dropped)')
+
+    # Overlay trend lines for Median (50th) and 95th percentile
+    df = res_qk.to_frame()
+    slope_50 = df.loc[df['quantile'] == 0.50, 'slope'].iloc[0]
+    slope_95 = df.loc[df['quantile'] == 0.95, 'slope'].iloc[0]
+    p_50 = df.loc[df['quantile'] == 0.50, 'p'].iloc[0]
+    p_95 = df.loc[df['quantile'] == 0.95, 'p'].iloc[0]
+
+    b_dates = res_qk.matrix.index
+    t_years = (b_dates - b_dates[0]).total_seconds() / (365.25 * 86400.0)
+    t_mid = float(np.median(t_years))
+
+    col_50 = [c for c in res_qk.matrix.columns if '0.5' in c or c == 'r3'][0]
+    col_95 = [c for c in res_qk.matrix.columns if '0.95' in c or c == 'r7'][0]
+    med_50 = float(np.median(res_qk.matrix[col_50]))
+    med_95 = float(np.median(res_qk.matrix[col_95]))
+
+    date_eval = [b_dates[0], dates.max()]
+    t_eval = np.array([0.0, (dates.max() - b_dates[0]).total_seconds() / (365.25 * 86400.0)])
+    y_pred_50 = med_50 + slope_50 * (t_eval - t_mid)
+    y_pred_95 = med_95 + slope_95 * (t_eval - t_mid)
+
+    ax.plot(date_eval, y_pred_50, color='#2ca02c', linestyle='-', linewidth=2.2,
+            label=f'50th %ile Trend ({slope_50:+.4f} mg/L/yr, p={p_50:.4f})', zorder=6)
+    ax.plot(date_eval, y_pred_95, color='#ff7f0e', linestyle='-', linewidth=2.2,
+            label=f'95th %ile Trend ({slope_95:+.4f} mg/L/yr, p={p_95:.1e})', zorder=6)
+
+    ax.set_xlabel('Monitoring Year', fontsize=11)
+    ax.set_ylabel('Dissolved Phosphorus (mg/L)', fontsize=11)
+    ax.set_title('Raw Monthly Water Quality Time Series (2005–2024)\nObserved Points, Censored Limits, and Divergent Quantile Trajectories',
+                 fontsize=12, fontweight='bold')
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend(loc='upper right', frameon=True, fontsize=9.2, facecolor='white', framealpha=0.9)
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close(fig)
+    print(f"Generated raw time-series plot: {save_path}")
 
 
 def write_readme(results: dict):
@@ -225,7 +297,20 @@ In this example, we evaluate a 20-year dissolved phosphorus record (2005–2024)
 
 ---
 
-## The Danger of Classical Median Analysis
+## 1. Visualizing the Original Monitoring Data
+
+Before decomposing the distribution into quantiles, we inspect the full monthly time series. The plot below illustrates the dataset:
+- **Observed non-censored concentrations** (solid blue circles)
+- **Left-censored values** (red inverted triangles plotted at the detection limit)
+- **Laboratory detection limit transitions** (dashed red step line at $0.05$ mg/L from 2005–2014, improving to $0.02$ mg/L from 2015–2024)
+- **Station outage** (shaded grey band during 2012 when only 5 samples were collected and subsequently dropped by `min_size_per_block=8`)
+- **Divergent trend trajectories**: The **50th percentile (median) trend** is steadily decreasing (green line), while the **95th percentile storm pulse trend** is rapidly increasing (orange line).
+
+![Raw Monthly Water Quality Time Series](monthly_time_series.png)
+
+---
+
+## 2. The Danger of Classical Median Analysis
 
 Running a classical monotonic trend test (e.g., Mann-Kendall or Seasonal Mann-Kendall on the median) yields:
 - **Sen's Slope**: `{MEDIAN_SLOPE} mg/L/year`
