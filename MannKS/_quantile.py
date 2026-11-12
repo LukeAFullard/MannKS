@@ -35,19 +35,20 @@ def _parse_block_frequency(block_frequency, is_datetime):
             raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number.")
 
 def _normalize_start_freq(offset_or_str) -> str:
-    s = str(offset_or_str).upper().strip()
+    s_raw = str(offset_or_str).strip()
     try:
         rc = getattr(offset_or_str, 'rule_code', None)
         if rc:
-            s = str(rc).upper()
+            s_raw = str(rc).strip()
     except Exception:
         pass
+    s = s_raw.upper()
+    end_month_map = {
+        'JAN': 'FEB', 'FEB': 'MAR', 'MAR': 'APR', 'APR': 'MAY',
+        'MAY': 'JUN', 'JUN': 'JUL', 'JUL': 'AUG', 'AUG': 'SEP',
+        'SEP': 'OCT', 'OCT': 'NOV', 'NOV': 'DEC', 'DEC': 'JAN',
+    }
     if 'YE-' in s:
-        end_month_map = {
-            'JAN': 'FEB', 'FEB': 'MAR', 'MAR': 'APR', 'APR': 'MAY',
-            'MAY': 'JUN', 'JUN': 'JUL', 'JUL': 'AUG', 'AUG': 'SEP',
-            'SEP': 'OCT', 'OCT': 'NOV', 'NOV': 'DEC', 'DEC': 'JAN',
-        }
         parts = s.split('YE-')
         prefix = parts[0]
         m_end = parts[1][:3]
@@ -57,13 +58,22 @@ def _normalize_start_freq(offset_or_str) -> str:
         prefix = s[:-2] if s.endswith('YE') else ''
         return f"{prefix}YS"
     if 'QE-' in s:
-        return s.replace('QE-', 'QS-')
+        parts = s.split('QE-')
+        prefix = parts[0]
+        m_end = parts[1][:3]
+        m_start = end_month_map.get(m_end, 'JAN')
+        return f"{prefix}QS-{m_start}"
     if s.endswith('QE') or s == 'Q':
         prefix = s[:-2] if s.endswith('QE') else ''
         return f"{prefix}QS"
     if s.endswith('ME') or s == 'M':
         prefix = s[:-2] if s.endswith('ME') else ''
         return f"{prefix}MS"
+    # Preserve lowercase for hourly 'h' required by pandas >= 2.2 without altering 'MS' (MonthStart)
+    unit_part = s_raw.lstrip('0123456789')
+    if unit_part in ('h', 'H'):
+        prefix = s_raw[:len(s_raw) - len(unit_part)]
+        return f"{prefix}h"
     return s
 
 def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):

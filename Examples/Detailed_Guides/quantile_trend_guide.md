@@ -40,8 +40,8 @@ The time domain $T = [t_{\min}, t_{\max}]$ is partitioned into $B$ consecutive, 
 For each block $k \in \{1, \dots, B\}$:
 1. All valid observations $(x_{i, k}, t_{i, k})$ within the block are collected.
 2. The temporal coverage $C_k$ is computed:
-   $$C_k = \frac{\max(t_{i, k}) - \min(t_{i, k})}{\Delta t_{\text{block}}}$$
-   Blocks with coverage $C_k < C_{\min}$ (specified by `min_coverage`) or sample count $N_k < N_{\min}$ (specified by `min_size_per_block`) are rejected as incomplete.
+   $$C_k = \min\!\left(1,\; \frac{\max(t_{i, k}) - \min(t_{i, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}}}\right)$$
+   where $\Delta t_{\text{med}, k}$ is the median spacing between distinct observation times in the block (defaulting to 1 day for single-observation datetime blocks). Blocks with coverage $C_k < C_{\min}$ (specified by `min_coverage`) or sample count $N_k < N_{\min}$ (specified by `min_size_per_block`) are rejected as incomplete.
 3. The remaining observations are sorted in ascending order to obtain the empirical order statistics:
    $$x_{(1), k} \le x_{(2), k} \le \dots \le x_{(n_k), k}$$
 
@@ -176,16 +176,17 @@ result = quantile_trend_test(
 | `t` | array-like or DatetimeIndex | *Required* | Timestamps or numeric time coordinates corresponding to `x`. |
 | `block_frequency` | str or float | `'YE'` | Duration of time blocks. For datetime `t`, use pandas frequency strings (e.g. `'YE'`, `'5YE'`, `'QE'`). For numeric `t`, specify block width (e.g. `1.0`). |
 | `block_origin` | str, Timestamp, or float | `None` | Fixed anchor for block boundaries. If `None`, anchored at data start or year boundary. |
-| `quantiles` | int, sequence, or str | `'auto'` | Quantile configuration. `'auto'` uses the minimum valid block size $N$. An integer specifies $M$ evenly spaced quantiles. A sequence of floats (e.g. `[0.1, 0.5, 0.9]`) specifies explicit non-exceedance probabilities. |
+| `quantiles` | int, sequence, or str | `'auto'` | Quantile configuration. `'auto'` uses the standardized block length (`target_length`). An integer specifies $M$ evenly spaced quantiles. A sequence of floats (e.g. `[0.1, 0.5, 0.9]`) specifies explicit non-exceedance probabilities in $[0, 1]$. |
+| `target_length` | str or int | `'min'` | Target standardized sample size $M$ when `quantiles='auto'`: `'min'`, `'median'`, `'max'`, or an explicit integer $\ge 2$. |
 | `standardization` | str | `'interpolate'` | Method for standardizing block lengths: `'interpolate'` (linear quantile interpolation) or `'egret'` (exact leap-year rank reduction). |
 | `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{\min}, t_{\max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
 | `min_size_per_block` | int | `10` | Minimum number of observations required to retain a block. |
 | `min_blocks` | int | `5` | Minimum number of valid blocks required to perform trend analysis. |
-| `equalize` | str or None | `'none' or None` | Subsampling strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (sub-samples blocks to uniform size), or `'aggregate'` (averages by sub-intervals). |
+| `equalize` | str or None | `'none' or None` | Subsampling strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (systematic temporal subsampling to uniform size), or `'aggregate'` (robust median within sub-intervals). |
 | `transform` | str or None | `'none' or None` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. If `'log'`, Sen's slope is exponentiated and reported as percentage change per time unit (`slope_pct`). |
 | `censor_quantile_method` | str | `'propagate'` | Handling of censored observations during quantile standardization: `'propagate'` (preserves censoring flags for ATS), `'substitute'` (replaces with multiplier), or `'error'`. |
 | `hicensor` | bool or float | `False` | Recensors all observations to the highest detection limit to eliminate false trends from improving laboratory precision. |
-| `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles ($p_{\text{field}}$). |
+| `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles. |
 | `n_permutations` | int | `999` | Number of block permutations for field significance testing. |
 | `slope_scaling` | str or None | `'year'` | Time unit for slope scaling: `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`. Pass `None` for unscaled raw units. |
 | `x_unit` | str or None | `'units'` | Measurement unit for reporting (e.g. `'mg/L'`, `'m3/s'`). |
@@ -222,17 +223,17 @@ result = quantile_trend_test(
   * `quantile`: Nominal percentile in $[0, 1]$.
   * `plotting_position`: Weibull non-exceedance probability $p = j / (M + 1)$.
   * `z_position`: Standard normal quantile $Z = \Phi^{-1}(p)$.
-  * `slope`: Sen's slope in scaled units (e.g. $mg/L/\text{year}$).
+  * `slope`: Sen's slope in scaled units (e.g. $\text{mg/L/year}$).
   * `lower_ci`, `upper_ci`: $(1 - \alpha)$ confidence bounds for the slope.
-  * `slope_pct`, `lower_ci_pct`, `upper_ci_pct`: Percentage change per unit time (when `transform='log'`).
+  * `slope_pct`, `lower_ci_pct`, `upper_ci_pct`: Percentage change per unit time (exponentiated when `transform='log'`, or relative to each quantile's median when `transform='none'`/`'pct_of_median'`).
   * `p`: Mann-Kendall two-sided p-value.
   * `h`: Boolean significance flag ($p < \alpha$).
-  * `tau`: Kendall's $\tau$ correlation coefficient.
+  * `Tau`: Kendall's $\tau$ correlation coefficient.
   * `classification`: Categorical trend description (e.g. `"Highly Likely Increasing"`).
   * `prop_censored`: Fraction of blocks where this rank is censored.
 
 * **`blocks` (DataFrame):**
-  Metadata for each evaluated time block: `block_id`, `block_start`, `block_end`, `block_center`, `n_obs`, `coverage`, and `is_valid`.
+  Metadata for each evaluated time block: `block_start`, `block_end`, `block_center`, `n_obs`, `n_censored`, `coverage`, `valid`, and `reason`.
 
 * **`matrix` (DataFrame):**
   Standardized values of dimension $B \text{ blocks} \times M \text{ ranks}$.
@@ -246,7 +247,7 @@ result = quantile_trend_test(
   * `ratio_max_min`: Ratio $N_{\max} / N_{\min}$.
 
 * **`field_significance` (dict or None):**
-  Results of permutation field significance testing (`p_field`, `n_permutations`).
+  Results of permutation field significance testing when `field_significance=True`: `n_significant`, `p_count`, `max_abs_z`, `p_max_z`, and `n_permutations`.
 
 ### Convenience Methods
 
@@ -274,7 +275,7 @@ When monitoring programs expand from monthly to weekly sampling over time, the e
 * Expected sample maximum increases with sample size.
 * Expected sample minimum decreases with sample size.
 
-**Remedy:** Always inspect `result.sampling_diagnostic['flag']`. If flagged, re-run with `equalize='thin'`, which randomly or systematically sub-samples blocks to a uniform sample size, restoring true flat trends across stationary distributions.
+**Remedy:** Always inspect `result.sampling_diagnostic['flag']`. If flagged, re-run with `equalize='thin'`, which systematically sub-samples blocks in time to a uniform sample size, restoring true flat trends across stationary distributions.
 
 ### 2. Partial Block Bias & Temporal Coverage
 Blocks near the start or end of a record often contain only partial years (e.g., monitoring began in September). Evaluating an incomplete year whose samples represent only summer or winter will severely bias the annual order statistics.
@@ -300,3 +301,14 @@ A very common practical configuration in water quality and environmental monitor
 - **Quantile-Kendall vs Seasonal Mann-Kendall**: Use **Seasonal MK** (`seasonal_trend_test`) when testing whether specific calendar months are changing (e.g., *"Is July getting drier?"*). Use **Quantile-Kendall** (`quantile_trend_test`) when testing whether the distribution extremes are shifting (e.g., *"Are annual drought baseflows declining or peak storm runoff pulses intensifying?"*), regardless of which calendar month the extremes fall into.
 
 See [Example 37](../37_Monthly_Censored_Quantile_Kendall/README.md) for a complete, executable demonstration.
+
+---
+
+## Limitations & Assumptions
+
+1. **Minimum Number of Blocks ($B$):** The Mann-Kendall test is conducted *across blocks*, not across raw observations. With fewer than $10$ valid blocks ($B < 10$), statistical power is low and normal-approximation p-values are coarse (e.g., with $B=5$, the minimum possible two-sided p-value is $0.083$, so $p < 0.05$ is unattainable).
+2. **Cross-Quantile Dependence & Multiple Testing:** Adjacent quantiles within the same block are strongly correlated. Individual quantile p-values are marginal (unadjusted); use `field_significance=True` when testing a global null hypothesis across the entire quantile spectrum.
+3. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows of the standardized quantile matrix, which assumes blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and evaluates numeric standardized values without censored-interval scoring.
+4. **Log Transformation Requires Positive Values:** `transform='log'` requires all standardized block values to be strictly $> 0$ (after adding `log_offset` if provided). Zero-flow or negative-value series must use `transform='none'` (or a positive `log_offset`).
+5. **Linear Interpolation & Tail Extrapolation:** When `quantiles` requests extreme percentiles (e.g., `0.99`) on a small block ($N = 10$–$12$), `standardization='interpolate'` cannot extrapolate beyond the observed sample minimum and maximum—it reflects the block's largest/smallest order statistics.
+6. **Temporal Coverage with Cross-Year Seasons:** `min_coverage` measures the span from first to last observation in a block. If `months` spans a calendar-year boundary (e.g., `[12, 1, 2]` with `block_frequency='YE'`), observations in January and December of the same calendar year span the full year and inflate coverage; use a shifted block origin such as `'YE-NOV'` (blocks starting Dec 1) for cross-year seasons.

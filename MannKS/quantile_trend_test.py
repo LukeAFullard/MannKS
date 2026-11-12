@@ -113,6 +113,7 @@ _RESULTS_COLUMNS = [
 def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardization, max_quantiles):
     n_med = int(np.round(np.median(block_sizes)))
     n_min = int(np.min(block_sizes))
+    n_max = int(np.max(block_sizes))
 
     if isinstance(quantiles, str):
         if quantiles != 'auto':
@@ -123,10 +124,12 @@ def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardizatio
             M = n_min
         elif target_length == 'median':
             M = n_med
+        elif target_length == 'max':
+            M = n_max
         elif isinstance(target_length, (int, np.integer)):
             M = int(target_length)
         else:
-            raise ValueError("`target_length` must be 'min', 'median', or an integer >= 2.")
+            raise ValueError("`target_length` must be 'min', 'median', 'max', or an integer >= 2.")
 
         if M < 2:
             raise ValueError(f"Target quantile length must be at least 2, got {M}.")
@@ -237,8 +240,16 @@ def _compute_field_significance(M_matrix, t_numeric, var_s_vec, z_obs_vec, alpha
     valid_var = (var_s_vec > 1e-10) & np.isfinite(var_s_vec)
     sqrt_var = np.where(valid_var, np.sqrt(np.maximum(var_s_vec, 1e-10)), np.inf)
 
-    n_sig_obs = int(np.sum(np.abs(z_obs_vec) > z_crit))
-    max_z_obs = float(np.nanmax(np.abs(z_obs_vec))) if len(z_obs_vec) > 0 else 0.0
+    abs_z_obs = np.abs(z_obs_vec)
+    n_sig_obs = int(np.nansum(abs_z_obs > z_crit))
+    max_z_obs = float(np.nanmax(abs_z_obs)) if np.any(np.isfinite(abs_z_obs)) else 0.0
+
+    has_nan = bool(np.isnan(M_matrix).any())
+    i_idx, j_idx = np.triu_indices(B, k=1)
+    dt = t_numeric[j_idx] - t_numeric[i_idx]
+    valid_t = dt != 0.0
+    ii, jj = i_idx[valid_t], j_idx[valid_t]
+    dt_sign = np.sign(dt[valid_t])[:, np.newaxis]
 
     count_exceed = 0
     max_z_exceed = 0
@@ -246,12 +257,17 @@ def _compute_field_significance(M_matrix, t_numeric, var_s_vec, z_obs_vec, alpha
     for _ in range(n_permutations):
         perm_idx = rng.permutation(B)
         M_perm = M_matrix[perm_idx, :]
-        s_perm, _, _ = _mk_s_matrix(M_perm, t_numeric)
+        if has_nan:
+            dM = M_perm[jj, :] - M_perm[ii, :]
+            s_perm = np.nansum(dt_sign * np.sign(dM), axis=0)
+        else:
+            s_perm, _, _ = _mk_s_matrix(M_perm, t_numeric)
         z_perm = np.where(s_perm > 0, (s_perm - 1.0) / sqrt_var, np.where(s_perm < 0, (s_perm + 1.0) / sqrt_var, 0.0))
         abs_z_perm = np.abs(z_perm)
-        if int(np.sum(abs_z_perm > z_crit)) >= n_sig_obs:
+        if int(np.nansum(abs_z_perm > z_crit)) >= n_sig_obs:
             count_exceed += 1
-        if float(np.max(abs_z_perm)) >= max_z_obs:
+        max_perm = float(np.nanmax(abs_z_perm)) if np.any(np.isfinite(abs_z_perm)) else 0.0
+        if max_perm >= max_z_obs:
             max_z_exceed += 1
 
     return {
@@ -589,7 +605,20 @@ def quantile_trend_test(
                     module_notes.append("transform='pct_of_median' encountered non-positive quantile median; set to NaN.")
     
             eff_slope_scaling = slope_scaling if is_datetime else None
-            use_fast_engine = (engine == 'fast' and not has_any_censored and mk_kwargs.get('autocorr_method', 'none') == 'none' and not np.isnan(work_matrix).any())
+            _fast_incompatible = (
+                mk_kwargs.get('autocorr_method', 'none') != 'none'
+                or mk_kwargs.get('sens_slope_method', 'unweighted') == 'ats'
+                or mk_kwargs.get('mk_test_method', 'robust') == 'lwp'
+                or mk_kwargs.get('tie_break_method', 'robust') == 'lwp'
+                or mk_kwargs.get('ci_method', 'direct') != 'direct'
+                or mk_kwargs.get('large_dataset_mode', 'auto') == 'fast'
+            )
+            use_fast_engine = (
+                engine == 'fast'
+                and not has_any_censored
+                and not _fast_incompatible
+                and not np.isnan(work_matrix).any()
+            )
     
             t_numeric_blocks = _to_numeric_time(block_centers)
             col_warning_counts = Counter()
@@ -601,6 +630,8 @@ def quantile_trend_test(
                     M_matrix=work_matrix, t_numeric=t_numeric_blocks, is_datetime=is_datetime,
                     alpha=alpha, slope_scaling=eff_slope_scaling, x_unit=x_unit,
                     continuous_confidence=continuous_confidence, category_map=category_map,
+                    ci_method=mk_kwargs.get('ci_method', 'direct'),
+                    tau_method=mk_kwargs.get('tau_method', 'b'),
                 )
                 for k, row_dict in enumerate(fast_rows):
                     row_dict['rank'] = int(ranks[k])
@@ -688,6 +719,19 @@ def quantile_trend_test(
     
             field_sig_dict = None
             if field_significance:
+                if has_any_censored:
+                    warnings.warn(
+                        "`field_significance=True` permutes numeric standardized quantile values "
+                        "without censored-interval scoring; interpret field p-values cautiously "
+                        "when censored quantiles are present.",
+                        UserWarning,
+                    )
+                if mk_kwargs.get('autocorr_method', 'none') != 'none':
+                    warnings.warn(
+                        "`field_significance=True` assumes exchangeable blocks under permutation; "
+                        "autocorrelation adjustments are not preserved across permutations.",
+                        UserWarning,
+                    )
                 field_sig_dict = _compute_field_significance(
                     M_matrix=work_matrix, t_numeric=t_numeric_blocks,
                     var_s_vec=results_df['var_s'].to_numpy(dtype=float),

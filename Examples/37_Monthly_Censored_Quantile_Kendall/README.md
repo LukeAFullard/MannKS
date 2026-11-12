@@ -66,7 +66,7 @@ censored_df = prepare_censored_data(raw_data_strings)
 ```
 
 ### Step 2: Configure Parameters for Monthly Data
-For monthly data ($N pprox 12$ per block), choose parameters tailored to the monthly sampling frequency, including regulatory NPS-FM percentiles:
+For monthly data ($N \approx 12$ per block), choose parameters tailored to the monthly sampling frequency, including regulatory NPS-FM percentiles:
 - `quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95]`: Spans baseflow (10th/25th), median (50th), storm runoff flush (75th/90th), and NPS-FM regulatory thresholds (92nd and 95th).
 - `standardization='interpolate'`: Uses robust linear percentile interpolation to estimate quantiles from 8–12 monthly points per block.
 - `min_size_per_block=8`: Requires at least 8 samples per year, allowing years with 1–4 missed months to be retained while dropping severely compromised years (e.g., 2012 with only 5 samples).
@@ -117,12 +117,12 @@ In water quality management under the **New Zealand National Policy Statement fo
 
 When applying Quantile-Kendall to monthly monitoring datasets over **10 to 20 years**:
 
-### 1. Order-Statistic Behavior for $N pprox 12$ Samples/Year
+### 1. Order-Statistic Behavior for $N \approx 12$ Samples/Year
 Within an annual block of 12 monthly samples:
-- The 12th (highest) sample has non-exceedance probability $p pprox 0.92$ (Weibull $12/13$) or $p pprox 0.96$ (Hazen $(12 - 0.5)/12$).
-- The 11th (second-highest) sample has $p pprox 0.85$ to $0.88$.
+- The 12th (highest) sample has non-exceedance probability $p \approx 0.92$ (Weibull $12/13$) or $p \approx 0.96$ (Hazen $(12 - 0.5)/12$).
+- The 11th (second-highest) sample has $p \approx 0.85$ to $0.88$.
 - **The 92nd percentile** is interpolated between the 11th and 12th samples, tracking the **second-highest monthly value** of the year.
-- **The 95th percentile** is interpolated halfway between the 11th and 12th samples ($12 	imes 0.95 = 11.4$), heavily tracking the **single annual maximum monthly flush**.
+- **The 95th percentile** is interpolated halfway between the 11th and 12th samples ($12 \times 0.95 = 11.4$), heavily tracking the **single annual maximum monthly flush**.
 
 In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests whether the **annual peak runoff events are intensifying** over time.
 
@@ -131,7 +131,7 @@ In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests 
 - **10 Years ($N_{\text{blocks}} = 10$):** Feasible, but confidence intervals around the Sen's slope will naturally be wider. An isolated extreme storm year exerts higher leverage when only 10 blocks are present.
 
 ### 3. Multi-Year Pooling Option (`block_frequency='2YE'`)
-If within-block percentile stabilization is desired, consecutive years can be pooled into 2-year blocks (`block_frequency='2YE'`, $N pprox 24$ samples per block), giving more empirical points above the 95th percentile.
+If within-block percentile stabilization is desired, consecutive years can be pooled into 2-year blocks (`block_frequency='2YE'`, $N \approx 24$ samples per block), giving more empirical points above the 95th percentile.
 
 ---
 

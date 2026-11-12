@@ -1075,6 +1075,10 @@ def plot_quantile_trend(
                         label='Median FDC'
                     )
                     unit_str = getattr(result, 'x_unit', None) or getattr(result, 'units', None) or ''
+                    if not unit_str and 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
+                        su = str(df['slope_units'].iloc[0]).strip()
+                        if ' per ' in su and not su.startswith('%'):
+                            unit_str = su.split(' per ')[0].strip()
                     if unit_str:
                         ax_fdc.set_ylabel(f"Median Concentration / Flow ({unit_str})", color='navy')
                     else:

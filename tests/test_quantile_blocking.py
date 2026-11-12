@@ -86,7 +86,7 @@ class TestNormalizeStartFreq:
         ('QE', 'QS'),
         ('Q', 'QS'),
         ('2QE', '2QS'),
-        ('QE-NOV', 'QS-NOV'),
+        ('QE-NOV', 'QS-DEC'),
         ('ME', 'MS'),
         ('M', 'MS'),
         ('3ME', '3MS'),

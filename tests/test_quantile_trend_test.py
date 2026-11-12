@@ -71,7 +71,7 @@ class TestInputValidationAndKwargs:
             quantile_trend_test(vals, dates, quantiles=[-0.1, 0.5])
 
         # target_length invalid
-        with pytest.raises(ValueError, match="`target_length` must be 'min', 'median', or an integer >= 2"):
+        with pytest.raises(ValueError, match="`target_length` must be 'min', 'median', 'max', or an integer >= 2"):
             quantile_trend_test(vals, dates, target_length='invalid')
 
         # standardization invalid
@@ -672,6 +672,60 @@ class TestPublicOptionsAndTransforms:
         assert res_thinned.sampling_diagnostic['flag'] is False
         assert res_thinned.sampling_diagnostic['ratio_max_min'] == 1.0
         assert res_thinned.sampling_diagnostic['n_min'] == res_thinned.sampling_diagnostic['n_max']
+
+    def test_target_length_max(self):
+        """Verify target_length='max' uses maximum valid block size."""
+        dates = pd.date_range('2010-01-01', periods=10 * 365 + 3, freq='D')
+        vals = np.random.default_rng(1).normal(10.0, 1.0, len(dates))
+        res = quantile_trend_test(vals, dates, block_frequency='YE', quantiles='auto', target_length='max')
+        assert res.n_ranks == 366
+        assert res.target_length == 366
+
+    def test_fast_engine_respects_ci_and_tau_method(self):
+        """Verify engine='fast' matches engine='trend_test' when ci_method or tau_method is customized."""
+        dates = pd.date_range('2010-01-01', periods=10 * 365, freq='D')
+        t_yrs = (dates - dates[0]).total_seconds() / (365.25 * 86400.0)
+        vals = np.asarray(10.0 + 0.5 * t_yrs + np.random.default_rng(7).normal(0.0, 1.0, len(dates)), dtype=float)
+        # Introduce ties
+        vals[:30] = 10.0
+        res_exact = quantile_trend_test(
+            vals, dates, block_frequency='YE', quantiles=5,
+            engine='trend_test', ci_method='lwp', tau_method='a'
+        )
+        res_fast = quantile_trend_test(
+            vals, dates, block_frequency='YE', quantiles=5,
+            engine='fast', ci_method='lwp', tau_method='a'
+        )
+        np.testing.assert_allclose(res_fast.results['Tau'], res_exact.results['Tau'], rtol=1e-12)
+        np.testing.assert_allclose(res_fast.results['lower_ci'], res_exact.results['lower_ci'], rtol=1e-12)
+        np.testing.assert_allclose(res_fast.results['upper_ci'], res_exact.results['upper_ci'], rtol=1e-12)
+
+    def test_normalize_start_freq_qe_and_hourly(self):
+        """Verify QE- maps to the following start month and sub-daily 'h' stays lowercase."""
+        from MannKS._quantile import _normalize_start_freq
+        assert _normalize_start_freq('QE-MAR') == 'QS-APR'
+        assert _normalize_start_freq('QE-DEC') == 'QS-JAN'
+        assert _normalize_start_freq('h') == 'h'
+        assert _normalize_start_freq('2h') == '2h'
+
+    def test_field_significance_handles_nan_columns(self):
+        """Verify field_significance=True handles NaN columns (e.g. zero median in pct_of_median) safely."""
+        dates = pd.date_range('2010-01-01', periods=8 * 20, freq='18D')
+        rng = np.random.default_rng(12)
+        vals = rng.normal(5.0, 1.0, len(dates))
+        # Force lowest values in every block to 0 so lowest quantile median is 0
+        for yr in range(2010, 2018):
+            idx = np.flatnonzero(dates.year == yr)[:3]
+            vals[idx] = 0.0
+        res = quantile_trend_test(
+            vals, dates, block_frequency='YE', quantiles=[0.05, 0.50, 0.95],
+            min_size_per_block=5, min_coverage=0.5, transform='pct_of_median',
+            field_significance=True, n_permutations=49, random_state=42
+        )
+        assert res.field_significance is not None
+        assert np.isfinite(res.field_significance['p_count'])
+        assert np.isfinite(res.field_significance['p_max_z'])
+
 
 
 

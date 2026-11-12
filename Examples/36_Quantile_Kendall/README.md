@@ -383,11 +383,11 @@ plot_quantile_trend(
 ### Results Table
 | rank | quantile | plotting_position | slope   | prop_censored | p         | classification           |
 | ---- | -------- | ----------------- | ------- | ------------- | --------- | ------------------------ |
-| 1    | 0.1000   | 0.1000            | -0.0656 | 0.0000        | 4.580e-10 | Highly Likely Decreasing |
-| 2    | 0.2500   | 0.2500            | -0.0679 | 0.0000        | 1.727e-09 | Highly Likely Decreasing |
-| 3    | 0.5000   | 0.5000            | -0.0659 | 0.0000        | 8.538e-09 | Highly Likely Decreasing |
-| 4    | 0.7500   | 0.7500            | -0.0650 | 0.0000        | 2.920e-08 | Highly Likely Decreasing |
-| 5    | 0.9000   | 0.9000            | -0.0590 | 0.0000        | 4.319e-06 | Highly Likely Decreasing |
+| 1    | 0.1000   | 0.1000            | -0.0611 | 0.4348        | 3.349e-08 | Highly Likely Decreasing |
+| 2    | 0.2500   | 0.2500            | -0.0744 | 0.3913        | 6.384e-08 | Highly Likely Decreasing |
+| 3    | 0.5000   | 0.5000            | -0.0800 | 0.3478        | 1.058e-08 | Highly Likely Decreasing |
+| 4    | 0.7500   | 0.7500            | -0.0849 | 0.2174        | 8.182e-09 | Highly Likely Decreasing |
+| 5    | 0.9000   | 0.9000            | -0.0958 | 0.0870        | 7.212e-09 | Highly Likely Decreasing |
 
 **Key Takeaway:** The lower quantiles ($p = 0.10, 0.25$) are heavily censored (`prop_censored` > 0), yet MannKS accurately preserves interval bounds and detects remediation progress across all detectable percentiles.
 
@@ -403,8 +403,8 @@ A notorious trap in non-parametric quantile analysis occurs when monitoring freq
 Consequently, naive order-statistic trend tests report **spurious upward trends in high quantiles** and **spurious downward trends in low quantiles**, generating false alarms of climate or environmental shifts.
 
 MannKS automatically guards against this trap:
-1. **Sampling Diagnostic:** Computes Kendall's $\tau$ and the max/min sample size ratio between blocks. If $\tau \ne 0$ or $N_{\max} / N_{\min} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
-2. **Equalization (`equalize='thin'`):** Uniformly sub-samples blocks to a common sample size, completely eliminating the artifact.
+1. **Sampling Diagnostic:** Computes Kendall's $\tau$ and the max/min sample size ratio between blocks. If $p < 0.10$ or $N_{\max} / N_{\min} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
+2. **Equalization (`equalize='thin'`):** Systematically sub-samples blocks to a common sample size, eliminating the sample-size expansion artifact.
 
 ### Python Comparison
 ```python
@@ -417,7 +417,7 @@ res_raw = quantile_trend_test(
     slope_scaling='year',
 )
 
-# Part B: Equalized Analysis (Thinning Restores True Zero Trend)
+# Part B: Equalized Analysis (Thinning Eliminates Drift Artifact)
 res_eq = quantile_trend_test(
     x=stationary_lognormal_values,
     t=dates,
@@ -433,7 +433,7 @@ res_eq = quantile_trend_test(
 #### Case 4A: Raw Un-equalized Series (False Artifactual Trends)
 ![Case 4A: Sampling Frequency Drift Trap](case4a_sampling_drift_raw_qk.png)
 
-#### Case 4B: Equalized Series via Thinning (True Flat Trends Restored)
+#### Case 4B: Equalized Series via Thinning (Drift Artifact Removed)
 ![Case 4B: Equalized Blocks](case4b_sampling_drift_equalized_qk.png)
 
 ### Numerical Comparison
@@ -448,7 +448,7 @@ res_eq = quantile_trend_test(
 | 6    | 0.9000   | 0.2018  | 0.0855 | Highly Likely Increasing    |
 | 7    | 0.9500   | 0.3835  | 0.0410 | Highly Likely Increasing    |
 
-#### Equalized Results (Case 4B - Accurate Zero Trend Across All Quantiles)
+#### Equalized Results (Case 4B - Drift Artifact Removed)
 | rank | quantile | slope   | p      | classification           |
 | ---- | -------- | ------- | ------ | ------------------------ |
 | 1    | 0.0500   | -0.0652 | 0.0350 | Highly Likely Decreasing |

@@ -169,8 +169,8 @@ def run_case_3(output_dir: str):
         for d in days:
             dt = pd.Timestamp(f"{yr}-01-01") + pd.Timedelta(days=int(d))
             visit_dates.append(dt)
-            # Declining contamination over 25 years (-3.5%/year)
-            true_c = 2.8 * np.exp(-0.035 * yr_idx) + rng.lognormal(0.0, 0.35)
+            # Declining contamination over 25 years (-8%/year) with multiplicative noise
+            true_c = 2.0 * np.exp(-0.08 * yr_idx) * rng.lognormal(0.0, 0.35)
             # Analytical detection limit at 0.5 ug/L
             if true_c < 0.5:
                 visit_vals.append(0.5)
@@ -476,7 +476,7 @@ plot_quantile_trend(
 ### Results Table
 {df_to_markdown(df3_all)}
 
-**Key Takeaway:** The lower quantiles ($p = 0.10, 0.25$) are heavily censored ($prop\\_censored > 0$), yet MannKS accurately preserves interval bounds and detects remediation progress across all detectable percentiles.
+**Key Takeaway:** The lower quantiles ($p = 0.10, 0.25$) are heavily censored (`prop_censored` > 0), yet MannKS accurately preserves interval bounds and detects remediation progress across all detectable percentiles.
 
 ---
 
@@ -490,8 +490,8 @@ A notorious trap in non-parametric quantile analysis occurs when monitoring freq
 Consequently, naive order-statistic trend tests report **spurious upward trends in high quantiles** and **spurious downward trends in low quantiles**, generating false alarms of climate or environmental shifts.
 
 MannKS automatically guards against this trap:
-1. **Sampling Diagnostic:** Computes Kendall's $\\tau$ and the max/min sample size ratio between blocks. If $\\tau \\ne 0$ or $N_{{max}} / N_{{min}} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
-2. **Equalization (`equalize='thin'`):** Uniformly sub-samples blocks to a common sample size, completely eliminating the artifact.
+1. **Sampling Diagnostic:** Computes Kendall's $\\tau$ and the max/min sample size ratio between blocks. If $p < 0.10$ or $N_{{\\max}} / N_{{\\min}} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
+2. **Equalization (`equalize='thin'`):** Systematically sub-samples blocks to a common sample size, eliminating the sample-size expansion artifact.
 
 ### Python Comparison
 ```python
@@ -504,7 +504,7 @@ res_raw = quantile_trend_test(
     slope_scaling='year',
 )
 
-# Part B: Equalized Analysis (Thinning Restores True Zero Trend)
+# Part B: Equalized Analysis (Thinning Eliminates Drift Artifact)
 res_eq = quantile_trend_test(
     x=stationary_lognormal_values,
     t=dates,
@@ -520,19 +520,19 @@ res_eq = quantile_trend_test(
 #### Case 4A: Raw Un-equalized Series (False Artifactual Trends)
 ![Case 4A: Sampling Frequency Drift Trap](case4a_sampling_drift_raw_qk.png)
 
-#### Case 4B: Equalized Series via Thinning (True Flat Trends Restored)
+#### Case 4B: Equalized Series via Thinning (Drift Artifact Removed)
 ![Case 4B: Equalized Blocks](case4b_sampling_drift_equalized_qk.png)
 
 ### Numerical Comparison
 #### Raw Results (Case 4A - Severe False Positive in Tails)
 {df_to_markdown(df4a_all)}
 
-#### Equalized Results (Case 4B - Accurate Zero Trend Across All Quantiles)
+#### Equalized Results (Case 4B - Drift Artifact Removed)
 {df_to_markdown(df4b_all)}
 
 #### Diagnostic Output
-- **Raw Diagnostic:** `flag = {res4a.sampling_diagnostic['flag']}`, ratio $N_{{max}}/N_{{min}} = {res4a.sampling_diagnostic['ratio_max_min']:.2f}$, $p = {res4a.sampling_diagnostic['p_n_vs_time']:.4e}$
-- **Equalized Diagnostic:** `flag = {res4b.sampling_diagnostic['flag']}`, ratio $N_{{max}}/N_{{min}} = {res4b.sampling_diagnostic['ratio_max_min']:.2f}$
+- **Raw Diagnostic:** `flag = {res4a.sampling_diagnostic['flag']}`, ratio $N_{{\\max}}/N_{{\\min}} = {res4a.sampling_diagnostic['ratio_max_min']:.2f}$, $p = {res4a.sampling_diagnostic['p_n_vs_time']:.4e}$
+- **Equalized Diagnostic:** `flag = {res4b.sampling_diagnostic['flag']}`, ratio $N_{{\\max}}/N_{{\\min}} = {res4b.sampling_diagnostic['ratio_max_min']:.2f}$
 
 ---
 
