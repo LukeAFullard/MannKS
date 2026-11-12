@@ -290,7 +290,7 @@ Naive substitution of non-detects (e.g., replacing `< 1.0` with `0.5`) before so
 ### 4. Zero-Flow and Dry-Bed Ties
 In ephemeral or arid streams, the hydrograph may record zero discharge for 30–60% of the year. All lower quantiles will equal exactly zero in every block.
 
-**Remedy:** When a quantile series is constant ($S = 0$, $\operatorname{Var}(S) = 0$), MannKS safely identifies the invariant rank, reports `slope = 0.0`, `p = 1.0`, and assigns `'As Likely as Not Indeterminate'` (or `'No Trend'` when `continuous_confidence=False`) without numerical exceptions.
+**Remedy:** When a quantile series is constant ($S = 0$, $\mathrm{Var}(S) = 0$), MannKS safely identifies the invariant rank, reports `slope = 0.0`, `p = 1.0`, and assigns `'As Likely as Not Indeterminate'` (or `'No Trend'` when `continuous_confidence=False`) without numerical exceptions.
 
 ### 5. Analyzing Monthly Sampled Datasets (10–25 Years with Censoring and Missing Values)
 A very common practical configuration in water quality and environmental monitoring is **monthly sampling** over 10 to 25 years (120 to 300 observations). In these datasets:

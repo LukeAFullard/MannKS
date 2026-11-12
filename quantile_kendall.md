@@ -65,7 +65,7 @@ Empty boundary blocks at the very start/end of the record are ignored. Every rem
    $$C_k = \min\!\left(1,\; \frac{(t_{\max, k} - t_{\min, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}, k}}\right)$$
    where $\Delta t_{\text{med}, k}$ is the median spacing between distinct observation times in block $k$ (defaulting to 1 day for single-observation datetime blocks, or $0$ for numeric singletons). This ensures, for example, that a partial monitoring year beginning in October is not treated as representative of a full annual distribution.
    * For monthly or irregular ambient sampling where 1–4 visits may be missed, consider lowering `min_coverage` (e.g. `0.70`) and `min_size_per_block` (e.g. `8`).
-3. **`require_complete`** (default `False`): Stricter check requiring $n_k \ge \operatorname{round}(\Delta t_{\text{block}, k} / \Delta t_{\text{global}})$, where $\Delta t_{\text{global}}$ is the global median time step. Useful for strict EGRET-style complete daily records.
+3. **`require_complete`** (default `False`): Stricter check requiring $n_k \ge \mathrm{round}(\Delta t_{\text{block}, k} / \Delta t_{\text{global}})$, where $\Delta t_{\text{global}}$ is the global median time step. Useful for strict EGRET-style complete daily records.
 
 The total number of surviving blocks $B$ must satisfy $B \ge \max(2, \text{min\_blocks})$ (`min_blocks` defaults to `5`). If fewer blocks survive, `computation_mode='insufficient'` is returned with an empty `results` table and a `UserWarning`.
 
@@ -120,7 +120,7 @@ Applied to the $B \times M$ standardized matrix prior to trend estimation:
 For each quantile column $j \in \{1, \dots, M\}$, a Mann-Kendall trend test is run against the block centers `block_centers`:
 
 * **`engine='trend_test'`** (default): Calls [`MannKS.trend_test`](MannKS/trend_test.py) column-by-column. Supports the full MannKS feature set: censored interval scoring, Akritas-Theil-Sen (`sens_slope_method='ats'`), autocorrelation corrections (`autocorr_method='yue_wang'`, `'hamed_rao'`, `'block_bootstrap'`), `ci_method='direct'` or `'lwp'`, `tau_method='a'` or `'b'`, and `continuous_confidence` classifications.
-* **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\operatorname{Var}(S)$ (with tie correction), Kendall's $\tau$, $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals across all $M$ quantiles simultaneously. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
+* **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\mathrm{Var}(S)$ (with tie correction), Kendall's $\tau$, $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals across all $M$ quantiles simultaneously. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
   * *Automatic fallback:* If censored data, `NaN`s, `autocorr_method != 'none'`, `ci_method != 'direct'`, `sens_slope_method == 'ats'`, `mk_test_method == 'lwp'`, `tie_break_method == 'lwp'`, or `large_dataset_mode == 'fast'` are requested, `quantile_trend_test` automatically falls back to `engine='trend_test'` so results remain exact.
 
 ### Step 8: Simultaneous Field Significance (`field_significance`)
@@ -192,7 +192,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 4. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows assuming blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and permutes numeric values without censored-interval scoring (a warning is raised if censored data or `autocorr_method != 'none'` are present).
 5. **Monotonicity Per Quantile:** Like all Mann-Kendall methods, each quantile test detects monotonic shifts over the full period. If a quantile reverses direction mid-record (e.g. rises then falls), inspect `result.get_quantile_series(q)` or apply `segmented_trend_test` to that extracted quantile series.
 6. **Censoring & Tie Behavior:**
-   * If a quantile is constant across all blocks (e.g., zero-flow dry beds or all blocks below a single detection limit), $S = 0$ and $\operatorname{Var}(S) = 0$, returning `slope = 0.0` and `p = 1.0`.
+   * If a quantile is constant across all blocks (e.g., zero-flow dry beds or all blocks below a single detection limit), $S = 0$ and $\mathrm{Var}(S) = 0$, returning `slope = 0.0` and `p = 1.0`.
    * Under `censor_quantile_method='propagate'`, censoring flags are checked at the two bracketing order statistics $\lfloor u(n_k-1)\rfloor$ and $\lceil u(n_k-1)\rceil$ (exact for `quantile_method='linear'`, approximate for other interpolation rules).
 
 ---

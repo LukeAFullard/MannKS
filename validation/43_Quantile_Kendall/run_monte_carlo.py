@@ -542,7 +542,7 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 | Metric | Max Absolute Difference | Assessment |
 | :--- | :--- | :--- |
 | **Mann-Kendall Score ($S$)** | `{p_egret['s_diff']:.2e}` | **Exact Integer Match ($0.0$)** |
-| **Variance of $S$ ($\\operatorname{{Var}}(S)$)** | `{p_egret['var_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
+| **Variance of $S$ ($\\mathrm{{Var}}(S)$)** | `{p_egret['var_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
 | **Kendall's $\\tau$** | `{p_egret['tau_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
 | **Z-Statistic ($Z$)** | `< 1e-10` | **Exact to Machine Precision** |
 | **p-value ($p$)** | `{p_egret['p_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-10}}$)** |
