@@ -97,7 +97,7 @@ The resulting quantile slopes show clear selective degradation in the upper perc
 ## Case 2: Daily Streamflow with 5-Year Blocks
 
 ### Scientific Background
-30 years of daily streamflow ($m^3/s$) from 1990 to 2020 (~10,950 observations) are analyzed. In this watershed, climate change and land-use alterations have created **divergent hydrological regimes**:
+30 years of daily streamflow ($m^3/s$) from 1990 to 2019 (~10,957 observations) are analyzed. In this watershed, climate change and land-use alterations have created **divergent hydrological regimes**:
 1. Extreme precipitation events have intensified flood peaks (+3% per year in top quantiles).
 2. Extended summer droughts and agricultural water extraction have caused baseflow to diminish (-2% per year in lower quantiles).
 

@@ -286,14 +286,14 @@ In practical applications, these datasets present three major analytical challen
 In this example, we evaluate a 20-year dissolved phosphorus record (2005–2024) with realistic monitoring imperfections:
 - **Planned Sampling**: 20 years $\\times$ 12 months = 240 planned visits.
 - **Data Completeness**: ~12% randomly missed monthly visits, leaving {ACTUAL_N} collected observations.
-- **Incomplete Year Exclusion**: Years with fewer than 8 samples (2012 station outage with 5 samples, and 2024 partial year with 6 samples) are safely excluded by `min_size_per_block=8`, leaving **{VALID_BLOCKS} valid annual blocks** ($N_{\\text{blocks}} = {VALID_BLOCKS} \\ge 10$).
+- **Incomplete Year Exclusion**: Years with fewer than 8 samples (2012 station outage with 5 samples, and 2024 where missed monthly visits left 6 samples) are safely excluded by `min_size_per_block=8`, leaving **{VALID_BLOCKS} valid annual blocks** ($N_{\\text{blocks}} = {VALID_BLOCKS} \\ge 10$).
 - **Censored Detection Limits**:
   - 2005–2014: Standard method ($< 0.05$ mg/L).
   - 2015–2024: Upgraded high-sensitivity method ($< 0.02$ mg/L).
   - Total censored observations: **{N_CENS} ({PCT_CENS}%)**.
 - **Underlying Asymmetric Trend**:
   - Baseline concentrations (lower/median quantiles) are **improving (decreasing)** due to wastewater treatment facility upgrades.
-  - Peak storm runoff pulses (upper 90th percentile) are **worsening (increasing)** due to expanding impervious surfaces and agricultural runoff flushes.
+  - Peak storm runoff pulses (upper quantiles, 90th–95th percentiles) are **worsening (increasing)** due to expanding impervious surfaces and agricultural runoff flushes.
 
 ---
 
@@ -318,7 +318,7 @@ Running a classical monotonic trend test (e.g., Mann-Kendall or Seasonal Mann-Ke
 - **Classification**: **{MEDIAN_CLASS}**
 
 > [!WARNING]
-> The classical median test reports a statistically significant "Improving / Decreasing" trend. A water resources manager relying solely on the median would conclude the watershed is recovering, completely missing the fact that **extreme peak pollution flushes (90th percentile) are actively worsening**!
+> The classical median test reports a statistically significant "Improving / Decreasing" trend. A water resources manager relying solely on the median would conclude the watershed is recovering, completely missing the fact that **extreme peak pollution flushes (90th–95th percentiles) are actively worsening**!
 
 ---
 
@@ -383,8 +383,8 @@ When applying Quantile-Kendall to monthly monitoring datasets over **10 to 20 ye
 Within an annual block of 12 monthly samples:
 - The 12th (highest) sample has non-exceedance probability $p \\approx 0.92$ (Weibull $12/13$) or $p \\approx 0.96$ (Hazen $(12 - 0.5)/12$).
 - The 11th (second-highest) sample has $p \\approx 0.85$ to $0.88$.
-- **The 92nd percentile** is interpolated between the 11th and 12th samples, tracking the **second-highest monthly value** of the year.
-- **The 95th percentile** is interpolated halfway between the 11th and 12th samples ($12 \\times 0.95 = 11.4$), heavily tracking the **single annual maximum monthly flush**.
+- **The 92nd percentile** is interpolated between the 11th and 12th samples ($1 + 0.92 \\times 11 = 11.12$ in 1-based rank: $0.88\\,x_{(11)} + 0.12\\,x_{(12)}$), primarily tracking the **second-highest monthly value** of the year.
+- **The 95th percentile** uses Type-7 linear interpolation ($1 + 0.95 \\times 11 = 11.45$ in 1-based rank, or index $10.45$ in 0-based indexing: $0.55\\,x_{(11)} + 0.45\\,x_{(12)}$), blending nearly equally between the second-highest and highest monthly values.
 
 In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests whether the **annual peak runoff events are intensifying** over time.
 

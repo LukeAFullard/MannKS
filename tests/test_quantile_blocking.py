@@ -313,3 +313,90 @@ class TestAssignBlocks:
         assert len(groups[1]) == 4  # [6, 7, 8, 9] in [5, 10)
         assert np.isclose(centers[0], 2.5)
         assert np.isclose(centers[1], 7.5)
+
+
+class TestBlockingEdgeCasesAndRegressions:
+    """Regression tests for frequency offsets, boundary ULP precision, sub-daily blocks, and validation."""
+
+    def test_invalid_datetime_non_positive_and_none_raise(self):
+        for bad in ('0D', '-1D', '-1YE', None):
+            with pytest.raises(ValueError, match="Invalid block_frequency"):
+                _parse_block_frequency(bad, is_datetime=True)
+
+    def test_invalid_numeric_bool_nan_inf_raise(self):
+        for bad in (True, np.bool_(True), np.nan, np.inf, -np.inf):
+            with pytest.raises(ValueError, match="Must be a positive number"):
+                _parse_block_frequency(bad, is_datetime=False)
+
+    def test_multiplied_pandas_offset_objects_preserve_multipliers(self):
+        assert _normalize_start_freq(pd.offsets.YearEnd(5)) == '5YS-JAN'
+        assert _normalize_start_freq(pd.offsets.Hour(6)) == '6h'
+        assert _normalize_start_freq(pd.offsets.MonthEnd(3)) == '3MS'
+
+    def test_me_ms_intraday_timestamp_rolls_back_to_midnight(self):
+        t_min = pd.Timestamp('2020-01-02 03:15:00.250')
+        t_max = pd.Timestamp('2020-03-10 18:45:00')
+        for freq in ('ME', 'MS'):
+            edges = _block_edges(t_min, t_max, block_frequency=freq, block_origin=None, is_datetime=True)
+            assert pd.Timestamp(edges[0]) == pd.Timestamp('2020-01-01 00:00:00')
+            assert pd.Timestamp(edges[-1]) > t_max
+
+    def test_numeric_ulp_boundary_edge_covers_tmin(self):
+        t_vals = np.array([0.7, 0.75, 0.85, 0.95])
+        edges = _block_edges(0.7, 0.95, block_frequency=0.1, block_origin=None, is_datetime=False)
+        assert edges[0] <= 0.7
+        assert edges[-1] > 0.95
+        df = pd.DataFrame({'t': t_vals, 'value': np.arange(len(t_vals), dtype=float)})
+        groups, _, _ = _assign_blocks(
+            df, block_frequency=0.1, block_origin=None, months=None,
+            min_size_per_block=1, min_coverage=0.0, require_complete=False, is_datetime=False
+        )
+        assert sum(len(g) for g in groups) == len(t_vals)
+
+    def test_subdaily_frequencies_and_custom_origins(self):
+        t0 = pd.Timestamp('2020-06-01 03:15:00.250')
+        for freq, span in (('30s', '3min'), ('500ms', '10s'), ('15min', '2h')):
+            t1 = t0 + pd.Timedelta(span)
+            edges = _block_edges(t0, t1, block_frequency=freq, block_origin=None, is_datetime=True)
+            assert pd.Timestamp(edges[0]) <= t0
+            assert pd.Timestamp(edges[-1]) > t1
+
+        # Custom origin later than t_min and much earlier than t_min (fast-forward path)
+        edges_fwd = _block_edges(
+            pd.Timestamp('2020-06-10 00:00:00'),
+            pd.Timestamp('2020-06-10 12:00:00'),
+            block_frequency='6h',
+            block_origin=pd.Timestamp('2020-01-01 00:00:00'),
+            is_datetime=True,
+        )
+        assert pd.Timestamp(edges_fwd[0]) == pd.Timestamp('2020-06-10 00:00:00')
+
+        edges_back = _block_edges(
+            pd.Timestamp('2020-06-10 00:00:00'),
+            pd.Timestamp('2020-06-10 12:00:00'),
+            block_frequency='6h',
+            block_origin=pd.Timestamp('2020-06-11 00:00:00'),
+            is_datetime=True,
+        )
+        assert pd.Timestamp(edges_back[0]) == pd.Timestamp('2020-06-10 00:00:00')
+
+    def test_subdaily_coverage_with_months_straddling_midnight(self):
+        # 6h block from May 31 21:00 to Jun 1 03:00 with months=[6]: only 3h expected in June
+        dates_in = pd.date_range('2020-06-01 00:00:00', '2020-06-01 02:30:00', freq='30min')
+        cov = _block_coverage('2020-05-31 21:00:00', '2020-06-01 03:00:00', dates_in, is_datetime=True, months=[6])
+        assert cov >= 0.95
+
+        # Fully inside June with 3h out of 6h -> ~0.50 coverage
+        cov_half = _block_coverage('2020-06-01 00:00:00', '2020-06-01 06:00:00', dates_in, is_datetime=True, months=[6])
+        assert np.isclose(cov_half, 0.5, atol=0.02)
+
+    def test_numeric_singleton_require_complete_marked_incomplete(self):
+        df = pd.DataFrame({'t': [5.0], 'value': [10.0]})
+        groups, summary, _ = _assign_blocks(
+            df, block_frequency=2.0, block_origin=0.0, months=None,
+            min_size_per_block=1, min_coverage=0.0, require_complete=True, is_datetime=False
+        )
+        assert len(groups) == 0
+        assert not summary.empty
+        assert "incomplete block" in summary['reason'].iloc[0]
+

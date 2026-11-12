@@ -182,14 +182,14 @@ result = quantile_trend_test(
 | `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{\min}, t_{\max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
 | `min_size_per_block` | int | `10` | Minimum number of observations required to retain a block. |
 | `min_blocks` | int | `5` | Minimum number of valid blocks required to perform trend analysis. |
-| `equalize` | str or None | `'none' or None` | Subsampling strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (systematic temporal subsampling to uniform size), or `'aggregate'` (robust median within sub-intervals). |
-| `transform` | str or None | `'none' or None` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. If `'log'`, Sen's slope is exponentiated and reported as percentage change per time unit (`slope_pct`). |
+| `equalize` | str or None | `'none'` | Subsampling/aggregation strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (systematic temporal subsampling to minimum valid block size), or `'aggregate'` (robust median within adaptive sub-intervals: months/days/hours/minutes for datetime `t`, or 12 bins for numeric `t`). |
+| `transform` | str or None | `'none'` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. With `'log'`, `slope` is in natural log units per time unit, while `slope_pct` is exponentiated as percentage change per time unit via $100(e^b - 1)$. |
 | `censor_quantile_method` | str | `'propagate'` | Handling of censored observations during quantile standardization: `'propagate'` (preserves censoring flags for ATS), `'substitute'` (replaces with multiplier), or `'error'`. |
 | `hicensor` | bool or float | `False` | Recensors all observations to the highest detection limit to eliminate false trends from improving laboratory precision. |
 | `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles. |
 | `n_permutations` | int | `999` | Number of block permutations for field significance testing. |
-| `slope_scaling` | str or None | `'year'` | Time unit for slope scaling: `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`. Pass `None` for unscaled raw units. |
-| `x_unit` | str or None | `'units'` | Measurement unit for reporting (e.g. `'mg/L'`, `'m3/s'`). |
+| `slope_scaling` | str or None | `'year'` | Time unit for slope scaling: `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`. Pass `None` for unscaled raw units (per second for datetime `t`). |
+| `x_unit` | str or None | `'units'` | Measurement unit for reporting (e.g. `'mg/L'`, `'m3/s'`). If `None`, defaults to `'units'`. |
 | `plot_path` | str or None | `None` | File path to automatically save the diagnostic quantile trend plot. |
 
 ---
@@ -221,11 +221,11 @@ result = quantile_trend_test(
   Main trend results table with one row per quantile rank:
   * `rank`: Integer index from $1$ to $M$.
   * `quantile`: Nominal percentile in $[0, 1]$.
-  * `plotting_position`: Weibull non-exceedance probability $p = j / (M + 1)$.
+  * `plotting_position`: Weibull non-exceedance probability $p = j / (M + 1)$ for `'auto'`/`int` grids, or user-supplied percentile clipped to $[1/(n_{\text{med}}+1),\, n_{\text{med}}/(n_{\text{med}}+1)]$ for explicit quantile sequences.
   * `z_position`: Standard normal quantile $Z = \Phi^{-1}(p)$.
-  * `slope`: Sen's slope in scaled units (e.g. $\text{mg/L/year}$).
-  * `lower_ci`, `upper_ci`: $(1 - \alpha)$ confidence bounds for the slope.
-  * `slope_pct`, `lower_ci_pct`, `upper_ci_pct`: Percentage change per unit time (exponentiated when `transform='log'`, or relative to each quantile's median when `transform='none'`/`'pct_of_median'`).
+  * `slope`: Sen's / ATS slope in scaled units (e.g. $\text{mg/L/year}$, or natural-log units per year when `transform='log'`).
+  * `lower_ci`, `upper_ci`: $(1 - \alpha)$ confidence bounds for `slope`.
+  * `slope_pct`, `lower_ci_pct`, `upper_ci_pct`: Percentage change per unit time (exponentiated via $100(e^b - 1)$ when `transform='log'`, or relative to each quantile's median when `transform='none'`/`'pct_of_median'`).
   * `p`: Mann-Kendall two-sided p-value.
   * `h`: Boolean significance flag ($p < \alpha$).
   * `Tau`: Kendall's $\tau$ correlation coefficient.
@@ -233,7 +233,7 @@ result = quantile_trend_test(
   * `prop_censored`: Fraction of blocks where this rank is censored.
 
 * **`blocks` (DataFrame):**
-  Metadata for each evaluated time block: `block_start`, `block_end`, `block_center`, `n_obs`, `n_censored`, `coverage`, `valid`, and `reason`.
+  Metadata for each evaluated time block: `block_start`, `block_end`, `block_center`, `n_obs` (pre-equalization observation count), `n_censored`, `coverage`, `valid`, and `reason`.
 
 * **`matrix` (DataFrame):**
   Standardized values of dimension $B \text{ blocks} \times M \text{ ranks}$.

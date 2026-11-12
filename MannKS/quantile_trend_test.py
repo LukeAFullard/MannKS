@@ -18,6 +18,7 @@ from ._stats import (
     _mk_probability,
     _confidence_intervals,
     _mk_score_and_var_censored,
+    _normalize_sens_slope_method,
 )
 from ._quantile import (
     _assign_blocks,
@@ -49,22 +50,62 @@ _Quantile_Trend_Tuple = namedtuple('Quantile_Trend_Test', [
 ])
 
 class QuantileTrendResult(_Quantile_Trend_Tuple):
+    """
+    Structured result returned by :func:`quantile_trend_test`.
+
+    Provides access to per-quantile trend results (``results``), block metadata
+    (``blocks``), the standardized block-by-quantile data matrix (``matrix`` and
+    optional censoring matrices), sampling drift diagnostics (``sampling_diagnostic``),
+    optional permutation field significance (``field_significance``), and helper
+    methods for inspecting and extracting quantile series.
+    """
+
     @property
     def quantiles(self) -> pd.DataFrame:
+        """DataFrame of per-quantile trend results (alias for ``self.results``)."""
         return self.results
 
     def to_frame(self) -> pd.DataFrame:
+        """Return a copy of the per-quantile trend results DataFrame."""
         return self.results.copy()
 
     def significant(self, alpha: Optional[float] = None) -> pd.DataFrame:
+        """
+        Filter quantile trend results to rows with two-sided ``p < alpha``.
+
+        Parameters
+        ----------
+        alpha : float, optional
+            Significance threshold in ``(0, 1)``. Defaults to ``self.alpha``.
+        """
         if self.results.empty:
             return self.results.copy()
         thresh = self.alpha if alpha is None else float(alpha)
         return self.results[self.results['p'] < thresh].copy()
 
     def get_quantile_series(self, quantile_or_rank: Union[float, int]) -> pd.DataFrame:
+        """
+        Extract the block-level time series for a specific quantile rank or probability.
+
+        Parameters
+        ----------
+        quantile_or_rank : int or float
+            Either a 1-based integer rank (``>= 1``) matching ``results['rank']``,
+            or a target probability in ``[0.0, 1.0]`` matched to the nearest
+            entry in ``results['quantile']``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Time series with columns ``'t'``, ``'value'``, ``'censored'``,
+            ``'cen_type'`` (plus ``'rank'``, ``'quantile'``, and
+            ``'plotting_position'`` when results are non-empty).
+        """
         if self.matrix.empty or self.results.empty:
             return pd.DataFrame(columns=['t', 'value', 'censored', 'cen_type'])
+
+        if isinstance(quantile_or_rank, (bool, np.bool_)):
+            raise ValueError("`quantile_or_rank` cannot be a boolean; pass a rank int >= 1 or quantile float.")
 
         if isinstance(quantile_or_rank, (int, np.integer)) and quantile_or_rank >= 1:
             rank_target = int(quantile_or_rank)
@@ -73,6 +114,8 @@ class QuantileTrendResult(_Quantile_Trend_Tuple):
             idx = int(np.flatnonzero(self.results['rank'].to_numpy() == rank_target)[0])
         else:
             q_target = float(quantile_or_rank)
+            if not np.isfinite(q_target):
+                raise ValueError("`quantile_or_rank` must be a finite probability or rank >= 1.")
             idx = int(np.argmin(np.abs(self.results['quantile'].to_numpy() - q_target)))
 
         col_name = self.matrix.columns[idx]
@@ -115,11 +158,23 @@ def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardizatio
     n_min = int(np.min(block_sizes))
     n_max = int(np.max(block_sizes))
 
+    if isinstance(quantiles, (bool, np.bool_)):
+        raise ValueError("`quantiles` cannot be a boolean; use 'auto', a positive integer, or a 1D probability sequence.")
+
     if isinstance(quantiles, str):
         if quantiles != 'auto':
             raise ValueError("String value for `quantiles` must be 'auto'.")
         if standardization == 'egret':
+            if isinstance(target_length, (bool, np.bool_)) or (
+                target_length != 'min'
+                and not (isinstance(target_length, (int, np.integer)) and int(target_length) == n_min)
+            ):
+                raise ValueError(
+                    "`standardization='egret'` requires `target_length='min'` (or an integer matching minimum block size)."
+                )
             M = n_min
+        elif isinstance(target_length, (bool, np.bool_)):
+            raise ValueError("`target_length` must be 'min', 'median', 'max', or an integer >= 2.")
         elif target_length == 'min':
             M = n_min
         elif target_length == 'median':
@@ -177,11 +232,16 @@ def _fast_uncensored_matrix_trends(M_matrix, t_numeric, is_datetime, alpha, slop
     ii, jj = i_idx[valid_t], j_idx[valid_t]
     dt_valid = dt[valid_t]
 
-    pairwise_slopes = (M_matrix[jj, :] - M_matrix[ii, :]) / dt_valid[:, np.newaxis]
-    slopes_raw = np.median(pairwise_slopes, axis=0)
-    t_med = float(np.median(t_numeric))
-    y_meds = np.median(M_matrix, axis=0)
-    intercepts = y_meds - slopes_raw * t_med
+    if len(dt_valid) == 0:
+        pairwise_slopes = np.empty((0, K), dtype=float)
+        slopes_raw = np.full(K, np.nan, dtype=float)
+        intercepts = np.full(K, np.nan, dtype=float)
+    else:
+        pairwise_slopes = (M_matrix[jj, :] - M_matrix[ii, :]) / dt_valid[:, np.newaxis]
+        slopes_raw = np.median(pairwise_slopes, axis=0)
+        t_med = float(np.median(t_numeric))
+        y_meds = np.median(M_matrix, axis=0)
+        intercepts = y_meds - slopes_raw * t_med
 
     slope_factor = 1.0
     if slope_scaling and is_datetime:
@@ -343,19 +403,21 @@ def quantile_trend_test(
         Quantile grid configuration:
         - ``'auto'``: Grid determined by standardized block length (target_length).
         - int: Integer number of evenly spaced quantiles.
-        - array-like: Explicit sequence of non-exceedance probabilities in (0, 1).
+        - array-like: Explicit sequence of non-exceedance probabilities in ``[0.0, 1.0]``.
     target_length : {'min', 'median', 'max'} or int, default 'min'
         Standard sample size across blocks when ``quantiles='auto'``:
         - ``'min'``: Uses the minimum valid block size (preserves order-statistic bounds).
         - ``'median'``: Uses the median valid block size.
         - ``'max'``: Uses the maximum valid block size.
         - int: Explicit integer sample size.
+        When ``standardization='egret'``, ``target_length`` must be ``'min'``
+        (or an integer matching the minimum valid block size).
     standardization : {'interpolate', 'egret'}, default 'interpolate'
         Method for standardizing unequal block lengths:
         - ``'interpolate'``: Linear quantile interpolation across block order statistics.
         - ``'egret'``: Exact USGS EGRET leap-year rank-reduction method (365 ranks).
     quantile_method : str, default 'linear'
-        Percentile calculation method passed to numpy.percentile (e.g. ``'linear'``, ``'weibull'``).
+        Percentile calculation method passed to ``numpy.quantile`` (e.g. ``'linear'``, ``'weibull'``).
     min_size_per_block : int, default 10
         Minimum number of observations required to retain a block.
     min_blocks : int, default 5
@@ -364,24 +426,30 @@ def quantile_trend_test(
         Minimum fraction of nominal block duration [t_min, t_max] spanned by observations (0.0 to 1.0).
         Blocks with temporal coverage below this threshold are rejected.
     require_complete : bool, default False
-        If True, blocks must contain observations covering nominal start and end dates.
+        If True, blocks must contain at least ``round(expected_duration / global_median_step)``
+        observations (e.g., all 365/366 daily observations per year).
     equalize : {'none', 'thin', 'aggregate'} or None, default 'none'
-        Subsampling strategy to equalize sample sizes across blocks and guard
-        against sampling drift artifacts:
+        Subsampling or aggregation strategy to equalize sample counts across blocks
+        and guard against sampling-frequency drift artifacts:
         - ``'none'`` or ``None``: No equalization (raw observations).
-        - ``'thin'``: Random or systematic subsampling to a uniform block sample size.
-        - ``'aggregate'``: Averages observations within sub-intervals.
+        - ``'thin'``: Deterministic systematic subsampling (evenly spaced indices via
+          ``linspace``) down to the minimum valid block sample size.
+        - ``'aggregate'``: Computes censored-aware ``'robust_median'`` within monthly
+          sub-intervals (multi-month blocks), daily/hourly/minute sub-intervals (shorter
+          datetime blocks), or 12 sub-intervals (numeric time).
     censor_quantile_method : {'propagate', 'substitute', 'error'}, default 'propagate'
         Handling of censored values during quantile standardization:
         - ``'propagate'``: Tracks censoring flags through order statistics and applies
-          Akritas-Theil-Sen (ATS) slope estimation.
-        - ``'substitute'``: Substitutes censored values using ``lt_mult`` / ``gt_mult``.
+          Akritas-Theil-Sen (ATS) slope estimation by default. With ``transform='log'``,
+          only ``sens_slope_method='ats'`` is supported.
+        - ``'substitute'``: Substitutes censored values in raw units using ``lt_mult`` / ``gt_mult``.
         - ``'error'``: Raises an exception if censoring is present.
     transform : {'none', 'log', 'pct_of_median'} or None, default 'none'
         Data transformation applied prior to trend testing:
         - ``'none'`` or ``None``: Raw values; reports slope and percentage slope relative to median.
-        - ``'log'``: Natural logarithm; Sen's slope is exponentiated as percentage change per time unit.
-        - ``'pct_of_median'``: Normalized as percentage of baseline median.
+        - ``'log'``: Natural logarithm; ``slope`` is in natural log units per time unit and
+          ``slope_pct`` is exponentiated as ``100 * (exp(slope) - 1)`` % per time unit.
+        - ``'pct_of_median'``: Normalized as percentage of each quantile's cross-block median.
     log_offset : float or None, default None
         Constant added to values before log-transformation if non-positive values exist.
     alpha : float, default 0.05
@@ -394,9 +462,10 @@ def quantile_trend_test(
         Whether to assign continuous confidence classifications (e.g. 'Likely Increasing').
     slope_scaling : str or None, default 'year'
         Time unit for reporting slope rates: ``'year'``, ``'month'``, ``'week'``, ``'day'``,
-        ``'hour'``, ``'minute'``, ``'second'``, or None (unscaled).
-    x_unit : str, default 'units'
+        ``'hour'``, ``'minute'``, ``'second'``, or None (unscaled, per second for datetime ``t``).
+    x_unit : str or None, default 'units'
         Measurement unit of the variable for labeling (e.g. ``'mg/L'``, ``'m3/s'``).
+        If None, defaults to ``'units'``.
     engine : {'trend_test', 'fast'}, default 'trend_test'
         Computational engine for trend estimation across quantiles.
     field_significance : bool, default False
@@ -406,7 +475,8 @@ def quantile_trend_test(
     max_quantiles : int, default 2000
         Maximum allowable quantiles when generating automatic grids.
     random_state : int, Generator, or None, default None
-        Seed or random number generator for reproducible subsampling and permutations.
+        Seed or random number generator for permutation tests (``field_significance=True``)
+        and block-bootstrap trend tests.
     plot_path : str, Path, or None, default None
         Optional file path to automatically render and save a Quantile-Kendall diagnostic plot.
     **mk_kwargs : dict
@@ -417,11 +487,13 @@ def quantile_trend_test(
     QuantileTrendResult
         A named tuple containing:
         - ``results``: DataFrame of per-quantile trend statistics (rank, quantile, tau, slope, p, etc.).
-        - ``blocks``: DataFrame detailing block start, end, count, and validity.
+        - ``blocks``: DataFrame detailing block start, end, center, pre-equalization count (``n_obs``),
+          censored count, coverage, and validity.
         - ``matrix``: DataFrame of standardized quantile values (blocks x quantiles).
         - ``censored_matrix``: Boolean DataFrame of censoring status.
         - ``cen_type_matrix``: String DataFrame of censoring types ('not', 'lt', 'gt').
-        - ``sampling_diagnostic``: Dict with tau, p-value, sample size ratio, and drift flag.
+        - ``sampling_diagnostic``: Dict with tau, p-value, sample size ratio, and drift flag
+          (evaluated on the block sizes used for quantile standardization).
         - ``field_significance``: Dict of permutation test results if field_significance=True, else None.
         - ``n_ranks``: Number of evaluated quantiles.
         - ``target_length``: Resolved standardization sample size.
@@ -430,13 +502,14 @@ def quantile_trend_test(
         - ``transform``: Transformation used.
         - ``standardization``: Standardization method used.
         - ``is_datetime``: Boolean indicating if time index was datetime-like.
-        - ``computation_mode``: Mode string ('standard' or 'insufficient').
+        - ``computation_mode``: Mode string ('exact', 'fast', or 'insufficient').
         - ``analysis_notes``: List of analysis and diagnostic notes.
         - ``warnings``: List of warnings raised during execution.
     """
+    mk_kwargs = dict(mk_kwargs)
     if 'min_samples' in mk_kwargs:
         warnings.warn("`min_samples` is deprecated; use `min_size_per_block` instead.", DeprecationWarning, stacklevel=2)
-        min_size_per_block = int(mk_kwargs.pop('min_samples'))
+        min_size_per_block = mk_kwargs.pop('min_samples')
     if 'classification' in mk_kwargs:
         continuous_confidence = bool(mk_kwargs.pop('classification'))
 
@@ -446,6 +519,19 @@ def quantile_trend_test(
     unknown = set(mk_kwargs.keys()) - _ALLOWED_MK_KWARGS
     if unknown:
         raise ValueError(f"Unknown keyword argument(s): {sorted(unknown)}")
+
+    if 'sens_slope_method' in mk_kwargs:
+        mk_kwargs['sens_slope_method'] = _normalize_sens_slope_method(mk_kwargs['sens_slope_method'], stacklevel=2)
+    if mk_kwargs.get('tau_method', 'b') not in ('a', 'b'):
+        raise ValueError("Invalid `tau_method`. Must be one of ['a', 'b'].")
+    if mk_kwargs.get('mk_test_method', 'robust') not in ('robust', 'lwp'):
+        raise ValueError("Invalid `mk_test_method`. Must be one of ['robust', 'lwp'].")
+    if mk_kwargs.get('ci_method', 'direct') not in ('direct', 'lwp'):
+        raise ValueError("Invalid `ci_method`. Must be one of ['direct', 'lwp'].")
+    if mk_kwargs.get('tie_break_method', 'robust') not in ('robust', 'lwp'):
+        raise ValueError("Invalid `tie_break_method`. Must be one of ['robust', 'lwp'].")
+    if mk_kwargs.get('autocorr_method', 'none') not in ('none', 'auto', 'block_bootstrap', 'yue_wang'):
+        raise ValueError("Invalid `autocorr_method`. Must be one of ['none', 'auto', 'block_bootstrap', 'yue_wang'].")
 
     if equalize is None:
         equalize = 'none'
@@ -464,6 +550,47 @@ def quantile_trend_test(
         raise ValueError("`transform` must be 'none', 'log', or 'pct_of_median'.")
     if engine not in ('trend_test', 'fast'):
         raise ValueError("`engine` must be 'trend_test' or 'fast'.")
+    if isinstance(min_size_per_block, (bool, np.bool_)) or not isinstance(min_size_per_block, (int, np.integer)) or int(min_size_per_block) < 1:
+        raise ValueError("`min_size_per_block` must be an integer >= 1.")
+    if isinstance(min_blocks, (bool, np.bool_)) or not isinstance(min_blocks, (int, np.integer)) or int(min_blocks) < 1:
+        raise ValueError("`min_blocks` must be an integer >= 1.")
+    if isinstance(min_coverage, (bool, np.bool_)) or not (0.0 <= float(min_coverage) <= 1.0):
+        raise ValueError("`min_coverage` must be between 0.0 and 1.0.")
+    if isinstance(max_quantiles, (bool, np.bool_)) or not isinstance(max_quantiles, (int, np.integer)) or int(max_quantiles) < 1:
+        raise ValueError("`max_quantiles` must be an integer >= 1.")
+    if isinstance(n_permutations, (bool, np.bool_)) or not isinstance(n_permutations, (int, np.integer)) or int(n_permutations) < 1:
+        raise ValueError("`n_permutations` must be an integer >= 1.")
+    if log_offset is not None:
+        if isinstance(log_offset, (bool, np.bool_)):
+            raise ValueError("`log_offset` must be a finite number or None.")
+        try:
+            log_offset_val = float(log_offset)
+        except (TypeError, ValueError):
+            raise ValueError("`log_offset` must be a finite number or None.")
+        if not np.isfinite(log_offset_val):
+            raise ValueError("`log_offset` must be finite.")
+
+    validated_months = None
+    if months is not None:
+        if isinstance(months, (str, bytes)) or not hasattr(months, '__iter__'):
+            raise ValueError("`months` must be a non-empty sequence of integers between 1 and 12.")
+        try:
+            months_list = list(months)
+        except TypeError:
+            raise ValueError("`months` must be a non-empty sequence of integers between 1 and 12.")
+        if len(months_list) == 0:
+            raise ValueError("`months` must be a non-empty sequence of integers between 1 and 12.")
+        validated_months = []
+        for m in months_list:
+            if isinstance(m, (bool, np.bool_)) or not isinstance(m, (int, np.integer)):
+                raise ValueError(f"All entries in `months` must be integers between 1 and 12. Got {m!r}.")
+            m_int = int(m)
+            if not 1 <= m_int <= 12:
+                raise ValueError(f"All entries in `months` must be integers between 1 and 12. Got {m_int}.")
+            validated_months.append(m_int)
+        months = validated_months
+
+    eff_x_unit = 'units' if x_unit is None else str(x_unit)
 
     x_arr = np.asarray(x) if not isinstance(x, pd.DataFrame) else x
     t_arr = np.asarray(t)
@@ -508,21 +635,24 @@ def quantile_trend_test(
                     module_warnings.append(str(w.message))
                 return _empty_result(is_datetime)
     
-            if months is not None and is_datetime:
-                months_arr = np.asarray(list(months), dtype=int)
-                norm_freq = _normalize_start_freq(block_frequency)
-                month_map = {
-                    'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-                    'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
-                }
-                start_month = 1
-                if '-' in norm_freq:
-                    m_str = norm_freq.split('-')[-1][:3].upper()
-                    start_month = month_map.get(m_str, 1)
-
-                rel_positions = (months_arr - start_month) % 12
-                if len(rel_positions) > 1 and np.any(np.diff(rel_positions) <= 0):
-                    warnings.warn(f"Cross-year `months={list(months)}` used with calendar-year block frequency.", UserWarning)
+            if months is not None:
+                if not is_datetime:
+                    warnings.warn("Parameter `months` is ignored when `t` is not datetime-like.", UserWarning)
+                else:
+                    norm_freq = _normalize_start_freq(block_frequency)
+                    if 'YS' in norm_freq:
+                        month_map = {
+                            'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                            'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+                        }
+                        start_month = 1
+                        if '-' in norm_freq:
+                            m_str = norm_freq.split('-')[-1][:3].upper()
+                            start_month = month_map.get(m_str, 1)
+                        end_month = 12 if start_month == 1 else start_month - 1
+                        unique_months = set(months)
+                        if len(unique_months) < 12 and start_month in unique_months and end_month in unique_months:
+                            warnings.warn(f"Cross-year `months={list(months)}` used with calendar-year block frequency.", UserWarning)
     
             valid_groups, blocks_df, block_centers = _assign_blocks(
                 data=data_filtered, block_frequency=block_frequency, block_origin=block_origin,
@@ -553,6 +683,11 @@ def quantile_trend_test(
                 valid_groups = _equalize_blocks(valid_groups, equalize, is_datetime=is_datetime)
                 block_sizes = np.array([len(g) for g in valid_groups], dtype=np.intp)
                 samp_diag = _sampling_diagnostic(block_centers, block_sizes)
+                if samp_diag['flag']:
+                    module_notes.append(
+                        f"Residual sampling-frequency imbalance remains after equalize='{equalize}' "
+                        f"(N_min={samp_diag['n_min']}, N_max={samp_diag['n_max']})."
+                    )
     
             M, ranks, u_grid, p_grid, z_grid, target_len_resolved = _resolve_quantile_grid(
                 quantiles=quantiles, block_sizes=block_sizes, target_length=target_length,
@@ -587,6 +722,12 @@ def quantile_trend_test(
             col_medians_raw = np.nanmedian(val_rows, axis=0)
     
             if transform == 'log':
+                if has_any_censored and censor_quantile_method == 'propagate' and mk_kwargs.get('sens_slope_method', 'ats') != 'ats':
+                    raise ValueError(
+                        "`transform='log'` with `censor_quantile_method='propagate'` requires `sens_slope_method='ats'` "
+                        "(or `censor_quantile_method='substitute'`), because heuristic multipliers (`lt_mult`/`gt_mult`) "
+                        "are invalid on negative log-transformed values."
+                    )
                 if log_offset is not None:
                     work_matrix = work_matrix + float(log_offset)
                 if np.any(work_matrix <= 0):
@@ -605,13 +746,20 @@ def quantile_trend_test(
                     module_notes.append("transform='pct_of_median' encountered non-positive quantile median; set to NaN.")
     
             eff_slope_scaling = slope_scaling if is_datetime else None
+            if eff_slope_scaling:
+                try:
+                    _get_slope_scaling_factor(eff_slope_scaling)
+                except (ValueError, TypeError) as e:
+                    warnings.warn(f"Slope scaling failed: {e}", UserWarning)
+                    eff_slope_scaling = None
+
             _fast_incompatible = (
                 mk_kwargs.get('autocorr_method', 'none') != 'none'
-                or mk_kwargs.get('sens_slope_method', 'unweighted') == 'ats'
                 or mk_kwargs.get('mk_test_method', 'robust') == 'lwp'
                 or mk_kwargs.get('tie_break_method', 'robust') == 'lwp'
-                or mk_kwargs.get('ci_method', 'direct') != 'direct'
-                or mk_kwargs.get('large_dataset_mode', 'auto') == 'fast'
+                or mk_kwargs.get('large_dataset_mode', 'auto') in ('fast', 'aggregate')
+                or mk_kwargs.get('max_pairs') is not None
+                or (mk_kwargs.get('large_dataset_mode', 'auto') == 'auto' and n_valid_blocks > 5000)
             )
             use_fast_engine = (
                 engine == 'fast'
@@ -628,7 +776,7 @@ def quantile_trend_test(
                 comp_mode = 'fast'
                 fast_rows = _fast_uncensored_matrix_trends(
                     M_matrix=work_matrix, t_numeric=t_numeric_blocks, is_datetime=is_datetime,
-                    alpha=alpha, slope_scaling=eff_slope_scaling, x_unit=x_unit,
+                    alpha=alpha, slope_scaling=eff_slope_scaling, x_unit=eff_x_unit,
                     continuous_confidence=continuous_confidence, category_map=category_map,
                     ci_method=mk_kwargs.get('ci_method', 'direct'),
                     tau_method=mk_kwargs.get('tau_method', 'b'),
@@ -653,7 +801,7 @@ def quantile_trend_test(
                         res_k = trend_test(
                             x=x_input, t=block_centers, alpha=alpha, hicensor=False,
                             category_map=category_map, continuous_confidence=continuous_confidence,
-                            slope_scaling=eff_slope_scaling, x_unit=x_unit, min_size=None,
+                            slope_scaling=eff_slope_scaling, x_unit=eff_x_unit, min_size=None,
                             random_state=random_state, **mk_kwargs,
                         )
                         for w_msg in res_k.warnings:
@@ -683,7 +831,11 @@ def quantile_trend_test(
                         'analysis_notes': res_k.analysis_notes,
                     })
     
-            scale_unit_label = eff_slope_scaling.lower() if (eff_slope_scaling and is_datetime) else "unit of t"
+            scale_unit_label = (
+                eff_slope_scaling.lower()
+                if (eff_slope_scaling and is_datetime)
+                else ("second" if is_datetime else "unit of t")
+            )
             for k, row_dict in enumerate(results_list):
                 slp = row_dict['slope']
                 lo = row_dict['lower_ci']
@@ -770,12 +922,41 @@ def quantile_trend_test(
 
     return res
 
-def summarize_quantile_regimes(result, regimes=None):
+_REGIME_SUMMARY_COLUMNS = [
+    'regime', 'p_min', 'p_max', 'n_quantiles', 'median_slope',
+    'median_slope_pct', 'prop_significant', 'modal_classification',
+]
+
+
+def summarize_quantile_regimes(
+    result: Union[QuantileTrendResult, pd.DataFrame],
+    regimes: Optional[Dict[str, tuple]] = None,
+) -> pd.DataFrame:
+    """
+    Summarize quantile trend test results across probability bands (regimes).
+
+    Parameters
+    ----------
+    result : QuantileTrendResult or pd.DataFrame
+        Output object returned by :func:`quantile_trend_test`, or its results DataFrame.
+    regimes : dict of str -> (float, float), optional
+        Mapping of regime names to ``(p_min, p_max)`` bounds on ``plotting_position``.
+        Defaults to ``{'low': (0.0, 0.25), 'mid': (0.25, 0.75), 'high': (0.75, 1.0)}``.
+        Intervals are half-open ``[p_min, p_max)`` except when ``p_max >= 1.0``,
+        where ``p_max`` is included.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary table with columns ``regime``, ``p_min``, ``p_max``, ``n_quantiles``,
+        ``median_slope``, ``median_slope_pct``, ``prop_significant``, and
+        ``modal_classification``.
+    """
     if regimes is None:
         regimes = {'low': (0.0, 0.25), 'mid': (0.25, 0.75), 'high': (0.75, 1.0)}
-    df = result.results
+    df = result if isinstance(result, pd.DataFrame) else result.results
     if df.empty:
-        return pd.DataFrame(columns=['regime', 'p_min', 'p_max', 'n_quantiles', 'median_slope', 'median_slope_pct', 'prop_significant', 'modal_classification'])
+        return pd.DataFrame(columns=_REGIME_SUMMARY_COLUMNS)
 
     summary_rows = []
     q_col = df['plotting_position']
@@ -792,4 +973,4 @@ def summarize_quantile_regimes(result, regimes=None):
             'median_slope_pct': float(sub['slope_pct'].median()), 'prop_significant': float(sub['h'].mean()),
             'modal_classification': modal_class,
         })
-    return pd.DataFrame(summary_rows)
+    return pd.DataFrame(summary_rows, columns=_REGIME_SUMMARY_COLUMNS)

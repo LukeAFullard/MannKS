@@ -21,25 +21,44 @@ def _parse_block_frequency(block_frequency, is_datetime):
     if is_datetime:
         if to_offset is None:
             raise ImportError("Could not import to_offset from pandas.")
+        if block_frequency is None:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
         try:
-            return to_offset(block_frequency)
+            offset = to_offset(block_frequency)
         except (ValueError, TypeError):
             raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
+        if offset is None:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
+        probe = pd.Timestamp('2000-01-01')
+        try:
+            if (probe + offset) <= probe:
+                raise ValueError(
+                    f"Invalid block_frequency '{block_frequency}' for datetime data. Frequency step must be positive."
+                )
+        except TypeError:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data.")
+        return offset
     else:
+        if isinstance(block_frequency, (bool, np.bool_)):
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number (finite).")
         try:
             width = float(block_frequency)
-            if width <= 0:
+            if not np.isfinite(width) or width <= 0:
                 raise ValueError
             return width
         except (ValueError, TypeError):
-            raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number.")
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number (finite).")
 
 def _normalize_start_freq(offset_or_str) -> str:
     s_raw = str(offset_or_str).strip()
     try:
-        rc = getattr(offset_or_str, 'rule_code', None)
-        if rc:
-            s_raw = str(rc).strip()
+        fs = getattr(offset_or_str, 'freqstr', None)
+        if fs:
+            s_raw = str(fs).strip()
+        else:
+            rc = getattr(offset_or_str, 'rule_code', None)
+            if rc:
+                s_raw = str(rc).strip()
     except Exception:
         pass
     s = s_raw.upper()
@@ -69,16 +88,16 @@ def _normalize_start_freq(offset_or_str) -> str:
     if s.endswith('ME') or s == 'M':
         prefix = s[:-2] if s.endswith('ME') else ''
         return f"{prefix}MS"
-    # Preserve lowercase for hourly 'h' required by pandas >= 2.2 without altering 'MS' (MonthStart)
+    # Preserve lowercase sub-daily units required by pandas >= 2.2 without altering 'MS' (MonthStart)
     unit_part = s_raw.lstrip('0123456789')
-    if unit_part in ('h', 'H'):
+    if unit_part in ('h', 'H', 'min', 's', 'ms', 'us', 'ns') or unit_part.lower() in ('h', 'min', 'us', 'ns'):
         prefix = s_raw[:len(s_raw) - len(unit_part)]
-        return f"{prefix}h"
+        return f"{prefix}{unit_part.lower()}"
     return s
 
 def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):
     if is_datetime:
-        offset = _parse_block_frequency(block_frequency, True)
+        _parse_block_frequency(block_frequency, True)
         start_freq = _normalize_start_freq(block_frequency)
         start_offset = to_offset(start_freq)
 
@@ -93,23 +112,98 @@ def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):
             origin = pd.Timestamp(block_origin)
             if origin.tzinfo is not None:
                 origin = origin.tz_convert(None)
+            while origin > t_min_ts:
+                prev = origin - start_offset
+                if prev >= origin:
+                    break
+                origin = prev
+            if isinstance(start_offset, pd.offsets.Tick) and (origin + start_offset) <= t_min_ts:
+                step_td = pd.Timedelta(start_offset)
+                if step_td > pd.Timedelta(0):
+                    k_fwd = int((t_min_ts - origin) // step_td)
+                    if k_fwd > 0:
+                        origin = origin + k_fwd * step_td
+                        while origin > t_min_ts:
+                            origin = origin - step_td
         else:
             unit_freq = start_freq.lstrip('0123456789')
             unit_offset = to_offset(unit_freq)
-            origin = unit_offset.rollback(t_min_ts.normalize())
+            # Case-sensitive check: keep lowercase 's'/'ms'/'us'/'ns' distinct from 'MS' (MonthStart)
+            if unit_freq in ('s', 'ms', 'us', 'ns'):
+                origin = unit_offset.rollback(t_min_ts)
+            else:
+                origin = unit_offset.rollback(t_min_ts.normalize())
 
         edges_dt = pd.date_range(start=origin, end=t_max_ts + start_offset, freq=start_offset)
         while len(edges_dt) < 2 or edges_dt[-1] <= t_max_ts:
+            prev_last = pd.Timestamp(edges_dt[-1]) if len(edges_dt) > 0 else None
             edges_dt = pd.date_range(start=origin, periods=len(edges_dt) + 1, freq=start_offset)
+            if prev_last is not None and pd.Timestamp(edges_dt[-1]) <= prev_last:
+                break
         return edges_dt.to_numpy()
     else:
         width = float(block_frequency)
+        t_min_f, t_max_f = float(t_min), float(t_max)
         if block_origin is not None:
             origin = float(block_origin)
+            if origin > t_min_f:
+                k_back = max(1, int(np.ceil((origin - t_min_f) / width)))
+                origin = origin - k_back * width
+                while origin > t_min_f:
+                    nxt = origin - width
+                    if nxt >= origin:
+                        break
+                    origin = nxt
+            elif (origin + width) <= t_min_f:
+                k_fwd = int(np.floor((t_min_f - origin) / width))
+                if k_fwd > 0:
+                    origin = origin + k_fwd * width
+                    while origin > t_min_f:
+                        nxt = origin - width
+                        if nxt >= origin:
+                            break
+                        origin = nxt
         else:
-            origin = np.floor(float(t_min) / width) * width
-        n_steps = int(np.ceil((float(t_max) - origin) / width)) + 2
-        return origin + np.arange(n_steps, dtype=float) * width
+            origin = np.floor(t_min_f / width) * width
+            while origin > t_min_f:
+                nxt = origin - width
+                if nxt >= origin:
+                    break
+                origin = nxt
+        n_steps = max(2, int(np.ceil((t_max_f - origin) / width)) + 2)
+        edges = origin + np.arange(n_steps, dtype=float) * width
+        while edges[-1] <= t_max_f:
+            nxt = origin + len(edges) * width
+            if nxt <= edges[-1]:
+                break
+            edges = np.append(edges, nxt)
+        return edges
+
+def _expected_block_seconds(b_start_ts: pd.Timestamp, b_end_ts: pd.Timestamp, months=None) -> float:
+    nominal_sec = (b_end_ts - b_start_ts).total_seconds()
+    if months is None or nominal_sec <= 0.0:
+        return nominal_sec
+    if nominal_sec < 86400.0:
+        end_probe = b_end_ts - pd.Timedelta(nanoseconds=1)
+        if b_start_ts.month in months and end_probe.month in months:
+            return nominal_sec
+        if b_start_ts.month not in months and end_probe.month not in months:
+            return 0.0
+        boundary = end_probe.normalize()
+        sec = 0.0
+        if b_start_ts.month in months:
+            sec += max(0.0, (boundary - b_start_ts).total_seconds())
+        if end_probe.month in months:
+            sec += max(0.0, (b_end_ts - boundary).total_seconds())
+        return sec
+    day_starts = pd.date_range(b_start_ts.normalize(), (b_end_ts - pd.Timedelta(nanoseconds=1)).normalize(), freq='D')
+    total = 0.0
+    for d in day_starts:
+        if d.month in months:
+            seg_start = max(b_start_ts, d)
+            seg_end = min(b_end_ts, d + pd.Timedelta(days=1))
+            total += max(0.0, (seg_end - seg_start).total_seconds())
+    return total
 
 def _block_coverage(block_start, block_end, t_block_obs, is_datetime, months=None):
     if len(t_block_obs) == 0:
@@ -117,12 +211,7 @@ def _block_coverage(block_start, block_end, t_block_obs, is_datetime, months=Non
     if is_datetime:
         b_start_ts = pd.Timestamp(block_start)
         b_end_ts = pd.Timestamp(block_end)
-        if months is not None:
-            full_days = pd.date_range(b_start_ts, b_end_ts - pd.Timedelta(seconds=1), freq='D')
-            in_months = full_days.month.isin(months)
-            duration_sec = float(np.sum(in_months)) * 86400.0
-        else:
-            duration_sec = (b_end_ts - b_start_ts).total_seconds()
+        duration_sec = _expected_block_seconds(b_start_ts, b_end_ts, months=months)
 
         if duration_sec <= 0:
             return 1.0
@@ -181,7 +270,8 @@ def _assign_blocks(
         edge_nums = np.asarray(edges, dtype=float)
 
     all_diffs = np.diff(np.unique(t_nums))
-    global_step_sec = float(np.median(all_diffs[all_diffs > 0])) if len(all_diffs) > 0 else 86400.0
+    pos_all_diffs = all_diffs[all_diffs > 0]
+    global_step_sec = float(np.median(pos_all_diffs)) if len(pos_all_diffs) > 0 else (86400.0 if is_datetime else np.nan)
 
     indices = (np.searchsorted(edge_nums, t_nums, side='right') - 1).astype(np.intp, copy=False)
 
@@ -211,15 +301,17 @@ def _assign_blocks(
             reason = f"coverage {coverage:.2f} < {min_coverage}"
         elif require_complete:
             if is_datetime:
-                b_start_ts, b_end_ts = pd.Timestamp(b_start), pd.Timestamp(b_end)
-                if months is not None:
-                    full_days = pd.date_range(b_start_ts, b_end_ts - pd.Timedelta(seconds=1), freq='D')
-                    expected_sec = float(np.sum(full_days.month.isin(months))) * 86400.0
+                expected_sec = _expected_block_seconds(pd.Timestamp(b_start), pd.Timestamp(b_end), months=months)
+                if np.isfinite(global_step_sec) and global_step_sec > 0:
+                    expected_n = int(round(expected_sec / global_step_sec))
                 else:
-                    expected_sec = (b_end_ts - b_start_ts).total_seconds()
-                expected_n = int(round(expected_sec / global_step_sec))
+                    expected_n = 1 if expected_sec > 0 else 0
             else:
-                expected_n = int(round((float(b_end) - float(b_start)) / global_step_sec))
+                duration = float(b_end) - float(b_start)
+                if np.isfinite(global_step_sec) and global_step_sec > 0:
+                    expected_n = int(round(duration / global_step_sec))
+                else:
+                    expected_n = n_obs + 1 if duration > 0 else 0
             if n_obs < expected_n:
                 valid = False
                 reason = f"incomplete block ({n_obs} < {expected_n} expected)"
@@ -334,8 +426,8 @@ def _standardize_block(
             gt_mask = s_cens & (s_type == 'gt')
 
             v_pos = u_grid * (n_obs - 1)
-            lo_idx = np.floor(v_pos).astype(np.intp)
-            hi_idx = np.ceil(v_pos).astype(np.intp)
+            lo_idx = np.clip(np.floor(v_pos).astype(np.intp), 0, n_obs - 1)
+            hi_idx = np.clip(np.ceil(v_pos).astype(np.intp), 0, n_obs - 1)
             neighbor_lt = lt_mask[lo_idx] | lt_mask[hi_idx]
             neighbor_gt = gt_mask[lo_idx] | gt_mask[hi_idx]
 
@@ -389,11 +481,46 @@ def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True):
     elif mode == 'aggregate':
         from ._helpers import _aggregate_by_group
         aggregated = []
+        agg_unit = None
+        if is_datetime:
+            spans_days = []
+            for df in valid_group_dfs:
+                dt_col = pd.to_datetime(df['t_original'])
+                spans_days.append((dt_col.max() - dt_col.min()).total_seconds() / 86400.0)
+            median_span_days = float(np.median(spans_days)) if spans_days else 0.0
+            if median_span_days > 45.0:
+                agg_unit = 'month'
+            elif median_span_days > 2.0:
+                agg_unit = 'day'
+            elif median_span_days > 2.0 / 24.0:
+                agg_unit = 'hour'
+            else:
+                agg_unit = 'minute'
+
         for df in valid_group_dfs:
             if is_datetime:
                 dt_col = pd.to_datetime(df['t_original'])
-                sub_key = dt_col.dt.year * 100 + dt_col.dt.month
-                freq_str = 'M'
+                if getattr(dt_col.dt, 'tz', None) is not None:
+                    dt_col = dt_col.dt.tz_convert(None)
+                if agg_unit == 'month':
+                    sub_key = dt_col.dt.year * 100 + dt_col.dt.month
+                    freq_str = 'ME'
+                elif agg_unit == 'day':
+                    sub_key = dt_col.dt.floor('D')
+                    freq_str = 'D'
+                elif agg_unit == 'hour':
+                    sub_key = dt_col.dt.floor('h')
+                    freq_str = 'h'
+                else:
+                    sub_key = dt_col.dt.floor('min')
+                    freq_str = 'min'
+                if pd.Series(sub_key).nunique() < 2 and len(df) >= 2:
+                    t_vals = df['t'].to_numpy(dtype=float)
+                    span = t_vals.max() - t_vals.min()
+                    if span > 0:
+                        step = span / 12.0
+                        sub_key = np.floor((t_vals - t_vals.min()) / step).astype(np.intp)
+                        freq_str = None
             else:
                 t_vals = df['t'].to_numpy(dtype=float)
                 span = t_vals.max() - t_vals.min()

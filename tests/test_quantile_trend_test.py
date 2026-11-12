@@ -696,6 +696,7 @@ class TestPublicOptionsAndTransforms:
             vals, dates, block_frequency='YE', quantiles=5,
             engine='fast', ci_method='lwp', tau_method='a'
         )
+        assert res_fast.computation_mode == 'fast'
         np.testing.assert_allclose(res_fast.results['Tau'], res_exact.results['Tau'], rtol=1e-12)
         np.testing.assert_allclose(res_fast.results['lower_ci'], res_exact.results['lower_ci'], rtol=1e-12)
         np.testing.assert_allclose(res_fast.results['upper_ci'], res_exact.results['upper_ci'], rtol=1e-12)
@@ -727,5 +728,173 @@ class TestPublicOptionsAndTransforms:
         assert np.isfinite(res.field_significance['p_max_z'])
 
 
+class TestEdgeCasesAndValidationRegressions:
+    """Comprehensive regression tests for validation guards, scaling/unit parity, and edge inputs."""
 
+    def test_x_unit_none_and_slope_scaling_none_both_engines(self):
+        dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
+        vals = 10.0 + (np.arange(len(dates)) / len(dates)) * 5.0
 
+        for eng in ('trend_test', 'fast'):
+            res_raw = quantile_trend_test(
+                vals, dates, block_frequency='YE', quantiles=3,
+                x_unit=None, slope_scaling=None, engine=eng,
+            )
+            assert res_raw.results['slope_units'].iloc[0] == 'units per second'
+
+            res_log = quantile_trend_test(
+                vals, dates, block_frequency='YE', quantiles=3,
+                transform='log', x_unit=None, slope_scaling=None, engine=eng,
+            )
+            assert res_log.results['slope_units'].iloc[0] == '% per second'
+
+    def test_invalid_slope_scaling_decade_parity_across_engines(self):
+        dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
+        vals = 10.0 + (np.arange(len(dates)) / len(dates)) * 5.0
+
+        with pytest.warns(UserWarning, match="Slope scaling failed"):
+            res_exact = quantile_trend_test(
+                vals, dates, block_frequency='YE', quantiles=3,
+                slope_scaling='decade', engine='trend_test',
+            )
+        with pytest.warns(UserWarning, match="Slope scaling failed"):
+            res_fast = quantile_trend_test(
+                vals, dates, block_frequency='YE', quantiles=3,
+                slope_scaling='decade', engine='fast',
+            )
+        assert res_exact.results['slope_units'].iloc[0] == 'units per second'
+        assert res_fast.results['slope_units'].iloc[0] == 'units per second'
+        np.testing.assert_allclose(res_fast.results['slope'], res_exact.results['slope'], rtol=1e-12)
+
+    def test_upfront_validation_rejects_bad_inputs_even_on_fast_engine(self):
+        dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
+        vals = np.arange(len(dates), dtype=float) + 1.0
+
+        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="min_size_per_block"):
+            quantile_trend_test(vals, dates, engine='fast', min_samples=True)
+        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="min_size_per_block"):
+            quantile_trend_test(vals, dates, engine='fast', min_samples=2.5)
+
+        for bad_months in ([], [0], [13], [True], '6'):
+            with pytest.raises(ValueError, match="`months`"):
+                quantile_trend_test(vals, dates, engine='fast', months=bad_months)
+
+        for bad_offset in (True, np.nan, np.inf, 'invalid'):
+            with pytest.raises(ValueError, match="`log_offset`"):
+                quantile_trend_test(vals, dates, engine='fast', log_offset=bad_offset)
+
+        with pytest.raises(ValueError, match="`quantiles` cannot be a boolean"):
+            quantile_trend_test(vals, dates, engine='fast', quantiles=True)
+
+        with pytest.raises(ValueError, match="`target_length`"):
+            quantile_trend_test(vals, dates, engine='fast', target_length=True)
+
+        with pytest.raises(ValueError, match="`standardization='egret'` requires `target_length='min'`"):
+            quantile_trend_test(vals, dates, standardization='egret', target_length='median', min_size_per_block=100)
+
+    def test_months_warnings_for_numeric_and_unsorted_months(self):
+        # Numeric t emits ignored-months warning
+        t_num = np.arange(6 * 12, dtype=float)
+        x_num = np.linspace(1.0, 10.0, len(t_num))
+        with pytest.warns(UserWarning, match="Parameter `months` is ignored"):
+            quantile_trend_test(
+                x_num, t_num, block_frequency=12.0, months=[6, 7],
+                min_size_per_block=5, min_blocks=5, quantiles=3,
+            )
+
+        # Unsorted summer months [8, 6, 7] should NOT trigger Cross-year warning
+        dates = pd.date_range('2010-01-01', periods=8 * 365, freq='D')
+        rng = np.random.default_rng(11)
+        vals = rng.normal(10.0, 1.0, len(dates))
+        with warnings.catch_warnings(record=True) as w_summer:
+            warnings.simplefilter("always")
+            quantile_trend_test(
+                vals, dates, block_frequency='YE', months=[8, 6, 7],
+                min_size_per_block=20, min_blocks=5,
+            )
+        assert not any("Cross-year" in str(item.message) for item in w_summer)
+
+        # [1, 12] spans calendar boundary under YE -> Cross-year warning
+        with pytest.warns(UserWarning, match="Cross-year"):
+            quantile_trend_test(
+                vals, dates, block_frequency='YE', months=[1, 12],
+                min_size_per_block=20, min_blocks=5,
+            )
+
+    def test_fast_engine_uncensored_sens_slope_ats_matches_trend_test(self):
+        dates = pd.date_range('2010-01-01', periods=8 * 365, freq='D')
+        rng = np.random.default_rng(7)
+        vals = 10.0 + 0.01 * np.arange(len(dates)) + rng.normal(0.0, 1.0, len(dates))
+        res_fast = quantile_trend_test(
+            vals, dates, block_frequency='YE', quantiles=5,
+            engine='fast', sens_slope_method='ats',
+        )
+        res_exact = quantile_trend_test(
+            vals, dates, block_frequency='YE', quantiles=5,
+            engine='trend_test', sens_slope_method='ats',
+        )
+        assert res_fast.computation_mode == 'fast'
+        np.testing.assert_allclose(res_fast.results['slope'], res_exact.results['slope'], rtol=1e-12)
+
+    def test_monthly_blocks_equalize_aggregate_end_to_end(self):
+        dates = pd.date_range('2020-01-01', '2020-08-31 18:00:00', freq='6h')
+        vals = 5.0 + np.linspace(0.0, 4.0, len(dates))
+        res = quantile_trend_test(
+            vals, dates, block_frequency='ME', equalize='aggregate',
+            quantiles=[0.25, 0.50, 0.75], min_blocks=6,
+        )
+        assert len(res.results) == 3
+        assert (res.results['slope'] > 0.0).all()
+
+    def test_equalize_aggregate_residual_imbalance_adds_analysis_note(self):
+        # First 5 years have 6 distinct months/year (bi-monthly); next 5 have 12 months/year -> ratio 2.0 > 1.5 even after monthly aggregate
+        t_parts = []
+        for yr in range(2010, 2015):
+            for m in (1, 3, 5, 7, 9, 11):
+                t_parts.extend(pd.date_range(f"{yr}-{m:02d}-01", periods=3, freq='3D'))
+        for yr in range(2015, 2020):
+            for m in range(1, 13):
+                t_parts.extend(pd.date_range(f"{yr}-{m:02d}-01", periods=4, freq='3D'))
+        dates = pd.DatetimeIndex(t_parts)
+        vals = np.linspace(1.0, 10.0, len(dates))
+        res = quantile_trend_test(
+            vals, dates, block_frequency='YE', equalize='aggregate',
+            quantiles=3, min_size_per_block=6, min_coverage=0.70,
+        )
+        assert res.sampling_diagnostic['flag'] is True
+        assert any("Residual sampling-frequency imbalance remains" in note for note in res.analysis_notes)
+
+    def test_fast_uncensored_matrix_trends_empty_dt_valid_no_warning(self):
+        from MannKS.quantile_trend_test import _fast_uncensored_matrix_trends
+        M = np.array([[1.0, 2.0], [3.0, 4.0]])
+        t_same = np.array([5.0, 5.0])
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.simplefilter("always", category=RuntimeWarning)
+            rows = _fast_uncensored_matrix_trends(
+                M, t_same, is_datetime=False, alpha=0.05, slope_scaling=None,
+                x_unit='mg/L', continuous_confidence=True, category_map=None,
+            )
+        assert not [w for w in rec if issubclass(w.category, RuntimeWarning)]
+        assert np.isnan(rows[0]['slope'])
+        assert np.isnan(rows[0]['lower_ci'])
+
+    def test_result_helpers_guards_and_dataframe_schema(self):
+        dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
+        vals = 10.0 + np.linspace(0.0, 5.0, len(dates))
+        res = quantile_trend_test(vals, dates, block_frequency='YE', quantiles=3)
+
+        with pytest.raises(ValueError, match="cannot be a boolean"):
+            res.get_quantile_series(True)
+        with pytest.raises(ValueError, match="finite probability or rank"):
+            res.get_quantile_series(np.nan)
+
+        # summarize_quantile_regimes preserves expected columns on empty match and accepts DataFrame input
+        empty_reg = summarize_quantile_regimes(res, regimes={'none': (0.99, 1.0)})
+        assert list(empty_reg.columns) == [
+            'regime', 'p_min', 'p_max', 'n_quantiles', 'median_slope',
+            'median_slope_pct', 'prop_significant', 'modal_classification',
+        ]
+        assert empty_reg.empty
+
+        df_reg = summarize_quantile_regimes(res.to_frame())
+        assert not df_reg.empty

@@ -316,7 +316,7 @@ def validate_type1_error(n_reps: int = 400, alpha: float = 0.05):
     plt.close(fig)
     print(f"  Saved plot: {plot_path}")
 
-    return dict(zip(q_probs, emp_rates))
+    return {'rates': dict(zip(q_probs, emp_rates)), 'n_reps': n_reps}
 
 
 def validate_sampling_drift_trap(n_reps: int = 300):
@@ -408,6 +408,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         'rate_raw_high': rate_raw_high,
         'rate_eq_low': rate_eq_low,
         'rate_eq_high': rate_eq_high,
+        'n_reps': n_reps,
     }
 
 
@@ -461,12 +462,13 @@ def validate_ci_coverage(n_reps: int = 350, alpha: float = 0.05):
     plt.close(fig)
     print(f"  Saved plot: {plot_path}")
 
-    return dict(zip(q_probs, emp_coverage))
+    return {'coverage': dict(zip(q_probs, emp_coverage)), 'n_reps': n_reps}
 
 
 def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.05):
     """Validates global permutation field significance false discovery rate under H0."""
-    print(f"\n[5/5] Validating Permutation Field Significance Calibration ({n_reps} Monte Carlo reps)...")
+    n_permutations = 199
+    print(f"\n[5/5] Validating Permutation Field Significance Calibration ({n_reps} Monte Carlo reps, {n_permutations} permutations)...")
     rng = np.random.default_rng(404)
     n_blocks = 20
     n_per_block = 25
@@ -483,7 +485,7 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
             block_frequency='YE',
             quantiles=M,
             field_significance=True,
-            n_permutations=199,
+            n_permutations=n_permutations,
             alpha=alpha,
         )
         df_res = res.to_frame()
@@ -500,7 +502,12 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
     print(f"  Naive Joint False Alarm Rate (any p < {alpha}): {rate_naive*100:.1f}% (Severe Multiplicity Inflation)")
     print(f"  Permutation Field Significance False Alarm Rate: {rate_field*100:.1f}% (Calibrated to nominal alpha)")
 
-    return {'rate_field': rate_field, 'rate_naive': rate_naive}
+    return {
+        'rate_field': rate_field,
+        'rate_naive': rate_naive,
+        'n_reps': n_reps,
+        'n_permutations': n_permutations,
+    }
 
 
 # ==============================================================================
@@ -557,12 +564,12 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 ## 2. Type I Error Rate Calibration
 
 ### Methodology
-Evaluated 400 Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks. Evaluated empirical false rejection rates at nominal $\\alpha = 0.05$.
+Evaluated {t1['n_reps']} Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks. Evaluated empirical false rejection rates at nominal $\\alpha = 0.05$.
 
 ### Calibration Results
 | Quantile Rank ($p$) | Nominal $\\alpha$ | Empirical Rejection Rate | Status |
 | :--- | :--- | :--- | :--- |
-{chr(10).join([f"| **{q:0.2f}** | 0.05 | {rate:.4f} | Calibrated within 95% MC bounds |" for q, rate in t1.items()])}
+{chr(10).join([f"| **{q:0.2f}** | 0.05 | {rate:.4f} | Calibrated within 95% MC bounds |" for q, rate in t1['rates'].items()])}
 
 ### Calibration Plot
 ![Type I Error Calibration](type1_error_calibration.png)
@@ -576,11 +583,11 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 - High quantiles exhibit **severe false upward trends**.
 - Low quantiles exhibit **severe false downward trends**.
 
-### Monte Carlo Verification Results (300 Replications)
+### Monte Carlo Verification Results ({drift['n_reps']} Replications)
 | Analytical Strategy | Quantile | False Rejection Rate | Assessment |
 | :--- | :--- | :--- | :--- |
-| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **{drift['rate_raw_low']*100:.1f}%** | Severely Inflated ($> 5\\times$ nominal $\\alpha$) |
-| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **{drift['rate_raw_high']*100:.1f}%** | Severely Inflated ($> 5\\times$ nominal $\\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **{drift['rate_raw_low']*100:.1f}%** | Severely Inflated ($> 3\\times$ nominal $\\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **{drift['rate_raw_high']*100:.1f}%** | Severely Inflated ($> 3\\times$ nominal $\\alpha$) |
 | **MannKS Diagnostic (`flag`)** | Global | **{drift['rate_raw_flag']*100:.1f}%** | 100% Detection of Drift Artifact |
 | **Equalized (`equalize='thin'`)** | $p = 0.09$ (Lowest) | **{drift['rate_eq_low']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
 | **Equalized (`equalize='thin'`)** | $p = 0.91$ (Highest) | **{drift['rate_eq_high']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
@@ -593,12 +600,12 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 ## 4. Confidence Interval Empirical Coverage
 
 ### Methodology
-Evaluated 350 Monte Carlo realizations of a known linear location shift (true slope $\\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \\alpha) = 95\%$ coverage.
+Evaluated {ci['n_reps']} Monte Carlo realizations of a known linear location shift (true slope $\\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \\alpha) = 95\%$ coverage.
 
 ### Coverage Results
 | Quantile Rank ($p$) | Nominal Coverage | Empirical Coverage | Status |
 | :--- | :--- | :--- | :--- |
-{chr(10).join([f"| **{q:0.2f}** | 95.0% | {cov*100:.2f}% | Certified Valid |" for q, cov in ci.items()])}
+{chr(10).join([f"| **{q:0.2f}** | 95.0% | {cov*100:.2f}% | Certified Valid |" for q, cov in ci['coverage'].items()])}
 
 ### CI Coverage Plot
 ![Confidence Interval Coverage](ci_coverage_validation.png)
@@ -608,9 +615,9 @@ Evaluated 350 Monte Carlo realizations of a known linear location shift (true sl
 ## 5. Permutation Field Significance Calibration
 
 ### Multiplicity Challenge
-When testing $M=15$ quantiles simultaneously under $H_0$, a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation:
+When testing $M=15$ quantiles simultaneously under $H_0$ ({field['n_reps']} Monte Carlo replications with {field['n_permutations']} block permutations each), a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation compared to the permutation field-significance rule (`p_count < 0.05` or `p_max_z < 0.05`):
 - **Naive Joint False Alarm Rate**: **{field['rate_naive']*100:.1f}%**
-- **MannKS Permutation Field Significance**: **{field['rate_field']*100:.1f}%** (Calibrated to nominal $\\alpha = 0.05$)
+- **MannKS Permutation Field Significance**: **{field['rate_field']*100:.1f}%** (Calibrated near nominal $\\alpha = 0.05$)
 
 ---
 

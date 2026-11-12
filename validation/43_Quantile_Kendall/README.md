@@ -39,7 +39,7 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 ## 2. Type I Error Rate Calibration
 
 ### Methodology
-Evaluated 400 Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks. Evaluated empirical false rejection rates at nominal $\alpha = 0.05$.
+Evaluated 300 Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks. Evaluated empirical false rejection rates at nominal $\alpha = 0.05$.
 
 ### Calibration Results
 | Quantile Rank ($p$) | Nominal $\alpha$ | Empirical Rejection Rate | Status |
@@ -64,11 +64,11 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 - High quantiles exhibit **severe false upward trends**.
 - Low quantiles exhibit **severe false downward trends**.
 
-### Monte Carlo Verification Results (300 Replications)
+### Monte Carlo Verification Results (250 Replications)
 | Analytical Strategy | Quantile | False Rejection Rate | Assessment |
 | :--- | :--- | :--- | :--- |
-| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **15.2%** | Severely Inflated ($> 5\times$ nominal $\alpha$) |
-| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **16.4%** | Severely Inflated ($> 5\times$ nominal $\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **15.2%** | Severely Inflated ($> 3\times$ nominal $\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **16.4%** | Severely Inflated ($> 3\times$ nominal $\alpha$) |
 | **MannKS Diagnostic (`flag`)** | Global | **100.0%** | 100% Detection of Drift Artifact |
 | **Equalized (`equalize='thin'`)** | $p = 0.09$ (Lowest) | **5.2%** | **Restored to Nominal $\alpha = 0.05$** |
 | **Equalized (`equalize='thin'`)** | $p = 0.91$ (Highest) | **4.4%** | **Restored to Nominal $\alpha = 0.05$** |
@@ -81,7 +81,7 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 ## 4. Confidence Interval Empirical Coverage
 
 ### Methodology
-Evaluated 350 Monte Carlo realizations of a known linear location shift (true slope $\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \alpha) = 95\%$ coverage.
+Evaluated 250 Monte Carlo realizations of a known linear location shift (true slope $\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \alpha) = 95\%$ coverage.
 
 ### Coverage Results
 | Quantile Rank ($p$) | Nominal Coverage | Empirical Coverage | Status |
@@ -100,9 +100,9 @@ Evaluated 350 Monte Carlo realizations of a known linear location shift (true sl
 ## 5. Permutation Field Significance Calibration
 
 ### Multiplicity Challenge
-When testing $M=15$ quantiles simultaneously under $H_0$, a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation:
+When testing $M=15$ quantiles simultaneously under $H_0$ (150 Monte Carlo replications with 199 block permutations each), a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation compared to the permutation field-significance rule (`p_count < 0.05` or `p_max_z < 0.05`):
 - **Naive Joint False Alarm Rate**: **34.0%**
-- **MannKS Permutation Field Significance**: **6.7%** (Calibrated to nominal $\alpha = 0.05$)
+- **MannKS Permutation Field Significance**: **7.3%** (Calibrated near nominal $\alpha = 0.05$)
 
 ---
 

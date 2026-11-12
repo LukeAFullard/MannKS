@@ -1,6 +1,7 @@
 """
 This script provides plotting utilities for the MannKS package.
 """
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -944,11 +945,18 @@ def plot_quantile_trend(
         # Horizontal baseline at y = 0
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7, zorder=1)
 
+        valid_x = np.isfinite(x)
+        if x_scale == 'normal' and not np.all(valid_x):
+            warnings.warn(
+                "Excluded quantile(s) with non-finite normal-scale coordinates (e.g., p=0 or p=1).",
+                UserWarning,
+            )
+
         # Confidence intervals (error bars)
         if show_ci and ci_low is not None and ci_high is not None:
-            yerr_low = np.where(np.isnan(ci_low) | np.isnan(y), 0.0, np.maximum(0.0, y - ci_low))
-            yerr_high = np.where(np.isnan(ci_high) | np.isnan(y), 0.0, np.maximum(0.0, ci_high - y))
-            valid_ci = (~np.isnan(y)) & ((~np.isnan(ci_low)) | (~np.isnan(ci_high)))
+            yerr_low = np.where(~np.isfinite(ci_low) | ~np.isfinite(y), 0.0, np.maximum(0.0, y - ci_low))
+            yerr_high = np.where(~np.isfinite(ci_high) | ~np.isfinite(y), 0.0, np.maximum(0.0, ci_high - y))
+            valid_ci = valid_x & np.isfinite(y) & (np.isfinite(ci_low) | np.isfinite(ci_high))
             if np.any(valid_ci):
                 ax.errorbar(
                     x[valid_ci], y[valid_ci],
@@ -960,9 +968,9 @@ def plot_quantile_trend(
         # Color coding points
         if color_by == 'p':
             p_vals = df['p'].to_numpy(dtype=float) if 'p' in df.columns else np.full(len(df), np.nan)
-            mask_sig = (~np.isnan(p_vals)) & (p_vals < alpha_val)
-            mask_mid = (~np.isnan(p_vals)) & (p_vals >= alpha_val) & (p_vals < 2.0 * alpha_val)
-            mask_ns = np.isnan(p_vals) | (p_vals >= 2.0 * alpha_val)
+            mask_sig = valid_x & (~np.isnan(p_vals)) & (p_vals < alpha_val)
+            mask_mid = valid_x & (~np.isnan(p_vals)) & (p_vals >= alpha_val) & (p_vals < 2.0 * alpha_val)
+            mask_ns = valid_x & (np.isnan(p_vals) | (p_vals >= 2.0 * alpha_val))
 
             if np.any(mask_sig):
                 ax.scatter(
@@ -990,9 +998,9 @@ def plot_quantile_trend(
             else:
                 cat_series = pd.Series(['No Trend'] * len(df))
 
-            mask_inc = cat_series.str.contains('increasing', case=False, na=False).to_numpy()
-            mask_dec = cat_series.str.contains('decreasing', case=False, na=False).to_numpy()
-            mask_other = ~(mask_inc | mask_dec)
+            mask_inc = valid_x & cat_series.str.contains('increasing', case=False, na=False).to_numpy()
+            mask_dec = valid_x & cat_series.str.contains('decreasing', case=False, na=False).to_numpy()
+            mask_other = valid_x & (~(mask_inc | mask_dec))
 
             if np.any(mask_inc):
                 ax.scatter(
@@ -1019,8 +1027,9 @@ def plot_quantile_trend(
             prob_labels = ['.001', '.01', '.05', '.10', '.25', '.50', '.75', '.90', '.95', '.99', '.999']
             z_ticks = [float(norm.ppf(p)) for p in prob_ticks]
 
-            min_x = min(z_ticks[0], np.nanmin(x) if len(x) > 0 and not np.isnan(x).all() else z_ticks[0])
-            max_x = max(z_ticks[-1], np.nanmax(x) if len(x) > 0 and not np.isnan(x).all() else z_ticks[-1])
+            finite_x = x[valid_x]
+            min_x = min(z_ticks[0], float(np.min(finite_x)) if len(finite_x) > 0 else z_ticks[0])
+            max_x = max(z_ticks[-1], float(np.max(finite_x)) if len(finite_x) > 0 else z_ticks[-1])
             margin = max(0.15, (max_x - min_x) * 0.03)
             ax.set_xlim(min_x - margin, max_x + margin)
 
@@ -1068,23 +1077,25 @@ def plot_quantile_trend(
             if matrix is not None and hasattr(matrix, 'median') and not getattr(matrix, 'empty', True):
                 median_curve = matrix.median(axis=0).to_numpy(dtype=float)
                 if len(median_curve) == len(x):
-                    ax_fdc = ax.twinx()
-                    ax_fdc.plot(
-                        x, median_curve,
-                        color='navy', linestyle=':', linewidth=1.5, alpha=0.75,
-                        label='Median FDC'
-                    )
-                    unit_str = getattr(result, 'x_unit', None) or getattr(result, 'units', None) or ''
-                    if not unit_str and 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
-                        su = str(df['slope_units'].iloc[0]).strip()
-                        if ' per ' in su and not su.startswith('%'):
-                            unit_str = su.split(' per ')[0].strip()
-                    if unit_str:
-                        ax_fdc.set_ylabel(f"Median Concentration / Flow ({unit_str})", color='navy')
-                    else:
-                        ax_fdc.set_ylabel("Median Concentration / Flow", color='navy')
-                    ax_fdc.tick_params(axis='y', labelcolor='navy')
-                    ax_fdc.grid(False)
+                    valid_fdc = valid_x & np.isfinite(median_curve)
+                    if np.any(valid_fdc):
+                        ax_fdc = ax.twinx()
+                        ax_fdc.plot(
+                            x[valid_fdc], median_curve[valid_fdc],
+                            color='navy', linestyle=':', linewidth=1.5, alpha=0.75,
+                            label='Median FDC'
+                        )
+                        unit_str = getattr(result, 'x_unit', None) or getattr(result, 'units', None) or ''
+                        if not unit_str and 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
+                            su = str(df['slope_units'].iloc[0]).strip()
+                            if ' per ' in su and not su.startswith('%'):
+                                unit_str = su.split(' per ')[0].strip()
+                        if unit_str:
+                            ax_fdc.set_ylabel(f"Median Concentration / Flow ({unit_str})", color='navy')
+                        else:
+                            ax_fdc.set_ylabel("Median Concentration / Flow", color='navy')
+                        ax_fdc.tick_params(axis='y', labelcolor='navy')
+                        ax_fdc.grid(False)
 
         # Title
         if title is not None:

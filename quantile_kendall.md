@@ -84,9 +84,9 @@ If `flag` is `True` and `equalize='none'`, a `UserWarning` is emitted.
 * **`'thin'`**: **Systematic temporal thinning.** Every valid block is downsampled to $n_{\min} = \min_k n_k$ observations by selecting evenly spaced indices in chronological order (`np.round(np.linspace(0, n_k - 1, n_min))`). This preserves seasonal coverage across the block while eliminating sample-size bias in the order statistics—restoring calibrated Type I error rates when sampling frequency shifts.
   * *Trade-off:* All blocks are thinned down to the smallest valid block's count ($n_{\min}$). If one valid block has unusually few observations (e.g., 10 vs. 52 elsewhere), consider increasing `min_size_per_block` so that one sparse year doesn't force heavy data loss in all other years.
 * **`'aggregate'`**: **Within-block sub-interval aggregation.** Reduces higher-frequency observations to a uniform sub-period cadence using robust medians (`_aggregate_by_group(..., 'robust_median')`):
-  * For datetime `t`: aggregates by calendar month (year-month), turning daily/weekly blocks into $\le 12$ monthly medians per year.
-  * For numeric `t`: divides the block's observed span into 12 equal-width sub-intervals and takes the robust median in each populated sub-interval.
-  * *Trade-off:* Smooths intra-month short-term correlation and equalizes cadence, but reduces effective within-block resolution to monthly medians (so extreme daily flood peaks are dampened).
+  * For datetime `t`, the sub-interval grain adapts to the median observed block span: calendar months when median block span $> 45$ days (yielding $\le 12$ monthly medians per annual block), days when $> 2$ days, hours when $> 2$ hours, and minutes otherwise (falling back to 12 equal bins if a block collapses into a single sub-interval).
+  * For numeric `t`: divides the block's observed span into 12 equal-width sub-intervals and computes the robust median per populated bin (`13` bins if the right endpoint falls on `t_max`).
+  * *Trade-off:* Smooths intra-interval short-term correlation and equalizes cadence, but dampens extreme single-day peaks within each sub-interval.
 
 ### Step 5: Sorting, Censor Propagation, and Block Standardization
 Observations within each block are sorted in ascending order. When censored data are present, interval endpoints are constructed with a small tie-breaking nudge (`make_intervals(..., nudge=True)`) so `<DL` sorts just below uncensored `DL`, and `>DL` sorts just above uncensored `DL`.
@@ -99,10 +99,10 @@ Blocks are standardized to a common target length $M$ via `quantiles`, `target_l
   * Sequence of floats in $[0, 1]$ (e.g., `[0.10, 0.25, 0.50, 0.75, 0.90, 0.95]`): Evaluates those exact percentiles in sorted order (requires `standardization='interpolate'`). For $Z$-scale plotting, `plotting_position` is clipped to $[1/(n_{\text{med}}+1),\, n_{\text{med}}/(n_{\text{med}}+1)]$ so `0.0` or `1.0` does not produce $\pm\infty$.
 * **`standardization`** (default `'interpolate'`):
   * **`'interpolate'`**: Computes `np.quantile(sorted_vals, u_grid, method=quantile_method)`. Works with any block size $n_k \ge 2$ and any `quantiles` specification.
-  * **`'egret'`**: Exact USGS EGRET rank-reduction mode (`quantiles='auto'` only). Requires every valid block to have size $M$ or $M+1$ (typically 365 and 366 for complete daily years). Blocks of size $M+1$ are reduced by dropping the middle rank if $n_k$ is odd (`leapOdd`) or averaging the two middle ranks if $n_k$ is even (`leapEven`). Raises `ValueError` if any block's size differs from $M$ or $M+1$.
+  * **`'egret'`**: Exact USGS EGRET rank-reduction mode (`quantiles='auto'` and `target_length='min'`—or integer matching `min(block_sizes)`—only). Requires every valid block to have size $M$ or $M+1$ (typically 365 and 366 for complete daily years). Blocks of size $M+1$ are reduced by dropping the middle rank if $n_k$ is odd (`leapOdd`) or averaging the two middle ranks if $n_k$ is even (`leapEven`). Raises `ValueError` if any block's size differs from $M$ or $M+1$.
 * **`quantile_method`** (default `'linear'`): Passed to `numpy.quantile` (e.g., `'linear'`, `'weibull'`, `'hazen'`, `'median_unbiased'`).
 * **`censor_quantile_method`** (default `'propagate'`):
-  * **`'propagate'`**: For `'interpolate'`, maps each quantile probability $u$ to its bracketing order-statistic indices $\lfloor u(n_k - 1) \rfloor$ and $\lceil u(n_k - 1) \rceil$. If either bracketing observation is censored, the standardized quantile value is flagged as censored (`'lt'` or `'gt'`, with `'lt'` taking precedence if both occur). For `'egret'`, censoring flags travel directly with the retained/merged order statistics.
+  * **`'propagate'`**: For `'interpolate'`, maps each quantile probability $u$ to its bracketing order-statistic indices $\lfloor u(n_k - 1) \rfloor$ and $\lceil u(n_k - 1) \rceil$. If either bracketing observation is censored, the standardized quantile value is flagged as censored (`'lt'` or `'gt'`, with `'lt'` taking precedence if both occur). For `'egret'`, censoring flags travel directly with the retained/merged order statistics. When combined with `transform='log'` and censored data, `sens_slope_method='ats'` is required.
   * **`'substitute'`**: Replaces `<DL` with `lt_mult * DL` (default `0.5 * DL`) and `>DL` with `gt_mult * DL` (default `1.1 * DL`) before sorting, clearing all censoring flags. *Note:* This can create artificial flat ties in lower quantiles if detection limits are constant.
   * **`'error'`**: Raises `ValueError` if any censored observation is encountered.
 
@@ -111,17 +111,18 @@ Applied to the $B \times M$ standardized matrix prior to trend estimation:
 
 * **`'none'`** (or `None`, default): No transformation. `slope` is in `x_unit` per `slope_scaling` unit; `slope_pct` is computed relative to each quantile's across-block median: $100 \times \text{slope} / \text{median}_j$.
 * **`'log'`**: Natural logarithm $\ln(x + \text{log\_offset})$. All standardized values (after `log_offset` if supplied) must be strictly $> 0$.
-  * Sen's slope $b$ on $\ln(x)$ is exponentiated into compound percentage change per time unit:
+  * `slope`, `lower_ci`, and `upper_ci` remain in natural-log units per time unit ($\ln(x) / \text{time}$), while `slope_pct` (and its CI columns `lower_ci_pct`, `upper_ci_pct`) exponentiate Sen's slope $b$ into compound percentage change per time unit:
     $$\text{slope\_pct} = 100 \times (e^b - 1)$$
+  * `slope_units` is labeled `% per <time_unit>` (used as the primary y-axis on `plot_quantile_trend`). If any standardized quantile is censored under `censor_quantile_method='propagate'`, `sens_slope_method='ats'` is required (`'lwp'`/`'drop_ambiguous'` heuristic multipliers are invalid on negative log-values and raise `ValueError`).
   * This reproduces USGS EGRET's `% per year` trend reporting and makes slopes comparable across vastly different flow magnitudes (e.g., baseflow vs. peak flood).
 * **`'pct_of_median'`**: Expresses each quantile column as a percentage of its across-block median ($100 \times x_{k,j} / \text{median}_j$). Columns whose median is $\le 0$ are set to `NaN` with an analysis note.
 
 ### Step 7: Per-Quantile Trend Estimation (`engine`, `**mk_kwargs`)
 For each quantile column $j \in \{1, \dots, M\}$, a Mann-Kendall trend test is run against the block centers `block_centers`:
 
-* **`engine='trend_test'`** (default): Calls [`MannKS.trend_test`](MannKS/trend_test.py) column-by-column. Supports the full MannKS feature set: censored interval scoring, Akritas-Theil-Sen (`sens_slope_method='ats'`), autocorrelation corrections (`autocorr_method='yue_wang'`, `'hamed_rao'`, `'block_bootstrap'`), `ci_method='direct'` or `'lwp'`, `tau_method='a'` or `'b'`, and `continuous_confidence` classifications.
-* **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\mathrm{Var}(S)$ (with tie correction), Kendall's $\tau$, $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals across all $M$ quantiles simultaneously. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
-  * *Automatic fallback:* If censored data, `NaN`s, `autocorr_method != 'none'`, `ci_method != 'direct'`, `sens_slope_method == 'ats'`, `mk_test_method == 'lwp'`, `tie_break_method == 'lwp'`, or `large_dataset_mode == 'fast'` are requested, `quantile_trend_test` automatically falls back to `engine='trend_test'` so results remain exact.
+* **`engine='trend_test'`** (default): Calls [`MannKS.trend_test`](MannKS/trend_test.py) column-by-column. Supports the full MannKS feature set: censored interval scoring, Akritas-Theil-Sen (`sens_slope_method='ats'`), autocorrelation corrections (`autocorr_method='auto'`, `'yue_wang'`, `'block_bootstrap'`), `ci_method='direct'` or `'lwp'`, `tau_method='a'` or `'b'`, and `continuous_confidence` classifications.
+* **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\mathrm{Var}(S)$ (with tie correction), Kendall's $\tau$ (`tau_method='a'` or `'b'`), $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals (`ci_method='direct'` or `'lwp'`) across all $M$ quantiles simultaneously. Note that for uncensored data, `sens_slope_method='ats'` reduces identically to standard pairwise Sen's slope, so it remains compatible with `engine='fast'`. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
+  * *Automatic fallback:* If censored data, `NaN`s, `autocorr_method != 'none'`, `mk_test_method == 'lwp'`, `tie_break_method == 'lwp'`, `large_dataset_mode in ('fast', 'aggregate')` (or `'auto'` with $> 5000$ blocks), or `max_pairs is not None` are requested, `quantile_trend_test` automatically falls back to `engine='trend_test'` so results remain exact.
 
 ### Step 8: Simultaneous Field Significance (`field_significance`)
 Testing $M$ quantiles at once creates a multiple-testing problem: if $M=20$ and $\alpha=0.05$, at least one false positive is likely by chance even under $H_0$. Standard Bonferroni or FDR corrections ignore the strong cross-correlation between adjacent order statistics within each block.
@@ -144,27 +145,27 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 | `block_origin` | `None` | datetime, float, or `None` | Explicit anchor for block edges. Defaults to calendar boundary or floored numeric origin. |
 | `months` | `None` | sequence of `1..12` or `None` | Filter to specific calendar months before blocking (datetime `t` only). |
 | `quantiles` | `'auto'` | `'auto'`, `int`, or sequence in `[0, 1]` | `'auto'` builds $M$ ranks from `target_length`; `int` evaluates $M$ Weibull quantiles $j/(M+1)$; sequence evaluates explicit probabilities. |
-| `target_length` | `'min'` | `'min'`, `'median'`, `'max'`, or `int >= 2` | Target grid size $M$ when `quantiles='auto'`. `'min'` avoids interpolating above the smallest block's sample size. |
-| `standardization` | `'interpolate'` | `'interpolate'`, `'egret'` | `'interpolate'` uses `np.quantile`; `'egret'` matches USGS EGRET `leapOdd`/`leapEven` (requires `quantiles='auto'` and $n_k \in \{M, M+1\}$). |
+| `target_length` | `'min'` | `'min'`, `'median'`, `'max'`, or `int >= 2` | Target grid size $M$ when `quantiles='auto'`. `'egret'` requires `'min'` (or matching integer). |
+| `standardization` | `'interpolate'` | `'interpolate'`, `'egret'` | `'interpolate'` uses `np.quantile`; `'egret'` matches USGS EGRET `leapOdd`/`leapEven` (requires `quantiles='auto'`, `target_length='min'`, and $n_k \in \{M, M+1\}$). |
 | `quantile_method` | `'linear'` | `numpy.quantile` method str | Interpolation rule (`'linear'`, `'weibull'`, `'hazen'`, etc.) when `standardization='interpolate'`. |
-| `min_size_per_block` | `10` | `int` | Minimum observations needed to keep a block (set to `8` or `9` for monthly data with occasional missed visits). |
-| `min_blocks` | `5` | `int` | Minimum valid blocks required to run the test ($< 10$ produces coarse p-values and low power). |
+| `min_size_per_block` | `10` | `int >= 1` | Minimum observations needed to keep a block (set to `8` or `9` for monthly data with occasional missed visits). |
+| `min_blocks` | `5` | `int >= 1` | Minimum valid blocks required to run the test ($< 10$ produces coarse p-values and low power). |
 | `min_coverage` | `0.9` | `float` in `[0, 1]` | Minimum fraction of block duration spanned by samples; set to `0.70`–`0.80` for irregular ambient sampling. |
 | `require_complete` | `False` | `bool` | Rejects blocks with fewer observations than expected from the global median sampling step. |
-| `equalize` | `'none'` | `'none'`, `None`, `'thin'`, `'aggregate'` | Controls sample-size equalization across blocks to eliminate sampling-frequency drift bias. |
+| `equalize` | `'none'` | `'none'`, `None`, `'thin'`, `'aggregate'` | Controls sample-size equalization across blocks to eliminate sampling-frequency drift bias. (`result.blocks['n_obs']` logs pre-equalization counts; `result.sampling_diagnostic` is evaluated post-equalization on standardized block counts.) |
 | `censor_quantile_method` | `'propagate'` | `'propagate'`, `'substitute'`, `'error'` | How detection limits are carried through order statistics (`'propagate'` recommended for censored data). |
 | `hicensor` | `False` | `bool` or `float` | Recensors values below the highest `<DL` threshold before blocking to prevent false trends from improving detection limits. |
-| `transform` | `'none'` | `'none'`, `None`, `'log'`, `'pct_of_median'` | Value transform prior to testing (`'log'` reports compound `%/unit` via $100(e^b - 1)$). |
+| `transform` | `'none'` | `'none'`, `None`, `'log'`, `'pct_of_median'` | Value transform prior to testing (`'log'` keeps `slope` in $\ln$ units and sets `slope_pct` via $100(e^b - 1)$). |
 | `log_offset` | `None` | `float` or `None` | Constant added before `np.log` when `transform='log'` and zeros/non-positives occur. |
 | `alpha` | `0.05` | `float` in `(0, 1)` | Significance level for `h`, confidence intervals, and field significance. |
 | `continuous_confidence` | `True` | `bool` | Computes confidence $C$, $C_d$, and LWP/IPCC qualitative `classification` labels. |
 | `category_map` | `None` | `dict` or `None` | Custom threshold mapping passed to `classify_trend`. |
 | `slope_scaling` | `'year'` | `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`, `None` | Time unit for `slope`, `lower_ci`, `upper_ci`, and `slope_pct` (datetime `t` only). |
-| `x_unit` | `'units'` | `str` | Variable unit label for reporting and plot axes. |
+| `x_unit` | `'units'` | `str` or `None` | Variable unit label for reporting and plot axes (`None` defaults to `'units'`). |
 | `engine` | `'trend_test'` | `'trend_test'`, `'fast'` | `'fast'` accelerates large uncensored grids (automatically falls back when needed). |
 | `field_significance` | `False` | `bool` | Runs row-permutation global test across all quantiles. |
-| `n_permutations` | `999` | `int` | Number of permutations when `field_significance=True`. |
-| `max_quantiles` | `2000` | `int` | Safety cap on the number of quantiles $M$. |
+| `n_permutations` | `999` | `int >= 1` | Number of permutations when `field_significance=True`. |
+| `max_quantiles` | `2000` | `int >= 1` | Safety cap on the number of quantiles $M$. |
 | `random_state` | `None` | `int`, `Generator`, or `None` | RNG seed for `field_significance` permutations and `block_bootstrap` kwargs. |
 | `plot_path` | `None` | `str`, `Path`, or `None` | Optional file path to auto-save `plot_quantile_trend(res)`. |
 | `**mk_kwargs` | — | dict | Forwarded to `trend_test`: `sens_slope_method`, `tau_method`, `mk_test_method`, `ci_method`, `tie_break_method`, `lt_mult`, `gt_mult`, `autocorr_method`, `block_size`, `n_bootstrap`, `large_dataset_mode`, `max_pairs`. |

@@ -114,4 +114,4 @@ In addition to the practical examples, the following deep-dive guides are availa
 *   [**Rolling Trend Analysis Guide**](./Detailed_Guides/rolling_trend_guide.md): Moving window analysis.
 *   [**Segmented Trend Analysis Guide**](./Detailed_Guides/segmented_trend_guide.md): Structural breakpoint detection.
 *   [**Large Dataset Analysis Guide**](./Detailed_Guides/large_dataset_guide.md): Strategies for analyzing big data.
-*   [**Quantile Trend Analysis Guide**](./Detailed_Guides/quantile_trend_guide.md): Frequency-agnostic quantile trend testing, block standardization, and sampling drift protection.
+*   [**Quantile Trend Analysis Guide**](./Detailed_Guides/quantile_trend_guide.md): Frequency-agnostic quantile trend testing, block standardization, and sampling drift protection (see also [Quantile-Kendall Statistical Methodology](../quantile_kendall.md)).

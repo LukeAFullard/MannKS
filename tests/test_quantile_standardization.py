@@ -341,3 +341,31 @@ class TestQuantileCoverageAndMatrixEdgeCases:
         assert np.array_equal(var_s2, [1.0, 1.0])
         assert np.array_equal(tau2, [0.0, 0.0])
 
+    def test_equalize_aggregate_subannual_and_subdaily(self):
+        # 1-month block of 6-hourly obs -> span ~30d (>2d, <=45d) -> daily aggregation
+        dates_me = pd.date_range('2021-03-01', '2021-03-31 18:00:00', freq='6h')
+        df_me = pd.DataFrame({
+            't': (dates_me - pd.Timestamp('1970-01-01')).total_seconds(),
+            't_original': dates_me,
+            'value': np.arange(len(dates_me), dtype=float),
+            'censored': False,
+            'cen_type': 'not',
+        })
+        res_me = _equalize_blocks([df_me], mode='aggregate', is_datetime=True)
+        assert len(res_me) == 1
+        assert len(res_me[0]) == 31  # 31 days in March
+
+        # 15-minute block of 1-minute obs -> span ~14min (<=2h) -> minute aggregation
+        dates_15m = pd.date_range('2021-03-01 12:00:00', '2021-03-01 12:14:00', freq='1min')
+        df_15m = pd.DataFrame({
+            't': (dates_15m - pd.Timestamp('1970-01-01')).total_seconds(),
+            't_original': dates_15m,
+            'value': np.arange(len(dates_15m), dtype=float),
+            'censored': False,
+            'cen_type': 'not',
+        })
+        res_15m = _equalize_blocks([df_15m], mode='aggregate', is_datetime=True)
+        assert len(res_15m) == 1
+        assert len(res_15m[0]) == 15
+
+

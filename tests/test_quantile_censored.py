@@ -199,3 +199,49 @@ class TestCensoredQuantileTrendIntegration:
         assert np.isclose(res_uncens['slope'].iloc[0], res_cens['slope'].iloc[0], atol=1e-5)
         assert np.isclose(res_uncens['p'].iloc[0], res_cens['p'].iloc[0], atol=1e-5)
         assert res_cens['prop_censored'].iloc[0] == 0.0
+
+    def test_log_transform_censored_sens_slope_method_guard(self):
+        dates = []
+        vals = []
+        cens = []
+        types = []
+        for yr in range(2010, 2016):
+            d = pd.date_range(f"{yr}-01-01", f"{yr}-12-31", freq='15D')
+            dates.extend(d)
+            v = np.linspace(1.0, 10.0, len(d)) + 0.5 * (yr - 2010)
+            vals.extend(np.maximum(v, 2.0))
+            c = v < 2.0
+            cens.extend(c)
+            types.extend(np.where(c, 'lt', 'not'))
+        df_cens = pd.DataFrame({'value': vals, 'censored': cens, 'cen_type': types})
+        t_idx = pd.DatetimeIndex(dates)
+
+        # Propagated censoring + log transform must reject lwp and drop_ambiguous
+        for bad_method in ('lwp', 'drop_ambiguous'):
+            with pytest.raises(ValueError, match="requires `sens_slope_method='ats'`"):
+                quantile_trend_test(
+                    df_cens, t_idx, block_frequency='YE', quantiles=[0.05, 0.5, 0.95],
+                    min_size_per_block=10, min_blocks=5,
+                    transform='log', censor_quantile_method='propagate',
+                    sens_slope_method=bad_method,
+                )
+
+        # ats with propagate must succeed
+        res_ats = quantile_trend_test(
+            df_cens, t_idx, block_frequency='YE', quantiles=[0.05, 0.5, 0.95],
+            min_size_per_block=10, min_blocks=5,
+            transform='log', censor_quantile_method='propagate',
+            sens_slope_method='ats',
+        )
+        assert res_ats.computation_mode == 'exact'
+        assert res_ats.results['slope_units'].iloc[0] == '% per year'
+
+        # substitute with lwp must succeed
+        res_sub = quantile_trend_test(
+            df_cens, t_idx, block_frequency='YE', quantiles=[0.05, 0.5, 0.95],
+            min_size_per_block=10, min_blocks=5,
+            transform='log', censor_quantile_method='substitute',
+            sens_slope_method='lwp',
+        )
+        assert res_sub.computation_mode == 'exact'
+

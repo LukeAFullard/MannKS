@@ -282,3 +282,39 @@ class TestPlotQuantileTrendEndToEnd:
         assert os.path.exists(plot_file)
         assert os.path.getsize(plot_file) > 1000
         assert len(plt.get_fignums()) == 0
+
+    def test_normal_scale_filters_boundary_quantiles_with_warning(self):
+        df = pd.DataFrame({
+            'quantile': [0.0, 0.5, 1.0],
+            'slope': [-1.0, 0.5, 2.0],
+            'lower_ci': [-np.inf, 0.0, 1.0],
+            'upper_ci': [0.0, 1.0, np.inf],
+            'p': [0.02, 0.50, 0.04],
+        })
+        fig, ax = plt.subplots()
+        with pytest.warns(UserWarning, match="non-finite normal-scale coordinates"):
+            plot_quantile_trend(df, ax=ax, x_scale='normal', show_ci=True)
+        # Only the interior quantile p=0.5 should be plotted (at Z=0.0)
+        scatter_colls = [
+            c for c in ax.collections
+            if isinstance(c, matplotlib.collections.PathCollection)
+        ]
+        assert len(scatter_colls) == 1
+        offsets = scatter_colls[0].get_offsets()
+        assert len(offsets) == 1
+        assert np.isclose(offsets[0][0], 0.0)
+        plt.close(fig)
+
+    def test_all_nan_slopes_and_unbounded_ci_safe(self):
+        df = pd.DataFrame({
+            'quantile': [0.1, 0.5, 0.9],
+            'slope': [np.nan, np.nan, np.nan],
+            'lower_ci': [-np.inf, -1.0, np.nan],
+            'upper_ci': [np.inf, np.inf, np.nan],
+            'p': [np.nan, np.nan, np.nan],
+        })
+        fig, ax = plt.subplots()
+        ret_ax = plot_quantile_trend(df, ax=ax, x_scale='linear', show_ci=True)
+        assert ret_ax is ax
+        plt.close(fig)
+
