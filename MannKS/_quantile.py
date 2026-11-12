@@ -2,6 +2,7 @@
 Core quantile blocking, length standardization, and sampling diagnostics
 for Generalized Quantile-Kendall Analysis (MannKS v0.7.0).
 """
+import datetime
 import numpy as np
 import pandas as pd
 import warnings
@@ -50,6 +51,8 @@ def _parse_block_frequency(block_frequency, is_datetime):
             raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number (finite).")
 
 def _normalize_start_freq(offset_or_str) -> str:
+    if isinstance(offset_or_str, (pd.Timedelta, datetime.timedelta)) and to_offset is not None:
+        offset_or_str = to_offset(offset_or_str)
     s_raw = str(offset_or_str).strip()
     try:
         fs = getattr(offset_or_str, 'freqstr', None)
@@ -254,7 +257,7 @@ def _assign_blocks(
 
     active_data = data.copy()
     if months is not None and is_datetime:
-        dt_series = pd.to_datetime(active_data['t_original'])
+        dt_series = pd.to_datetime(active_data['t'], unit='s')
         active_mask = dt_series.dt.month.isin(months)
         active_data = active_data[active_mask].reset_index(drop=True)
 

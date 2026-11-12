@@ -193,7 +193,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 4. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows assuming blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and permutes numeric values without censored-interval scoring (a warning is raised if censored data or `autocorr_method != 'none'` are present).
 5. **Monotonicity Per Quantile:** Like all Mann-Kendall methods, each quantile test detects monotonic shifts over the full period. If a quantile reverses direction mid-record (e.g. rises then falls), inspect `result.get_quantile_series(q)` or apply `segmented_trend_test` to that extracted quantile series.
 6. **Censoring & Tie Behavior:**
-   * If a quantile is constant across all blocks (e.g., zero-flow dry beds or all blocks below a single detection limit), $S = 0$ and $\mathrm{Var}(S) = 0$, returning `slope = 0.0` and `p = 1.0`.
+   * If an uncensored quantile is constant across all blocks (e.g., zero-flow dry beds), $S = 0$ and $\mathrm{Var}(S) = 0$, returning `slope = 0.0`, `lower_ci = NaN`, `upper_ci = NaN`, and `p = 1.0`. If every block at a quantile is left-censored (even if detection limits change over time), no pairs are unambiguously resolvable ($S = 0$), returning `p = 1.0` and `slope = NaN` under `sens_slope_method='ats'`.
    * Under `censor_quantile_method='propagate'`, censoring flags are checked at the two bracketing order statistics $\lfloor u(n_k-1)\rfloor$ and $\lceil u(n_k-1)\rceil$ (exact for `quantile_method='linear'`, approximate for other interpolation rules).
 
 ---

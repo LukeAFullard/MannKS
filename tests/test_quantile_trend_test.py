@@ -885,8 +885,9 @@ class TestEdgeCasesAndValidationRegressions:
 
         with pytest.raises(ValueError, match="cannot be a boolean"):
             res.get_quantile_series(True)
-        with pytest.raises(ValueError, match="finite probability or rank"):
-            res.get_quantile_series(np.nan)
+        for bad_q in (np.nan, -0.1, 1.5, -2):
+            with pytest.raises(ValueError, match="Probability `quantile_or_rank` must be in"):
+                res.get_quantile_series(bad_q)
 
         # summarize_quantile_regimes preserves expected columns on empty match and accepts DataFrame input
         empty_reg = summarize_quantile_regimes(res, regimes={'none': (0.99, 1.0)})
@@ -898,3 +899,33 @@ class TestEdgeCasesAndValidationRegressions:
 
         df_reg = summarize_quantile_regimes(res.to_frame())
         assert not df_reg.empty
+
+    def test_edge_cases_constant_all_censored_negative_tz_and_timedelta(self):
+        dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
+
+        # 1. 100% left-censored with changing DL does not claim false trend
+        vals_dl = np.where(dates.year < 2013, 5.0, 2.0)
+        cens_df = pd.DataFrame({
+            'value': vals_dl,
+            'censored': np.ones(len(dates), dtype=bool),
+            'cen_type': np.full(len(dates), 'lt', dtype=object),
+        })
+        res_cens = quantile_trend_test(cens_df, dates, quantiles=3)
+        assert np.allclose(res_cens.results['p'], 1.0)
+        assert res_cens.results['slope'].isna().all()
+
+        # 2. All-negative values: transform='none' yields valid slope and NaN slope_pct
+        neg_vals = -20.0 + np.linspace(0.0, 5.0, len(dates))
+        res_neg = quantile_trend_test(neg_vals, dates, quantiles=3, transform='none')
+        assert (res_neg.results['slope'] > 0.0).all()
+        assert res_neg.results['slope_pct'].isna().all()
+
+        # 3. Timezone-aware timestamps + months + equalize='aggregate' + pd.Timedelta block_frequency
+        dates_tz = pd.date_range('2010-01-01', periods=6 * 365, freq='D', tz='Pacific/Auckland')
+        res_tz = quantile_trend_test(
+            np.arange(len(dates_tz), dtype=float), dates_tz,
+            block_frequency=pd.Timedelta('365D'), months=[1, 2, 3, 4],
+            equalize='aggregate', quantiles=3, min_coverage=0.5,
+        )
+        assert len(res_tz.results) == 3
+        assert (res_tz.results['slope'] > 0.0).all()

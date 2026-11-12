@@ -114,8 +114,8 @@ class QuantileTrendResult(_Quantile_Trend_Tuple):
             idx = int(np.flatnonzero(self.results['rank'].to_numpy() == rank_target)[0])
         else:
             q_target = float(quantile_or_rank)
-            if not np.isfinite(q_target):
-                raise ValueError("`quantile_or_rank` must be a finite probability or rank >= 1.")
+            if not np.isfinite(q_target) or q_target < 0.0 or q_target > 1.0:
+                raise ValueError("Probability `quantile_or_rank` must be in [0.0, 1.0], or pass an integer rank >= 1.")
             idx = int(np.argmin(np.abs(self.results['quantile'].to_numpy() - q_target)))
 
         col_name = self.matrix.columns[idx]

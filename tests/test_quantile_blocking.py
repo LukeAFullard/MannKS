@@ -400,3 +400,11 @@ class TestBlockingEdgeCasesAndRegressions:
         assert not summary.empty
         assert "incomplete block" in summary['reason'].iloc[0]
 
+    def test_timedelta_block_frequency_supported(self):
+        import datetime
+        t0 = pd.Timestamp('2020-01-01')
+        t1 = pd.Timestamp('2021-12-31')
+        for freq in (pd.Timedelta('90D'), datetime.timedelta(days=90)):
+            edges = _block_edges(t0, t1, block_frequency=freq, block_origin=None, is_datetime=True)
+            assert pd.Timestamp(edges[0]) <= t0
+            assert pd.Timestamp(edges[-1]) > t1
