@@ -9,7 +9,7 @@ Traditional trend tests (such as the standard Mann-Kendall test or Seasonal Mann
 * **Ambient Monitoring Gaps:** Ambient groundwater and river networks often collect sparse, irregular, and censored data (measurements below analytical detection limits). Classical daily order-statistic methods fail when annual sample sizes vary from 8 to 20 visits.
 * **Sampling Frequency Drift:** Over multi-decade monitoring programs, sampling frequency frequently changes (e.g., historical monthly sampling upgraded to modern weekly sampling). In extreme order statistics, larger sample sizes naturally span wider percentiles, generating severe artificial trends if not recognized and equalized.
 
-`quantile_trend_test` addresses these challenges by extending the order-statistic trend concept of USGS EGRET (*Hirsch et al., 2015*) into a **frequency-agnostic, censor-aware, multi-block, and drift-protected** Generalized Quantile-Kendall framework.
+`quantile_trend_test` addresses these challenges by extending the order-statistic trend concept of USGS EGRET (*Hirsch et al., 2015*) into a **frequency-agnostic, censor-aware, multi-block, and drift-protected** Generalized Quantile-Kendall framework. For a full statistical breakdown of the methodology and every parameter option, see [quantile_kendall.md](../../quantile_kendall.md).
 
 ---
 

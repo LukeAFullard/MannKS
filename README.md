@@ -116,7 +116,7 @@ Confidence: 99.23%
 - **Rolling Trends**: Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](https://github.com/LukeAFullard/MannKS/tree/main/Examples/31_Rolling_Trend_Analysis).
 - **Segmented Trends**: Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](https://github.com/LukeAFullard/MannKS/tree/main/Examples/32_Segmented_Regression).
 - **Block Bootstrap**: Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](https://github.com/LukeAFullard/MannKS/blob/main/bootstrap.md) for details and [Example 29](https://github.com/LukeAFullard/MannKS/tree/main/Examples/29_Block_Bootstrap_Autocorrelation).
-- **Generalized Quantile-Kendall Trends**: Evaluate divergent trends across all quantiles (e.g. increasing flood peaks vs declining drought baseflows) with `quantile_trend_test` and `plot_quantile_trend`. See [Example 36](https://github.com/LukeAFullard/MannKS/tree/main/Examples/36_Quantile_Kendall) and the [Quantile Trend Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md).
+- **Generalized Quantile-Kendall Trends**: Evaluate divergent trends across all quantiles (e.g. increasing flood peaks vs declining drought baseflows) with `quantile_trend_test` and `plot_quantile_trend`. See [quantile_kendall.md](https://github.com/LukeAFullard/MannKS/blob/main/quantile_kendall.md) for methodology, the [Quantile Trend Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md), and [Example 36](https://github.com/LukeAFullard/MannKS/tree/main/Examples/36_Quantile_Kendall).
 
 
 ---
@@ -217,7 +217,8 @@ See the [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/E
 - **[Rolling Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/rolling_trend_guide.md)** - Moving window analysis
 - **[Segmented Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/segmented_trend_guide.md)** - Structural breakpoint detection
 - **[Large Dataset Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md)** - Fast mode, accuracy and performance
-- **[Quantile Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md)** - Generalized Quantile-Kendall, block standardization, and drift protection
+- **[Quantile-Kendall Methodology](https://github.com/LukeAFullard/MannKS/blob/main/quantile_kendall.md)** - What, why, how, and full options for Quantile-Kendall analysis
+- **[Quantile Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md)** - Practical recipes, parameter reference, and pitfalls
 
 ### Examples
 The [Examples](https://github.com/LukeAFullard/MannKS/blob/main/Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.
