@@ -277,7 +277,7 @@ class TestEqualizeBlocks:
         })
         res_num = _equalize_blocks([df_num], mode='aggregate', is_datetime=False)
         assert len(res_num) == 1
-        assert len(res_num[0]) == 13
+        assert len(res_num[0]) == 12  # exactly 12 equal-width bins (right endpoint in the last bin)
         assert set(res_num[0].columns) >= expected_cols
 
 

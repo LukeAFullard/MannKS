@@ -15,11 +15,11 @@ Traditional trend tests (such as the standard Mann-Kendall test or Seasonal Mann
 
 ## Relationship to USGS EGRET
 
-The USGS R package **EGRET** (*Exploration and Graphics for RivEr Trends*, Hirsch and De Cicco, 2015; Hirsch et al., 2015) introduced the Quantile-Kendall method (`runQuantileTest` and `plotQuantileKendall`) for daily streamflow records. 
+The USGS R package **EGRET** (*Exploration and Graphics for RivEr Trends*, Hirsch and De Cicco, 2015; Hirsch et al., 2015) introduced the Quantile-Kendall method (`plotQuantileKendall`, built on the `makeSortQ` and `trendSortQ` functions of the EGRET vignette *Daily Streamflow Trend Analysis*) for daily streamflow records. 
 
 MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 
-| Feature | USGS EGRET (`runQuantileTest`) | MannKS (`quantile_trend_test`) |
+| Feature | USGS EGRET (`plotQuantileKendall`) | MannKS (`quantile_trend_test`) |
 | :--- | :--- | :--- |
 | **Observation Frequency** | Daily data only ($N=365$ or $366$ days/year). | Any frequency: daily, weekly, monthly, multi-year, or irregular visits. |
 | **Blocking Duration** | Strict annual blocks (Water Year, Climate Year, Calendar Year). | Flexible: annual (`'YE'`), multi-year (`'5YE'`), seasonal/quarterly (`'QE'`), or numeric intervals. |
@@ -27,6 +27,10 @@ MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 | **Censored Data** | Uncensored streamflow only. | Native handling of detection limits (`<DL`, `>DL`) with Akritas-Theil-Sen (ATS) slope estimation. |
 | **Coverage Filtering** | Implicitly requires continuous daily records. | Explicit `min_coverage` parameter to reject incomplete blocks with temporal gaps. |
 | **Sampling Drift Guard** | Not supported. | Built-in `sampling_diagnostic` and `equalize='thin'` / `'aggregate'`. |
+| **Serial Correlation** | Points coloured by `zyp` (Zhang pre-whitening) adjusted p-value. | Unadjusted Mann-Kendall `p` by default (identical to EGRET's `pValue`); `autocorr_method` options instead of `zyp`. |
+| **Timezones** | Dates only. | Timezone-aware timestamps analysed in local wall-clock time. |
+
+With matching settings (Recipe 1) MannKS reproduces EGRET's `makeSortQ`/`trendSortQ` numbers to floating-point rounding. This is checked against the real R package in [`validation/43_Quantile_Kendall`](../../validation/43_Quantile_Kendall/README.md) and in the test suite.
 | **Field Significance** | Not built-in. | Matrix permutation test evaluating joint significance across all quantiles. |
 
 ---
@@ -64,7 +68,7 @@ Because blocks may contain different numbers of observations $n_k$ (e.g., 365 vs
   $$
 
 * **EGRET Parity (`standardization='egret'`):**
-  Replicates EGRET's exact leap-year adjustment: for 366-day leap years, the middle rank ($j=183$) is dropped (`leapOdd`) or averaged with its neighbor (`leapEven`), maintaining exactly 365 ranks per block.
+  Replicates EGRET's leap-year adjustment for blocks that are one observation longer than the shortest: an even-length block (a 366-day leap year) has its two middle ranks ($j=183, 184$) averaged (`leapEven`); an odd-length block (e.g. a 91-day Dec–Feb season in a leap year) has its middle rank dropped (`leapOdd`). Every block then has exactly the same number of ranks.
 * **Explicit Quantiles (`quantiles=[q_1, q_2, \dots]`):**
   Directly evaluates user-specified percentiles (e.g., `[0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]`).
 
@@ -99,7 +103,9 @@ When `field_significance=True`, MannKS computes an empirical permutation test of
 
 ## Step-by-Step Practical Recipes
 
-### Recipe 1: Daily Streamflow with Annual Blocks (EGRET Parity)
+### Recipe 1: Daily Streamflow with Annual Blocks (Reproducing EGRET)
+
+These settings reproduce EGRET's Quantile-Kendall numbers (`makeSortQ` + `trendSortQ` with `setPA(paStart = 10, paLong = 12)`, i.e. water years) on a complete daily record:
 
 ```python
 import pandas as pd
@@ -107,15 +113,20 @@ from MannKS import quantile_trend_test, plot_quantile_trend
 
 # Daily streamflow record
 # dates: DatetimeIndex (daily)
-# flow: 1D array of discharge values (m3/s)
+# flow: 1D array of discharge values (m3/s), all > 0
 result = quantile_trend_test(
     x=flow,
     t=dates,
-    block_frequency='YE',
-    standardization='egret',
+    block_frequency='YS-OCT',     # EGRET paStart = 10 ('YS-APR' for climate years, 'YE' for calendar years)
+    require_complete=True,        # EGRET keeps only years with every day present
+    standardization='egret',      # leapOdd / leapEven rank reduction
+    transform='log',              # EGRET tests log(Q); slope_pct = 100 * (exp(slope) - 1)
+    block_time='egret',           # EGRET's midDecYear time axis (exact slopes)
     slope_scaling='year',
     x_unit='m3/s',
 )
+# result.results: 'slope' = EGRET slopeLog, 'slope_pct' = slopePct, 'p' = pValue, 'Tau' = tau
+# For a seasonal period of analysis (paLong < 12) add e.g. months=[12, 1, 2] with 'YS-DEC'.
 
 # Plot on USGS EGRET style normal probability scale
 plot_quantile_trend(
@@ -192,17 +203,18 @@ result = quantile_trend_test(
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `x` | array-like or DataFrame | *Required* | Observed values. For censored data, provide a DataFrame with `value`, `censored`, and `cen_type` (from `prepare_censored_data`). |
-| `t` | array-like or DatetimeIndex | *Required* | Timestamps or numeric time coordinates corresponding to `x`. |
+| `t` | array-like or DatetimeIndex | *Required* | Timestamps or numeric time coordinates corresponding to `x`. Timezone-aware timestamps are analysed in local wall-clock time (blocks and `months` are local; outputs are tz-naive). |
 | `block_frequency` | str or float | `'YE'` | Duration of time blocks. For datetime `t`, use pandas frequency strings (e.g. `'YE'`, `'5YE'`, `'QE'`). For numeric `t`, specify block width (e.g. `1.0`). |
-| `block_origin` | str, Timestamp, or float | `None` | Fixed anchor for block boundaries. If `None`, anchored at data start or year boundary. |
+| `block_origin` | str, Timestamp, or float | `None` | Fixed anchor for block boundaries. If `None`, anchored at data start or year boundary. Calendar-anchored frequencies snap to their own anchors (a warning reports the edges used); observations are never dropped. |
 | `quantiles` | int, sequence, or str | `'auto'` | Quantile configuration. `'auto'` uses the standardized block length (`target_length`). An integer specifies $M$ evenly spaced quantiles. A sequence of floats (e.g. `[0.1, 0.5, 0.9]`) specifies explicit non-exceedance probabilities in $[0, 1]$. |
 | `target_length` | str or int | `'min'` | Target standardized sample size $M$ when `quantiles='auto'`: `'min'`, `'median'`, `'max'`, or an explicit integer $\ge 2$. |
 | `standardization` | str | `'interpolate'` | Method for standardizing block lengths: `'interpolate'` (`numpy.quantile` interpolation) or `'egret'` (exact leap-year rank reduction). |
 | `quantile_method` | str | `'hazen'` | Percentile calculation method passed to `numpy.quantile` (e.g., `'hazen'`, `'linear'`, `'weibull'`, `'median_unbiased'`) when `standardization='interpolate'`. |
+| `block_time` | str | `'center'` | Time coordinate of each block: `'center'` (calendar midpoint) or `'egret'` (EGRET `midDecYear`; reproduces EGRET slopes exactly, requires `slope_scaling='year'`). |
 | `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{\min}, t_{\max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
 | `min_size_per_block` | int | `10` | Minimum number of observations required to retain a block. |
 | `min_blocks` | int | `5` | Minimum number of valid blocks required to perform trend analysis. |
-| `equalize` | str or None | `'none'` | Subsampling/aggregation strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (systematic temporal subsampling to minimum valid block size), or `'aggregate'` (robust median within adaptive sub-intervals: months/days/hours/minutes for datetime `t`, or 12 bins for numeric `t`). |
+| `equalize` | str or None | `'none'` | Subsampling/aggregation strategy to prevent sampling drift artifacts: `'none'` or `None` (raw), `'thin'` (systematic temporal subsampling to minimum valid block size), or `'aggregate'` (robust median within adaptive sub-intervals: months/days/hours/minutes for datetime `t`, or 12 bins for numeric `t`; every sub-interval is first thinned to a common number of observations $k$, reported as `sampling_diagnostic['aggregate_support']`). |
 | `transform` | str or None | `'none'` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. With `'log'`, `slope` is in natural log units per time unit, while `slope_pct` is exponentiated as percentage change per time unit via $100(e^b - 1)$. |
 | `censor_quantile_method` | str | `'propagate'` | Handling of censored observations during quantile standardization: `'propagate'` (preserves censoring flags for ATS), `'substitute'` (replaces with multiplier), or `'error'`. |
 | `hicensor` | bool or float | `False` | Recensors all observations to the highest detection limit to eliminate false trends from improving laboratory precision. |
@@ -295,7 +307,7 @@ When monitoring programs expand from monthly to weekly sampling over time, the e
 * Expected sample maximum increases with sample size.
 * Expected sample minimum decreases with sample size.
 
-**Remedy:** Always inspect `result.sampling_diagnostic['flag']`. If flagged, re-run with `equalize='thin'`, which systematically sub-samples blocks in time to a uniform sample size, restoring true flat trends across stationary distributions.
+**Remedy:** Always inspect `result.sampling_diagnostic['flag']`. If flagged, re-run with `equalize='thin'`, which systematically sub-samples blocks in time to a uniform sample size, restoring true flat trends across stationary distributions. `equalize='aggregate'` is the alternative when the seasons should also be balanced within each block: it reduces every block to one value per sub-interval (e.g. per month), each computed from the same number of observations $k$ in every block. Never compare medians of different numbers of observations between blocks — a monthly median of four weekly samples is far less variable than a single monthly sample.
 
 ### 2. Partial Block Bias & Temporal Coverage
 Blocks near the start or end of a record often contain only partial years (e.g., monitoring began in September). Evaluating an incomplete year whose samples represent only summer or winter will severely bias the annual order statistics.

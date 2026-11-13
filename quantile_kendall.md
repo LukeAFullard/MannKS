@@ -45,6 +45,8 @@ Environmental, hydrological, and water quality trends are often **non-uniform ac
 ### Step 1: Data Preparation & High-Censoring (`_prepare_data`)
 Input values `x` (numeric array or DataFrame from `prepare_censored_data`) and timestamps `t` (datetime-like or numeric) are validated, non-finite values are dropped, and observations are sorted chronologically.
 
+* **Timezones:** timezone-aware timestamps are analysed in their own **local wall-clock time**. Block boundaries (e.g. the start of a calendar or water year), the `months` filter, and every reported block time are local and are returned tz-naive, so a sample taken at 09:00 on 1 January in `Pacific/Auckland` belongs to the new year even though it is still 31 December in UTC. The result is identical to passing the same timestamps with the timezone dropped (`t.tz_localize(None)`); an analysis note records the timezone used.
+
 * **`hicensor`** (default `False`): If `True`, finds the highest left-censoring limit (`<DL`) in the dataset and recensors every observation below that limit to `<max_DL`. If a numeric threshold is given, recensors below `min(natural_max_lt, hicensor)` (or `hicensor` if no left-censored values exist). This prevents artificial downward trends caused purely by improving laboratory detection limits over time.
 
 ### Step 2: Non-Overlapping Temporal Blocking (`block_frequency`, `block_origin`, `months`)
@@ -54,6 +56,9 @@ The time domain is partitioned into **disjoint, consecutive half-open intervals*
   * For datetime `t`: any pandas offset string, such as `'YE'` (calendar year), `'YS-OCT'` or `'YE-SEP'` (Oct–Sep water year), `'YS-JUL'` / `'YE-JUN'` (Jul–Jun hydrological year), `'5YE'` (5-year blocks), `'QE'` (quarterly), or `'ME'` (monthly).
   * For numeric `t`: a positive float specifying block width (e.g. `1.0`, `5.0`).
 * **`block_origin`** (default `None`): Fixed anchor point for block boundaries. If `None`, boundaries align to calendar period starts (e.g., Jan 1 for `'YE'`, Oct 1 for `'YE-SEP'`) or multiples of width for numeric `t`.
+  * Fixed-length blocks (`pd.Timedelta`, `'10D'`, `'6h'`, numeric widths) start exactly at the origin and its multiples.
+  * Calendar-anchored frequencies (`'YE'`, `'YS-OCT'`, `'QE'`, `'ME'`, ...) can only start a block on their own anchor. For these the origin selects the **phase** of multi-period blocks (e.g. `block_origin='1999-01-01'` with `'5YE'` gives blocks starting 1999, 2004, 2009, ...). An origin that is not on an anchor (e.g. `'1998-07-01'` with `'5YE'`) cannot be honoured literally: the edges fall on the frequency's anchors and a `UserWarning` reports the first edge used. To start annual blocks in July, use `'YS-JUL'`.
+  * Whatever the origin, the block edges always span the whole record: **no observation is ever dropped** by the choice of origin. A timezone-aware origin is converted to the timezone of `t`.
 * **`months`** (default `None`): Optional sequence of calendar months (`1`–`12`) to retain before blocking (e.g., `months=[12, 1, 2]` or `[6, 7, 8]`).
   * *Cross-year caveat:* If `months` spans a calendar-year boundary (e.g. `[12, 1, 2]`), do **not** use `'YE'` (Jan–Dec), as it will combine Jan–Feb of year $Y$ with Dec of year $Y$ and inflate temporal coverage. Instead, align the block start using `'YE-NOV'` (blocks run Dec 1–Nov 30).
 
@@ -87,10 +92,12 @@ If `flag` is `True` and `equalize='none'`, a `UserWarning` is emitted.
 * **`'none'`** (or `None`, default): Uses all retained observations in each block as-is. Appropriate when sampling density is roughly stable across blocks, or when differences are minor and you are evaluating interior quantiles (`0.25`–`0.75`).
 * **`'thin'`**: **Systematic temporal thinning.** Every valid block is downsampled to $n_{\min} = \min_k n_k$ observations by selecting evenly spaced indices in chronological order (`np.round(np.linspace(0, n_k - 1, n_min))`). This preserves seasonal coverage across the block while eliminating sample-size bias in the order statistics—restoring calibrated Type I error rates when sampling frequency shifts.
   * *Trade-off:* All blocks are thinned down to the smallest valid block's count ($n_{\min}$). If one valid block has unusually few observations (e.g., 10 vs. 52 elsewhere), consider increasing `min_size_per_block` so that one sparse year doesn't force heavy data loss in all other years.
-* **`'aggregate'`**: **Within-block sub-interval aggregation.** Reduces higher-frequency observations to a uniform sub-period cadence using robust medians (`_aggregate_by_group(..., 'robust_median')`):
+* **`'aggregate'`**: **Within-block sub-interval aggregation on a common support.** Reduces higher-frequency observations to a uniform sub-period cadence using robust medians (`_aggregate_by_group(..., 'robust_median')`):
   * For datetime `t`, the sub-interval grain adapts to the median observed block span: calendar months when median block span $> 45$ days (yielding $\le 12$ monthly medians per annual block), days when $> 2$ days, hours when $> 2$ hours, and minutes otherwise (falling back to 12 equal bins if a block collapses into a single sub-interval).
-  * For numeric `t`: divides the block's observed span into 12 equal-width sub-intervals and computes the robust median per populated bin (`13` bins if the right endpoint falls on `t_max`).
-  * *Trade-off:* Smooths intra-interval short-term correlation and equalizes cadence, but dampens extreme single-day peaks within each sub-interval.
+  * For numeric `t`: divides the block's observed span into exactly 12 equal-width sub-intervals (the right endpoint belongs to the last one) and computes the robust median per populated bin.
+  * **Common support $k$:** the median of 4 weekly values has a much narrower sampling distribution than a single monthly value, so medians taken over different numbers of observations are **not comparable between blocks**. Taking the median of whatever happens to be in each sub-interval would make intensively sampled blocks look compressed and produce the *opposite* drift artifact (low quantiles falsely increasing, high quantiles falsely decreasing). Therefore every sub-interval of every valid block is first thinned, systematically in time order, to the same number of observations $k$ — the smallest count found in any populated sub-interval of any valid block — and the robust median of those $k$ observations is used. $k$ is reported as `sampling_diagnostic['aggregate_support']` and in `analysis_notes`.
+  * When the sampling frequency changed over the record (the situation `equalize` exists for), $k$ is typically $1$ and the mode reduces to **stratified thinning**: one observation per sub-interval, which—unlike `'thin'`—also balances the seasons within each block. When all blocks are sampled at a similar high frequency, $k > 1$ and genuine sub-interval medians are used.
+  * *Trade-off:* With $k > 1$ it smooths short-term correlation but dampens single-day peaks within each sub-interval; one sparsely sampled sub-interval anywhere in the record lowers $k$ for every block.
 
 ### Step 5: Sorting, Censor Propagation, and Block Standardization
 Observations within each block are sorted in ascending order. When censored data are present, interval endpoints are constructed with a small tie-breaking nudge (`make_intervals(..., nudge=True)`) so `<DL` sorts just below uncensored `DL`, and `>DL` sorts just above uncensored `DL`.
@@ -103,12 +110,20 @@ Blocks are standardized to a common target length $M$ via `quantiles`, `target_l
   * Sequence of floats in $[0, 1]$ (e.g., `[0.10, 0.25, 0.50, 0.75, 0.90, 0.95]`): Evaluates those exact percentiles in sorted order (requires `standardization='interpolate'`). For $Z$-scale plotting, `plotting_position` is clipped to $[1/(n_{\text{med}}+1), n_{\text{med}}/(n_{\text{med}}+1)]$ so `0.0` or `1.0` does not produce $\pm\infty$.
 * **`standardization`** (default `'interpolate'`):
   * **`'interpolate'`**: Computes `np.quantile(sorted_vals, u_grid, method=quantile_method)`. Works with any block size $n_k \ge 2$ and any `quantiles` specification.
-  * **`'egret'`**: Exact USGS EGRET rank-reduction mode (`quantiles='auto'` and `target_length='min'`—or integer matching `min(block_sizes)`—only). Requires every valid block to have size $M$ or $M+1$ (typically 365 and 366 for complete daily years). Blocks of size $M+1$ are reduced by dropping the middle rank if $n_k$ is odd (`leapOdd`) or averaging the two middle ranks if $n_k$ is even (`leapEven`). Raises `ValueError` if any block's size differs from $M$ or $M+1$.
+  * **`'egret'`**: USGS EGRET rank-reduction mode (`quantiles='auto'` and `target_length='min'`—or integer matching `min(block_sizes)`—only). Requires every valid block to have size $M$ or $M+1$ (typically 365 and 366 for complete daily years). Blocks of size $M+1$ are reduced by dropping the middle rank if $n_k$ is odd (`leapOdd`) or averaging the two middle ranks if $n_k$ is even (`leapEven`). Raises `ValueError` if any block's size differs from $M$ or $M+1$.
 * **`quantile_method`** (default `'hazen'`): Passed to `numpy.quantile` (e.g., `'hazen'`, `'linear'`, `'weibull'`, `'median_unbiased'`). With `'hazen'` (Hyndman & Fan Type 5), the 0-based virtual index is $v = \mathrm{clip}(u n_k - 0.5, 0, n_k - 1)$, matching standard hydrological plotting-position symmetry without artificially pulling tail percentiles inward.
 * **`censor_quantile_method`** (default `'propagate'`):
   * **`'propagate'`**: For `'interpolate'`, maps each quantile probability $u$ to its exact Hyndman–Fan virtual index $v$ (e.g., $\mathrm{clip}(u n_k - 0.5, 0, n_k - 1)$ for `'hazen'`, or $u(n_k - 1)$ for `'linear'`) across continuous `numpy.quantile` rules (`'hazen'`, `'linear'`, `'weibull'`, `'median_unbiased'`, `'normal_unbiased'`, `'interpolated_inverted_cdf'`), and inspects the bracketing order-statistic indices $\lfloor v \rfloor$ and $\lceil v \rceil$ (with exact integer snapping within $10^{-12}$). If either bracketing observation is censored, the standardized quantile value is flagged as censored (`'lt'` or `'gt'`, with `'lt'` taking precedence if both occur). For `'egret'`, censoring flags travel directly with the retained/merged order statistics. When combined with `transform='log'` and censored data, `sens_slope_method='ats'` is required.
   * **`'substitute'`**: Replaces `<DL` with `lt_mult * DL` (default `0.5 * DL`) and `>DL` with `gt_mult * DL` (default `1.1 * DL`) before sorting, clearing all censoring flags. *Note:* This can create artificial flat ties in lower quantiles if detection limits are constant.
   * **`'error'`**: Raises `ValueError` if any censored observation is encountered.
+
+### Step 5b: Block Time Coordinate (`block_time`)
+Each block needs one time value for the trend test:
+
+* **`'center'`** (default): the calendar midpoint of the block $[b_{\text{start}}, b_{\text{end}})$; slopes are scaled to `slope_scaling` units using a 365.25-day year.
+* **`'egret'`**: EGRET's `midDecYear`, the mean of the EGRET decimal year of the first and the last observation in the block, where a day's decimal year is $\text{year} + (\text{day of year} - 0.5) / \text{days in year}$. The trend test then runs on decimal years, so slopes are per year exactly as in EGRET. Requires datetime `t` and `slope_scaling='year'`.
+
+The choice only affects slopes and their confidence limits ($S$, $\mathrm{Var}(S)$, $\tau$ and $p$ depend only on the order of the blocks). Combined with `standardization='egret'`, `transform='log'` and `require_complete=True`, `block_time='egret'` reproduces the output of EGRET's `makeSortQ` and `trendSortQ` to floating-point rounding; see the [validation report](validation/43_Quantile_Kendall/README.md) for the setting-by-setting correspondence and for what is deliberately not reproduced (EGRET's `zyp` pre-whitened `pValueAdj`).
 
 ### Step 6: Optional Value Transformation (`transform`, `log_offset`)
 Applied to the $B \times M$ standardized matrix prior to trend estimation:
@@ -122,7 +137,7 @@ Applied to the $B \times M$ standardized matrix prior to trend estimation:
     $$
 
   * `slope_units` is labeled `% per <time_unit>` (used as the primary y-axis on `plot_quantile_trend`). If any standardized quantile is censored under `censor_quantile_method='propagate'`, `sens_slope_method='ats'` is required (`'lwp'`/`'drop_ambiguous'` heuristic multipliers are invalid on negative log-values and raise `ValueError`).
-  * This reproduces USGS EGRET's `% per year` trend reporting and makes slopes comparable across vastly different flow magnitudes (e.g., baseflow vs. peak flood).
+  * This is USGS EGRET's `% per year` trend reporting (`slopePct`) and makes slopes comparable across vastly different flow magnitudes (e.g., baseflow vs. peak flood).
 * **`'pct_of_median'`**: Expresses each quantile column as a percentage of its across-block median ($100 \times x_{k,j} / \text{median}_j$). Columns whose median is $\le 0$ are set to `NaN` with an analysis note.
 
 ### Step 7: Per-Quantile Trend Estimation (`engine`, `**mk_kwargs`)
@@ -148,19 +163,20 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 
 | Parameter | Default | Options / Type | Purpose & Guidance |
 | :--- | :--- | :--- | :--- |
-| `x`, `t` | *Required* | array-like / DataFrame | Observations (`prepare_censored_data` output for censored data) and corresponding datetime or numeric times. |
+| `x`, `t` | *Required* | array-like / DataFrame | Observations (`prepare_censored_data` output for censored data) and corresponding datetime or numeric times. Timezone-aware times are analysed in local wall-clock time. |
 | `block_frequency` | `'YE'` | pandas offset str or `float > 0` | Temporal block duration (`'YE'`, `'YS-OCT'`, `'5YE'`, `'QE'`, `'ME'`, or numeric width). |
-| `block_origin` | `None` | datetime, float, or `None` | Explicit anchor for block edges. Defaults to calendar boundary or floored numeric origin. |
+| `block_origin` | `None` | datetime, float, or `None` | Explicit anchor for block edges. Defaults to calendar boundary or floored numeric origin. Calendar-anchored frequencies snap to their anchors (with a warning); no observation is dropped. |
 | `months` | `None` | sequence of `1..12` or `None` | Filter to specific calendar months before blocking (datetime `t` only). |
 | `quantiles` | `'auto'` | `'auto'`, `int`, or sequence in `[0, 1]` | `'auto'` builds $M$ ranks from `target_length`; `int` evaluates $M$ Weibull quantiles $j/(M+1)$; sequence evaluates explicit probabilities. |
 | `target_length` | `'min'` | `'min'`, `'median'`, `'max'`, or `int >= 2` | Target grid size $M$ when `quantiles='auto'`. `'egret'` requires `'min'` (or matching integer). |
 | `standardization` | `'interpolate'` | `'interpolate'`, `'egret'` | `'interpolate'` uses `np.quantile`; `'egret'` matches USGS EGRET `leapOdd`/`leapEven` (requires `quantiles='auto'`, `target_length='min'`, and $n_k = M$ or $M+1$). |
 | `quantile_method` | `'hazen'` | `numpy.quantile` method str | Interpolation rule (`'hazen'`, `'linear'`, `'weibull'`, etc.) when `standardization='interpolate'`. |
+| `block_time` | `'center'` | `'center'`, `'egret'` | Time coordinate of each block: calendar midpoint, or EGRET's `midDecYear` (needed to reproduce EGRET slopes exactly). |
 | `min_size_per_block` | `10` | `int >= 1` | Minimum observations needed to keep a block (set to `8` or `9` for monthly data with occasional missed visits). |
 | `min_blocks` | `5` | `int >= 1` | Minimum valid blocks required to run the test ($< 10$ produces coarse p-values and low power). |
 | `min_coverage` | `0.9` | `float` in `[0, 1]` | Minimum fraction of block duration spanned by samples; set to `0.70`–`0.80` for irregular ambient sampling. |
 | `require_complete` | `False` | `bool` | Rejects blocks with fewer observations than expected from the global median sampling step. |
-| `equalize` | `'none'` | `'none'`, `None`, `'thin'`, `'aggregate'` | Controls sample-size equalization across blocks to eliminate sampling-frequency drift bias. (`result.blocks['n_obs']` logs pre-equalization counts; `result.sampling_diagnostic` is evaluated post-equalization on standardized block counts.) |
+| `equalize` | `'none'` | `'none'`, `None`, `'thin'`, `'aggregate'` | Controls sample-size equalization across blocks to eliminate sampling-frequency drift bias. `'aggregate'` medians use a common support $k$ (`sampling_diagnostic['aggregate_support']`). (`result.blocks['n_obs']` logs pre-equalization counts; `result.sampling_diagnostic` is evaluated post-equalization on standardized block counts.) |
 | `censor_quantile_method` | `'propagate'` | `'propagate'`, `'substitute'`, `'error'` | How detection limits are carried through order statistics (`'propagate'` recommended for censored data). |
 | `hicensor` | `False` | `bool` or `float` | Recensors values below the highest `<DL` threshold before blocking to prevent false trends from improving detection limits. |
 | `transform` | `'none'` | `'none'`, `None`, `'log'`, `'pct_of_median'` | Value transform prior to testing (`'log'` keeps `slope` in $\ln$ units and sets `slope_pct` via $100(e^b - 1)$). |

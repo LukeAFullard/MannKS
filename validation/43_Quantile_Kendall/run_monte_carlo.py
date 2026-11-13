@@ -4,14 +4,17 @@ Package: MannKS v0.7.0
 Folder: validation/43_Quantile_Kendall/
 
 This study validates the statistical trustworthiness of Generalized Quantile-Kendall:
-1. Exact USGS EGRET Parity:
-   Direct comparison against the USGS EGRET R reference algorithms (makeSortQ,
-   leapEven, leapOdd, trendSortQ) on multi-year daily streamflow with leap years.
+1. USGS EGRET Parity:
+   Direct comparison against the genuine USGS EGRET R code (EGRET's own makeSortQ,
+   leapEven, leapOdd, trendSortQ run with the EGRET, rkt and zyp packages through
+   rpy2; see egret_reference.R and egret_parity.py).  Without R the stored EGRET
+   output in tests/data/egret_qk is used and the report says so.
 2. Type I Error Rate Calibration:
    Empirical rejection rates under H0 across quantiles at nominal alpha = 0.05.
 3. Sampling Frequency Drift Trap & Equalization:
    Validation of the sampling frequency drift trap (monthly -> weekly shift) and
-   verification of equalize='thin' restoring nominal Type I error rates.
+   verification that equalize='thin' and equalize='aggregate' restore nominal
+   Type I error rates.
 4. Confidence Interval Coverage:
    Validation that (1 - alpha) = 95% confidence intervals achieve nominal coverage.
 5. Permutation Field Significance Calibration:
@@ -38,124 +41,18 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # ==============================================================================
-# 1. USGS EGRET Reference Implementation (Python Port)
+# 1. USGS EGRET parity (genuine R code, see egret_reference.R / egret_parity.py)
 # ==============================================================================
 
-def egret_leap_even(s_vals: np.ndarray) -> np.ndarray:
-    """EGRET leapEven: when n_obs is even (e.g. 366), average middle two values and drop one."""
-    n = len(s_vals)
-    mid = n // 2
-    merged = 0.5 * (s_vals[mid - 1] + s_vals[mid])
-    keep = np.ones(n, dtype=bool)
-    keep[mid] = False
-    out = s_vals[keep].copy()
-    out[mid - 1] = merged
-    return out
+import egret_parity  # noqa: E402  (same folder)
 
 
-def egret_make_sort_q(df_daily: pd.DataFrame, pa_start: int = 4):
-    """
-    EGRET makeSortQ:
-    Partitions daily discharge into climate years starting in month pa_start (default April),
-    verifies complete years (365 or 366 days), downsamples leap years (366 days)
-    to minimum year length (365 days) via leapEven, and returns (Y, 365) matrix
-    along with decimal year midpoints.
-    """
-    df = df_daily.sort_values('date').reset_index(drop=True)
-    dates = pd.to_datetime(df['date'])
-    vals = df['q'].to_numpy(dtype=float)
-
-    c_years = np.where(dates.dt.month >= pa_start, dates.dt.year, dates.dt.year - 1)
-    unique_years = np.unique(c_years)
-
-    valid_matrices = []
-    midpoint_decimal_years = []
-
-    for yr in unique_years:
-        mask = (c_years == yr)
-        y_dates = dates[mask]
-        y_vals = vals[mask]
-        n_days = len(y_vals)
-
-        has_feb29 = pd.Timestamp(f"{yr+1}-01-01").is_leap_year
-        expected_days = 366 if has_feb29 else 365
-        if n_days != expected_days:
-            continue
-
-        s_vals = np.sort(y_vals)
-        if n_days == 366:
-            reduced = egret_leap_even(s_vals)
-        else:
-            reduced = s_vals
-
-        valid_matrices.append(reduced)
-        start_ts = pd.Timestamp(f"{yr}-{pa_start:02d}-01")
-        end_ts = pd.Timestamp(f"{yr+1}-{pa_start:02d}-01")
-        mid_sec = start_ts.timestamp() + (end_ts.timestamp() - start_ts.timestamp()) / 2.0
-        mid_dt = pd.to_datetime(mid_sec, unit='s')
-        dec_yr = mid_dt.year + (mid_dt.day_of_year - 0.5) / (366.0 if mid_dt.is_leap_year else 365.0)
-        midpoint_decimal_years.append(dec_yr)
-
-    return np.array(valid_matrices), np.array(midpoint_decimal_years)
-
-
-def egret_trend_sort_q(sort_q_matrix: np.ndarray, decimal_years: np.ndarray):
-    """
-    EGRET trendSortQ:
-    Computes Mann-Kendall and Theil-Sen trend on log(Q) for each rank column.
-    Reports slope as 100 * (exp(b) - 1) % per year.
-    """
-    Y, M = sort_q_matrix.shape
-    log_q = np.log(sort_q_matrix)
-
-    i_idx, j_idx = np.triu_indices(Y, k=1)
-    dt = decimal_years[j_idx] - decimal_years[i_idx]
-
-    base_var = Y * (Y - 1) * (2 * Y + 5) / 18.0
-    n0 = Y * (Y - 1) / 2.0
-
-    results = []
-    for k in range(M):
-        y_col = log_q[:, k]
-        dy = y_col[j_idx] - y_col[i_idx]
-        s_score = float(np.sum(np.sign(dy) * np.sign(dt)))
-
-        _, counts = np.unique(y_col, return_counts=True)
-        tie_counts = counts[counts > 1]
-        if len(tie_counts) > 0:
-            tie_adj = np.sum(tie_counts * (tie_counts - 1) * (2 * tie_counts + 5)) / 18.0
-            var_s = max(0.0, base_var - tie_adj)
-            n_ties = np.sum(tie_counts * (tie_counts - 1)) / 2.0
-            denom = np.sqrt(max(0.0, n0 - n_ties)) * np.sqrt(n0)
-            tau = s_score / denom if denom > 0 else 0.0
-        else:
-            var_s = base_var
-            tau = s_score / n0 if n0 > 0 else 0.0
-
-        if s_score > 0:
-            z = (s_score - 1.0) / np.sqrt(var_s)
-        elif s_score < 0:
-            z = (s_score + 1.0) / np.sqrt(var_s)
-        else:
-            z = 0.0
-        p_val = 2.0 * (1.0 - norm.cdf(abs(z)))
-
-        pairwise_slopes = dy / dt
-        sen_slope = float(np.median(pairwise_slopes))
-        slope_pct = 100.0 * (np.exp(sen_slope) - 1.0)
-
-        results.append({
-            'rank': k + 1,
-            's': s_score,
-            'var_s': var_s,
-            'tau': tau,
-            'z': z,
-            'p': p_val,
-            'slope_log': sen_slope,
-            'slope_pct': slope_pct,
-        })
-
-    return pd.DataFrame(results)
+def _mc_status(rate: float, nominal: float, n: int) -> str:
+    """Whether an empirical rate lies inside the 95% binomial Monte Carlo band around nominal."""
+    se = np.sqrt(nominal * (1.0 - nominal) / n)
+    lo, hi = nominal - 1.96 * se, nominal + 1.96 * se
+    inside = lo <= rate <= hi
+    return f"{'Within' if inside else '**Outside**'} 95% MC band [{lo:.3f}, {hi:.3f}]"
 
 
 # ==============================================================================
@@ -163,92 +60,68 @@ def egret_trend_sort_q(sort_q_matrix: np.ndarray, decimal_years: np.ndarray):
 # ==============================================================================
 
 def validate_egret_parity():
-    """Runs exact parity validation against USGS EGRET algorithm on 15 climate years."""
-    print("\n[1/5] Validating exact parity with USGS EGRET algorithm...")
-    rng = np.random.default_rng(42)
-    start_date = pd.Timestamp('2000-04-01')
-    end_date = pd.Timestamp('2015-03-31')
-    dates = pd.date_range(start_date, end_date, freq='D')
+    """Compares MannKS with the genuine EGRET R code on every parity scenario."""
+    live = egret_parity.r_available()
+    source = "live EGRET run through rpy2" if live else "stored EGRET output (tests/data/egret_qk); R not available"
+    print(f"\n[1/5] Validating parity with USGS EGRET ({source})...")
 
-    # Streamflow with seasonal variation and mild trend
-    t_years = (dates - dates[0]).total_seconds() / (365.25 * 86400.0)
-    seasonal = 1.0 + 0.6 * np.sin(2.0 * np.pi * dates.day_of_year / 365.25)
-    trend = np.exp(0.015 * t_years)
-    noise = rng.lognormal(mean=0.0, sigma=0.35, size=len(dates))
-    discharge = 12.0 * seasonal * trend * noise
-    df_daily = pd.DataFrame({'date': dates, 'q': discharge})
+    rows = []
+    versions = None
+    plot_data = None
+    for name, (dataset, pa_start, pa_long, desc) in egret_parity.SCENARIOS.items():
+        if live:
+            daily = egret_parity.make_dataset(dataset)
+            egret = egret_parity.run_egret(daily, pa_start, pa_long)
+        else:
+            daily, egret, _ = egret_parity.load_fixture(name)
+        versions = egret['versions']
+        res = egret_parity.run_mannks(daily, pa_start, pa_long)
+        diff = egret_parity.compare(res, egret)
+        diff.update({'name': name, 'paStart': pa_start, 'paLong': pa_long, 'description': desc})
+        rows.append(diff)
+        print(f"  {name}: {diff['n_ranks']} ranks x {diff['n_years']} years, "
+              f"max|d sortQ|={diff['sortQ']:.1e} |d S|={diff['S']:.1e} |d p|={diff['p']:.1e} "
+              f"|d tau|={diff['tau']:.1e} |d slopeLog|={diff['slopeLog']:.1e} |d slopePct|={diff['slopePct']:.1e}")
 
-    # 1. EGRET Reference
-    sort_q_ref, dec_years_ref = egret_make_sort_q(df_daily, pa_start=4)
-    egret_res = egret_trend_sort_q(sort_q_ref, dec_years_ref)
+        if name == 'climate_year':
+            kw = egret_parity.mannks_settings(pa_start, pa_long)
+            x, t = daily['q'].to_numpy(), pd.DatetimeIndex(daily['date'])
+            kw_center = dict(kw, block_time='center')
+            centre = quantile_trend_test(x, t, **kw_center).to_frame()
+            kw_interp = dict(kw_center, standardization='interpolate')
+            interp = quantile_trend_test(x, t, **kw_interp).to_frame()
+            ref = egret['results']
+            plot_data = (ref, res.to_frame(), centre, interp)
 
-    # 2. MannKS in EGRET parity mode
-    mannks_egret = quantile_trend_test(
-        x=df_daily['q'], t=df_daily['date'],
-        block_frequency='YS-APR',
-        require_complete=True,
-        standardization='egret',
-        transform='log',
-        slope_scaling='year',
-        min_size_per_block=300,
-        min_blocks=5,
-    ).to_frame()
-
-    # 3. MannKS in Interpolate mode
-    mannks_interp = quantile_trend_test(
-        x=df_daily['q'], t=df_daily['date'],
-        block_frequency='YS-APR',
-        require_complete=True,
-        standardization='interpolate',
-        transform='log',
-        slope_scaling='year',
-        min_size_per_block=300,
-        min_blocks=5,
-    ).to_frame()
-
-    # Parity comparisons
-    s_diff = np.max(np.abs(mannks_egret['s'] - egret_res['s']))
-    var_diff = np.max(np.abs(mannks_egret['var_s'] - egret_res['var_s']))
-    tau_diff = np.max(np.abs(mannks_egret['Tau'] - egret_res['tau']))
-    p_diff = np.max(np.abs(mannks_egret['p'] - egret_res['p']))
-    z_diff = np.max(np.abs(mannks_egret['z'] - egret_res['z']))
-    slope_rel_diff = np.max(np.abs(mannks_egret['slope_pct'] - egret_res['slope_pct']) / np.abs(egret_res['slope_pct'])) * 100
-
-    interp_slope_rel = np.mean(np.abs(mannks_interp['slope_pct'] - egret_res['slope_pct']) / np.abs(egret_res['slope_pct'])) * 100
-    interp_slope_abs = np.mean(np.abs(mannks_interp['slope_pct'] - egret_res['slope_pct']))
-
-    print(f"  Exact EGRET Parity Mode:")
-    print(f"    Max |S| difference:       {s_diff:.2e} (Exact: 0)")
-    print(f"    Max |Var(S)| difference: {var_diff:.2e} (Machine epsilon: < 1e-12)")
-    print(f"    Max |Tau| difference:    {tau_diff:.2e} (Machine epsilon: < 1e-12)")
-    print(f"    Max |p| difference:      {p_diff:.2e} (Machine epsilon: < 1e-10)")
-    print(f"    Max Slope % difference:  {slope_rel_diff:.4f}% (< 0.5% due to 365 vs 365.25 day year)")
-    print(f"  Interpolation Mode vs EGRET:")
-    print(f"    Mean Slope % difference: {interp_slope_rel:.3f}% ({interp_slope_abs:.4f} %/yr abs)")
+    ref, exact, centre, interp = plot_data
+    ref_pct = ref['slopePct'].to_numpy()
+    centre_rel = float(np.max(np.abs(centre['slope_pct'].to_numpy() - ref_pct) / np.abs(ref_pct)) * 100)
+    interp_rel = float(np.mean(np.abs(interp['slope_pct'].to_numpy() - ref_pct) / np.abs(ref_pct)) * 100)
+    interp_abs = float(np.mean(np.abs(interp['slope_pct'].to_numpy() - ref_pct)))
+    print(f"  Default block centre (block_time='center') vs EGRET: max slope difference {centre_rel:.4f}%")
+    print(f"  Interpolation mode vs EGRET: mean slope difference {interp_rel:.3f}% ({interp_abs:.4f} %/yr abs)")
 
     # Plot Comparison
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=150)
-    ranks = egret_res['rank'].to_numpy()
-    pp = ranks / 366.0
-    z = norm.ppf(pp)
-
-    ax1.plot(z, egret_res['slope_pct'], 'k-', label='USGS EGRET (R Reference)', linewidth=1.8)
-    ax1.plot(z, mannks_egret['slope_pct'], 'r--', label="MannKS (standardization='egret')", linewidth=1.5)
-    ax1.plot(z, mannks_interp['slope_pct'], 'b:', label="MannKS (standardization='interpolate')", linewidth=1.2)
+    z = ref['z'].to_numpy()
+    ref_label = 'USGS EGRET (R, live via rpy2)' if live else 'USGS EGRET (R, stored output)'
+    ax1.plot(z, ref_pct, 'k-', label=ref_label, linewidth=1.8)
+    ax1.plot(z, exact['slope_pct'], 'r--', label="MannKS (standardization='egret', block_time='egret')", linewidth=1.5)
+    ax1.plot(z, interp['slope_pct'], 'b:', label="MannKS (standardization='interpolate')", linewidth=1.2)
     ax1.set_xlabel('Standard Normal Quantile (Z-scale)', fontsize=11)
     ax1.set_ylabel('Trend Slope (% / year)', fontsize=11)
-    ax1.set_title('USGS EGRET vs MannKS Quantile Slope Parity', fontsize=12, fontweight='bold')
+    ax1.set_title('USGS EGRET vs MannKS Quantile Slopes (climate year)', fontsize=12, fontweight='bold')
     ax1.grid(True, linestyle='--', alpha=0.5)
-    ax1.legend(loc='lower left', frameon=True)
+    ax1.legend(loc='best', frameon=True, fontsize=8)
 
-    # Relative difference plot
-    diff_pct = (mannks_egret['slope_pct'] - egret_res['slope_pct'])
-    ax2.plot(z, diff_pct, 'm-', linewidth=1.2)
+    ax2.plot(z, exact['slope_pct'].to_numpy() - ref_pct, 'r-', linewidth=1.2, label="block_time='egret' (EGRET settings)")
+    ax2.plot(z, centre['slope_pct'].to_numpy() - ref_pct, 'm-', linewidth=1.0, label="block_time='center' (MannKS default time axis)")
     ax2.axhline(0, color='k', linestyle='--', alpha=0.7)
     ax2.set_xlabel('Standard Normal Quantile (Z-scale)', fontsize=11)
-    ax2.set_ylabel('Discretization Difference (% / year)', fontsize=11)
+    ax2.set_ylabel('Slope difference, MannKS - EGRET (% / year)', fontsize=11)
     ax2.set_title('Slope Difference (MannKS - EGRET)', fontsize=12, fontweight='bold')
     ax2.grid(True, linestyle='--', alpha=0.5)
+    ax2.legend(loc='best', frameon=True, fontsize=8)
 
     plt.tight_layout()
     plot_path = os.path.join(OUT_DIR, 'egret_parity_comparison.png')
@@ -257,13 +130,13 @@ def validate_egret_parity():
     print(f"  Saved plot: {plot_path}")
 
     return {
-        's_diff': s_diff,
-        'var_diff': var_diff,
-        'tau_diff': tau_diff,
-        'p_diff': p_diff,
-        'slope_rel_diff': slope_rel_diff,
-        'interp_slope_rel': interp_slope_rel,
-        'interp_slope_abs': interp_slope_abs,
+        'rows': rows,
+        'live': live,
+        'source': source,
+        'versions': versions,
+        'centre_rel': centre_rel,
+        'interp_slope_rel': interp_rel,
+        'interp_slope_abs': interp_abs,
     }
 
 
@@ -334,6 +207,8 @@ def validate_sampling_drift_trap(n_reps: int = 300):
 
     eq_rejections_low = 0
     eq_rejections_high = 0
+    agg_rejections_low = 0
+    agg_rejections_high = 0
 
     for _ in range(n_reps):
         t_list = []
@@ -366,19 +241,32 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         if df_eq.iloc[-1]['h']:
             eq_rejections_high += 1
 
+        # 3. Equalized Analysis (equalize='aggregate': monthly sub-intervals on a common support)
+        res_agg = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='aggregate', min_size_per_block=10)
+        df_agg = res_agg.to_frame()
+        if df_agg.iloc[0]['h']:
+            agg_rejections_low += 1
+        if df_agg.iloc[-1]['h']:
+            agg_rejections_high += 1
+
     rate_raw_flag = raw_flags / n_reps
     rate_raw_low = raw_rejections_low / n_reps
     rate_raw_high = raw_rejections_high / n_reps
     rate_eq_low = eq_rejections_low / n_reps
     rate_eq_high = eq_rejections_high / n_reps
+    rate_agg_low = agg_rejections_low / n_reps
+    rate_agg_high = agg_rejections_high / n_reps
 
     print(f"  Sampling Diagnostic Detection Rate: {rate_raw_flag*100:.1f}%")
     print(f"  Raw Unequalized False Trend Rates (Nominal alpha = 0.05):")
-    print(f"    Lowest Quantile (p=0.08): False Downward Rate = {rate_raw_low*100:.1f}% (Severely Inflated)")
-    print(f"    Highest Quantile (p=0.92): False Upward Rate   = {rate_raw_high*100:.1f}% (Severely Inflated)")
+    print(f"    Lowest Quantile (p=0.08): False Downward Rate = {rate_raw_low*100:.1f}% ")
+    print(f"    Highest Quantile (p=0.92): False Upward Rate   = {rate_raw_high*100:.1f}% ")
     print(f"  Equalized (equalize='thin') False Trend Rates:")
-    print(f"    Lowest Quantile (p=0.08): False Trend Rate     = {rate_eq_low*100:.1f}% (Calibrated to nominal alpha)")
-    print(f"    Highest Quantile (p=0.92): False Trend Rate    = {rate_eq_high*100:.1f}% (Calibrated to nominal alpha)")
+    print(f"    Lowest Quantile (p=0.08): False Trend Rate     = {rate_eq_low*100:.1f}%")
+    print(f"    Highest Quantile (p=0.92): False Trend Rate    = {rate_eq_high*100:.1f}%")
+    print(f"  Equalized (equalize='aggregate') False Trend Rates:")
+    print(f"    Lowest Quantile (p=0.08): False Trend Rate     = {rate_agg_low*100:.1f}%")
+    print(f"    Highest Quantile (p=0.92): False Trend Rate    = {rate_agg_high*100:.1f}%")
 
     # Plot Drift Trap Comparison
     fig, ax = plt.subplots(figsize=(8.5, 4.8), dpi=150)
@@ -410,6 +298,8 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         'rate_raw_high': rate_raw_high,
         'rate_eq_low': rate_eq_low,
         'rate_eq_high': rate_eq_high,
+        'rate_agg_low': rate_agg_low,
+        'rate_agg_high': rate_agg_high,
         'n_reps': n_reps,
     }
 
@@ -477,10 +367,12 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
     dates = pd.date_range("2000-01-01", periods=n_blocks * n_per_block, freq="14D")
 
     rejections_field = 0
+    rejections_count = 0
+    rejections_max_z = 0
     rejections_naive_any = 0
     M = 15
 
-    for _ in range(n_reps):
+    for rep_idx in range(n_reps):
         x = rng.normal(size=len(dates))
         res = quantile_trend_test(
             x, dates,
@@ -489,23 +381,29 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
             field_significance=True,
             n_permutations=n_permutations,
             alpha=alpha,
+            random_state=rep_idx,
         )
         df_res = res.to_frame()
         # Naive: any quantile significant
         if df_res['h'].any():
             rejections_naive_any += 1
-        # Field significance: global p_field < alpha
-        if res.field_significance['p_count'] < alpha or res.field_significance['p_max_z'] < alpha:
+        # Field significance: each statistic on its own, and the union of the two
+        fs = res.field_significance
+        rejections_count += int(fs['p_count'] < alpha)
+        rejections_max_z += int(fs['p_max_z'] < alpha)
+        if fs['p_count'] < alpha or fs['p_max_z'] < alpha:
             rejections_field += 1
 
     rate_field = rejections_field / n_reps
     rate_naive = rejections_naive_any / n_reps
 
-    print(f"  Naive Joint False Alarm Rate (any p < {alpha}): {rate_naive*100:.1f}% (Severe Multiplicity Inflation)")
-    print(f"  Permutation Field Significance False Alarm Rate: {rate_field*100:.1f}% (Calibrated to nominal alpha)")
+    print(f"  Naive Joint False Alarm Rate (any p < {alpha}): {rate_naive*100:.1f}% ")
+    print(f"  Permutation Field Significance False Alarm Rate: {rate_field*100:.1f}%")
 
     return {
         'rate_field': rate_field,
+        'rate_count': rejections_count / n_reps,
+        'rate_max_z': rejections_max_z / n_reps,
         'rate_naive': rate_naive,
         'n_reps': n_reps,
         'n_permutations': n_permutations,
@@ -517,119 +415,178 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
 # ==============================================================================
 
 def generate_validation_report(results: dict):
-    """Generates the authoritative README.md validation report."""
+    """Generates the README.md validation report from the numbers computed in this run."""
     report_path = os.path.join(OUT_DIR, 'README.md')
-    p_egret = results['egret']
+    eg = results['egret']
     t1 = results['type1']
     drift = results['drift']
     ci = results['ci']
     field = results['field']
+    nl = chr(10)
 
-    content = f"""# Validation Report: Generalized Quantile-Kendall (`MannKS` v0.7.0)
+    ver = eg['versions'] or {}
+    ver_str = ", ".join(f"{k} {v}" for k, v in ver.items())
+    parity_rows = nl.join(
+        f"| `{r['name']}` | {r['paStart']} / {r['paLong']} | {r['n_ranks']} x {r['n_years']} | {r['n_tied_ranks']} | "
+        f"`{r['sortQ']:.1e}` | `{r['S']:.1e}` | `{r['varS']:.1e}` | `{r['tau']:.1e}` | `{r['p']:.1e}` | "
+        f"`{r['slopeLog']:.1e}` | `{r['slopePct']:.1e}` |"
+        for r in eg['rows']
+    )
+    scen_rows = nl.join(f"| `{r['name']}` | {r['description']} |" for r in eg['rows'])
+    worst = max(max(r[k] for k in ('sortQ', 'S', 'varS', 'tau', 'p', 'slopeLog', 'slopePct')) for r in eg['rows'])
+    n_rep_d = drift['n_reps']
 
-## Overview & Executive Summary
+    type1_rows = nl.join(
+        f"| **{q:0.2f}** | 0.05 | {rate:.4f} | {_mc_status(rate, 0.05, t1['n_reps'])} |"
+        for q, rate in t1['rates'].items()
+    )
+    ci_rows = nl.join(
+        f"| **{q:0.2f}** | 95.0% | {cov*100:.2f}% | {_mc_status(1.0 - cov, 0.05, ci['n_reps'])} (non-coverage) |"
+        for q, cov in ci['coverage'].items()
+    )
 
-This validation suite evaluates the mathematical correctness, numerical parity, and statistical reliability of `MannKS.quantile_trend_test` against authoritative benchmarks, primarily the **USGS EGRET R package** (*Exploration and Graphics for RivEr Trends*, Hirsch et al., 2015).
+    content = rf"""# Validation Report: Generalized Quantile-Kendall (`MannKS` v0.7.0)
 
-All five core statistical properties have been empirically verified:
-1. **Exact Parity with USGS EGRET**: Matches the official USGS EGRET implementation (`makeSortQ` + `leapEven` + `trendSortQ`) to machine epsilon on annual hydrographs with leap years.
-2. **Type I Error Rate Calibration**: Empirical false-positive rates under $H_0$ match the nominal significance level $\\alpha = 0.05$ across all quantiles.
-3. **Sampling Drift Protection**: The sampling frequency diagnostic detects 100% of sampling transitions (e.g. monthly to weekly), and `equalize='thin'` completely eliminates spurious tail trends.
-4. **Confidence Interval Coverage**: Empirical $(1 - \\alpha)$ coverage of Theil-Sen confidence bounds achieves the nominal 95% target across all quantiles.
-5. **Permutation Field Significance**: Global block permutation correctly controls family-wise error rates across multi-quantile tests, eliminating multiple-testing inflation.
+## Overview
+
+This report is generated by [`run_monte_carlo.py`](run_monte_carlo.py); every number below was computed in the run that wrote this file. It covers:
+
+1. **Parity with USGS EGRET**: `MannKS.quantile_trend_test` against the genuine EGRET R code (EGRET's `makeSortQ` + `leapOdd`/`leapEven` + `trendSortQ`, run with the EGRET, rkt and zyp R packages) on identical daily series and periods of analysis.
+2. **Type I error** of the per-quantile tests under $H_0$.
+3. **Sampling-frequency drift**: the artifact, the diagnostic, and both equalization modes.
+4. **Confidence-interval coverage** of the per-quantile slopes.
+5. **Permutation field significance** under $H_0$.
+
+Monte Carlo sample sizes are modest (a few hundred replicates), so each rate is shown with the 95% binomial Monte Carlo band it should fall in; read the tables as "consistent with nominal", not as proof of exact calibration.
 
 ---
 
-## 1. USGS EGRET Parity Validation
+## 1. USGS EGRET Parity
 
-### Benchmark Design
-A 15-year daily streamflow record (April 2000 to March 2015, including multiple leap years) was evaluated using:
-1. A reference Python port of the USGS EGRET package (`makeSortQ`, `leapEven`, and `trendSortQ`).
-2. `MannKS.quantile_trend_test(..., block_frequency='YS-APR', standardization='egret', transform='log', slope_scaling='year')`.
+### What is compared
+* **Reference**: {eg['source']}. Package versions: {ver_str}.
+* The R code in [`egret_reference.R`](egret_reference.R) is EGRET's own: `makeSortQ`, `trendSortQ`, `getFirstJulian`, `leapOdd`, `leapEven` and `odd` are copied verbatim from the EGRET vignette [*Daily Streamflow Trend Analysis*](https://doi-usgs.github.io/EGRET/articles/streamflow_trend.html) (the code behind `plotQuantileKendall`). They run on an EGRET `eList` built with `populateDaily`, `as.egret` and `setPA`, so `DecYear`, `MonthSeq` and the period of analysis are EGRET's, and the Mann-Kendall test and Theil-Sen slope are `rkt::rkt`.
+* [`egret_parity.py`](egret_parity.py) feeds the **same dates and discharges** to EGRET (through `rpy2`) and to MannKS, and stores EGRET's output in `tests/data/egret_qk/` so that `tests/test_quantile_egret_parity.py` asserts the same parity without R (and re-derives it live when R is installed).
 
-### Parity Results
-| Metric | Max Absolute Difference | Assessment |
-| :--- | :--- | :--- |
-| **Mann-Kendall Score ($S$)** | `{p_egret['s_diff']:.2e}` | **Exact Integer Match ($0.0$)** |
-| **Variance of $S$ ($\\mathrm{{Var}}(S)$)** | `{p_egret['var_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
-| **Kendall's $\\tau$** | `{p_egret['tau_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
-| **Z-Statistic ($Z$)** | `< 1e-10` | **Exact to Machine Precision** |
-| **p-value ($p$)** | `{p_egret['p_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-10}}$)** |
-| **Theil-Sen Slope (%/year)** | `{p_egret['slope_rel_diff']:.4f}%` | **$< 0.5$% relative difference** (due to 365 vs 365.25 day year) |
-| **Interpolate Mode vs. EGRET** | `{p_egret['interp_slope_rel']:.3f}%` (`{p_egret['interp_slope_abs']:.4f}` %/yr abs) | **Minor half-rank shift** (default `'hazen'` interpolation on uniform grid vs. EGRET ranks) |
+### Equivalent settings
+| EGRET | MannKS `quantile_trend_test` |
+| :--- | :--- |
+| `setPA(paStart = m, paLong = 12)` | `block_frequency='YS-<MON>'` (e.g. `paStart = 10` is `'YS-OCT'`) |
+| `paLong < 12` (seasonal period of analysis) | additionally `months=[...]` listing the `paLong` months |
+| `makeSortQ` keeps a year only if every day is present | `require_complete=True` |
+| `leapOdd` / `leapEven` rank reduction | `standardization='egret'` |
+| `time = (DecYear[first] + DecYear[last]) / 2` | `block_time='egret'` |
+| `rkt(time, log(Q))`, `slopePct = 100 * (exp(B) - 1)` | `transform='log'`, `slope_scaling='year'` (`slope` is `slopeLog`, `slope_pct` is `slopePct`) |
+| `rkt` `tau` (tau-b), `sl` (two-sided, continuity-corrected, tie-corrected) | `tau_method='b'` (default), `p` |
+| `freq = iRank / (nFreq + 1)`, `z = qnorm(freq)` | `plotting_position`, `z_position` |
+
+### Scenarios
+| Scenario | Description |
+| :--- | :--- |
+{scen_rows}
+
+### Results: maximum absolute difference, MannKS minus EGRET
+| Scenario | `paStart` / `paLong` | ranks x years | ranks with ties | `sortQ` matrix | $S$ | $\mathrm{{Var}}(S)$ | $\tau$ | $p$ (`pValue`) | `slopeLog` | `slopePct` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+{parity_rows}
+
+The largest difference in any quantity in any scenario is `{worst:.1e}`: with the settings above MannKS reproduces EGRET to floating-point rounding, including tied values and both leap-year reductions (`leapEven` for 366-day years, `leapOdd` for 91-day Dec-Feb seasons).
+
+### What is *not* the same as EGRET
+* **Default time axis.** Without `block_time='egret'` MannKS places each block at its calendar midpoint and scales by a 365.25-day year. $S$, $\mathrm{{Var}}(S)$, $\tau$ and $p$ are unchanged (they only use the order of the blocks); the slope differs by at most `{eg['centre_rel']:.4f}%` of its value in the `climate_year` scenario (magenta line in the right-hand panel below).
+* **Default standardization.** `standardization='interpolate'` (Hazen quantiles on a uniform grid) is a different estimator: mean slope difference `{eg['interp_slope_rel']:.3f}%` (`{eg['interp_slope_abs']:.4f}` %/yr) in the `climate_year` scenario.
+* **Serial-correlation-adjusted p-value.** EGRET's `trendSortQ` also returns `pValueAdj` (`zyp::zyp.zhang` trend-free pre-whitening) and `plotQuantileKendall` colours its points by `pValueAdj` (red $< 0.05$, black $\le 0.1$, grey otherwise). MannKS does not implement Zhang pre-whitening: `p` reproduces EGRET's unadjusted `pValue`, and `plot_quantile_trend` colours by `p` with bands at $\alpha$ and $2\alpha$. `pValueAdj` is stored in the fixtures for reference only. Use `autocorr_method` for MannKS's own serial-correlation corrections.
+* **Records with gaps.** EGRET's `makeSortQ` stops with an error when a year inside the record has missing days; MannKS drops that block (`require_complete=True`) and continues.
 
 ### Visual Parity
 ![USGS EGRET Parity Comparison](egret_parity_comparison.png)
 
 ---
 
-## 2. Type I Error Rate Calibration
+## 2. Type I Error Rate
 
 ### Methodology
-Evaluated {t1['n_reps']} Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks. Evaluated empirical false rejection rates at nominal $\\alpha = 0.05$.
+{t1['n_reps']} Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks; rejection rate of each per-quantile test at nominal $\alpha = 0.05$. The Mann-Kendall normal approximation with continuity correction is slightly conservative for 20 blocks.
 
-### Calibration Results
-| Quantile Rank ($p$) | Nominal $\\alpha$ | Empirical Rejection Rate | Status |
+### Results
+| Quantile ($p$) | Nominal $\alpha$ | Empirical Rejection Rate | Monte Carlo check |
 | :--- | :--- | :--- | :--- |
-{chr(10).join([f"| **{q:0.2f}** | 0.05 | {rate:.4f} | Calibrated within 95% MC bounds |" for q, rate in t1['rates'].items()])}
+{type1_rows}
 
-### Calibration Plot
+### Plot
 ![Type I Error Calibration](type1_error_calibration.png)
 
 ---
 
-## 3. Sampling Frequency Drift Trap Validation
+## 3. Sampling Frequency Drift
 
 ### The Drift Phenomenon
-When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes naturally widen over time even when the underlying data-generating process is completely stationary:
-- High quantiles exhibit **severe false upward trends**.
-- Low quantiles exhibit **severe false downward trends**.
+When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes widen over time even when the data-generating process is stationary: high order statistics trend upward and low order statistics trend downward.
 
-### Monte Carlo Verification Results ({drift['n_reps']} Replications)
-| Analytical Strategy | Quantile | False Rejection Rate | Assessment |
+### Monte Carlo Results ({n_rep_d} replications, stationary lognormal, 10 years monthly then 10 years weekly)
+Rates for the equalized analyses are two-sided rejection rates at $\alpha = 0.05$; the raw rows count only rejections in the artifact's direction.
+
+| Analysis | Rank | False Rejection Rate | Monte Carlo check vs. $\alpha = 0.05$ |
 | :--- | :--- | :--- | :--- |
-| **Naive Raw (`equalize='none'`)** | $p = 0.08$ (Lowest) | **{drift['rate_raw_low']*100:.1f}%** | Severely Inflated ($\\gg$ nominal $\\alpha$) |
-| **Naive Raw (`equalize='none'`)** | $p = 0.92$ (Highest) | **{drift['rate_raw_high']*100:.1f}%** | Severely Inflated ($\\gg$ nominal $\\alpha$) |
-| **MannKS Diagnostic (`flag`)** | Global | **{drift['rate_raw_flag']*100:.1f}%** | 100% Detection of Drift Artifact |
-| **Equalized (`equalize='thin'`)** | $p = 0.08$ (Lowest) | **{drift['rate_eq_low']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
-| **Equalized (`equalize='thin'`)** | $p = 0.92$ (Highest) | **{drift['rate_eq_high']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
+| **Raw (`equalize='none'`)** | lowest ($p = 0.08$), downward | **{drift['rate_raw_low']*100:.1f}%** | {_mc_status(drift['rate_raw_low'], 0.05, n_rep_d)} |
+| **Raw (`equalize='none'`)** | highest ($p = 0.92$), upward | **{drift['rate_raw_high']*100:.1f}%** | {_mc_status(drift['rate_raw_high'], 0.05, n_rep_d)} |
+| **`equalize='thin'`** | lowest | **{drift['rate_eq_low']*100:.1f}%** | {_mc_status(drift['rate_eq_low'], 0.05, n_rep_d)} |
+| **`equalize='thin'`** | highest | **{drift['rate_eq_high']*100:.1f}%** | {_mc_status(drift['rate_eq_high'], 0.05, n_rep_d)} |
+| **`equalize='aggregate'`** | lowest | **{drift['rate_agg_low']*100:.1f}%** | {_mc_status(drift['rate_agg_low'], 0.05, n_rep_d)} |
+| **`equalize='aggregate'`** | highest | **{drift['rate_agg_high']*100:.1f}%** | {_mc_status(drift['rate_agg_high'], 0.05, n_rep_d)} |
+
+The sampling diagnostic (`sampling_diagnostic['flag']`) was raised in **{drift['rate_raw_flag']*100:.1f}%** of the raw analyses.
+
+`equalize='aggregate'` takes sub-interval medians on a **common support**: every sub-interval of every block is thinned to the same number of observations $k$ before the median is taken (here $k = 1$, because the monthly years have one observation per month). Medians of different numbers of observations are not comparable between blocks; an implementation that takes the median of whatever is in each month makes the weekly years look compressed and produces the *opposite* artifact (lowest rank falsely increasing, highest falsely decreasing, in roughly 70-80% of replicates of this design).
 
 ### Drift Plot
 ![Sampling Drift Validation](sampling_drift_validation.png)
 
 ---
 
-## 4. Confidence Interval Empirical Coverage
+## 4. Confidence Interval Coverage
 
 ### Methodology
-Evaluated {ci['n_reps']} Monte Carlo realizations of a known linear location shift (true slope $\\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \\alpha) =$ 95% coverage.
+{ci['n_reps']} Monte Carlo realizations of a linear location shift (true slope $\beta = 0.15$ units/year at every quantile), 25 annual blocks; coverage of the 95% interval for each quantile's slope.
 
-### Coverage Results
-| Quantile Rank ($p$) | Nominal Coverage | Empirical Coverage | Status |
+### Results
+| Quantile ($p$) | Nominal Coverage | Empirical Coverage | Monte Carlo check |
 | :--- | :--- | :--- | :--- |
-{chr(10).join([f"| **{q:0.2f}** | 95.0% | {cov*100:.2f}% | Certified Valid |" for q, cov in ci['coverage'].items()])}
+{ci_rows}
 
-### CI Coverage Plot
+### Plot
 ![Confidence Interval Coverage](ci_coverage_validation.png)
 
 ---
 
-## 5. Permutation Field Significance Calibration
+## 5. Permutation Field Significance
 
-### Multiplicity Challenge
-When testing $M=15$ quantiles simultaneously under $H_0$ ({field['n_reps']} Monte Carlo replications with {field['n_permutations']} block permutations each), a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation compared to the permutation field-significance rule (`p_count < 0.05` or `p_max_z < 0.05`):
-- **Naive Joint False Alarm Rate**: **{field['rate_naive']*100:.1f}%**
-- **MannKS Permutation Field Significance**: **{field['rate_field']*100:.1f}%** (Calibrated near nominal $\\alpha = 0.05$)
+Testing $M=15$ quantiles simultaneously under $H_0$ ({field['n_reps']} Monte Carlo replications, {field['n_permutations']} block permutations each, seeded per replicate):
+
+| Rule | False alarm rate | Monte Carlo check vs. $\alpha = 0.05$ |
+| :--- | :--- | :--- |
+| Naive: any quantile with $p < 0.05$ | **{field['rate_naive']*100:.1f}%** | {_mc_status(field['rate_naive'], 0.05, field['n_reps'])} |
+| `p_count < 0.05` | **{field['rate_count']*100:.1f}%** | {_mc_status(field['rate_count'], 0.05, field['n_reps'])} |
+| `p_max_z < 0.05` | **{field['rate_max_z']*100:.1f}%** | {_mc_status(field['rate_max_z'], 0.05, field['n_reps'])} |
+| `p_count < 0.05` **or** `p_max_z < 0.05` | **{field['rate_field']*100:.1f}%** | {_mc_status(field['rate_field'], 0.05, field['n_reps'])} |
+
+Each field statistic is a level-$\alpha$ test on its own; rejecting when *either* is below $\alpha$ is two tests and is slightly above $\alpha$. Choose one statistic in advance. The permutation assumes exchangeable blocks: with strong between-block autocorrelation the field test is anti-conservative (see the methodology document, section 6).
 
 ---
 
-## Conclusion
-`MannKS.quantile_trend_test` is mathematically exact against USGS EGRET and statistically robust against sampling irregularities, multiple testing inflation, and frequency drift.
+## Reproducing
+
+```bash
+python validation/43_Quantile_Kendall/run_monte_carlo.py                   # this report
+python validation/43_Quantile_Kendall/egret_parity.py --write-fixtures     # refresh stored EGRET output (needs R)
+```
+
+The live EGRET comparison needs R with the `EGRET`, `rkt` and `zyp` packages and `rpy2` (`rpy2==3.5.17` for R < 4.5). Without them the stored EGRET output is used and section 1 says so.
 """
 
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(content.strip() + "\n")
-    print(f"\nGenerated authoritative validation report: {report_path}")
+    print(f"\nGenerated validation report: {report_path}")
 
 
 # ==============================================================================

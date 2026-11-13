@@ -7,20 +7,20 @@ Major feature release introducing frequency-agnostic, censor-aware, and drift-pr
 ### New Features & APIs
 * **Generalized Quantile-Kendall Test (`quantile_trend_test`)**:
   - Partitions time series into consecutive, non-overlapping temporal blocks (`block_frequency`, e.g. `'YE'`, `'5YE'`, `'QE'`, `'ME'`, sub-daily offsets, or numeric widths), with optional `block_origin` and `months` seasonal filtering.
-  - Standardizes order statistics using linear quantile interpolation (`'interpolate'`), exact USGS EGRET leap-year rank reduction (`'egret'`), or explicit non-exceedance percentiles (`quantiles=[0.05, 0.5, 0.95]`), with configurable `target_length` (`'min'`, `'median'`, `'max'`, or explicit integer).
+  - Standardizes order statistics using quantile interpolation (`'interpolate'`, Hazen by default), USGS EGRET leap-year rank reduction (`'egret'`), or explicit non-exceedance percentiles (`quantiles=[0.05, 0.5, 0.95]`), with configurable `target_length` (`'min'`, `'median'`, `'max'`, or explicit integer).
   - Native handling of detection limits (`<DL`, `>DL`) with rank-based censor propagation (`censor_quantile_method='propagate'`) and robust Akritas-Theil-Sen (ATS) slope estimation, plus `hicensor` recensoring.
   - Optional transformations (`transform='log'`, `'pct_of_median'`, `'none'`/`None`), computing exponentiated percentage change per time unit (`slope_pct`) and vectorized acceleration via `engine='fast'`.
   - Coverage filtering (`min_coverage`, `require_complete`) to eliminate bias from partial blocks, supporting sub-daily blocks and exact seasonal month-window coverage.
 * **Sampling Frequency Drift Protection**:
   - Built-in diagnostic (`sampling_diagnostic`) evaluates Kendall's $\tau$ on sample size across time blocks and flags sampling frequency drift ($p < 0.10$ or $N_{\max}/N_{\min} > 1.5$).
-  - Equalization strategies (`equalize='thin'` and adaptive `equalize='aggregate'`) eliminate artificial tail order-statistic expansion caused by historical shifts in monitoring frequency.
+  - Equalization strategies remove the artificial tail order-statistic expansion caused by historical shifts in monitoring frequency: `equalize='thin'` (systematic thinning to the smallest block) and `equalize='aggregate'` (robust medians within adaptive sub-intervals, taken on a common support of $k$ observations per sub-interval in every block so that medians are comparable between blocks; $k$ is reported as `sampling_diagnostic['aggregate_support']`).
 * **Permutation Field Significance**:
   - Global matrix permutation test (`field_significance=True`) evaluates joint non-monotonicity across all quantiles while preserving empirical cross-quantile correlation.
 * **Diagnostic Visualization (`plot_quantile_trend` / `plot_quantile_kendall`)**:
   - Dual normal Z / probability coordinates: plots on probit scale ($Z = \Phi^{-1}(p)$) with probability tick labels (`.001` to `.999`).
   - Linear probability mode (`x_scale='linear'`).
   - Flow Duration Curve overlay (`show_fdc=True`) displaying median concentration/flow on a secondary right-hand y-axis (`twinx`).
-  - Significance color bands (`color_by='p'`) matching EGRET color schemes, or IPCC/LWP category mapping (`color_by='classification'`).
+  - Significance color bands (`color_by='p'`: $p < \alpha$, $\alpha \le p < 2\alpha$, $p \ge 2\alpha$, in the style of EGRET's Quantile-Kendall plot but using the unadjusted Mann-Kendall `p`), or IPCC/LWP category mapping (`color_by='classification'`).
   - Confidence interval error whiskers (`show_ci=True`) and percentage slope labeling.
 * **Regime Summary Tool (`summarize_quantile_regimes`)**:
   - Aggregates quantile slopes into intuitive low (0–25%), mid (25–75%), and high (75–100%) hydrological or water-quality regimes.
@@ -30,7 +30,10 @@ Major feature release introducing frequency-agnostic, censor-aware, and drift-pr
 * Added comprehensive deep-dive practical guide: [`Examples/Detailed_Guides/quantile_trend_guide.md`](Examples/Detailed_Guides/quantile_trend_guide.md).
 * Added four-part practical example: [`Examples/36_Quantile_Kendall/`](Examples/36_Quantile_Kendall/README.md) covering weekly nitrate, daily flow 5-year blocks, sparse irregular groundwater, and sampling frequency drift trap.
 * Added real-world monthly monitoring example: [`Examples/37_Monthly_Censored_Quantile_Kendall/`](Examples/37_Monthly_Censored_Quantile_Kendall/README.md) covering missing visits, incomplete-year exclusion, shifting detection limits, and NPS-FM 92nd/95th percentiles.
-* Added USGS EGRET parity & Monte Carlo validation suite: [`validation/43_Quantile_Kendall/`](validation/43_Quantile_Kendall/README.md).
+* Added USGS EGRET parity & Monte Carlo validation suite: [`validation/43_Quantile_Kendall/`](validation/43_Quantile_Kendall/README.md). Parity is measured against the **genuine EGRET R code** (EGRET's `makeSortQ`/`trendSortQ` run with the EGRET, rkt and zyp packages through `rpy2`): with `standardization='egret'`, `transform='log'`, `require_complete=True` and the new `block_time='egret'`, MannKS reproduces EGRET's rank matrix, $S$, $\mathrm{Var}(S)$, $\tau$, p-value and slopes to floating-point rounding for climate, water and calendar years, tied flows, and seasonal periods of analysis. EGRET's output is stored in `tests/data/egret_qk/` so the test suite asserts the same parity without R.
+* `block_time='egret'` uses EGRET's `midDecYear` (mean decimal year of the first and last observation of each block) as the block time, giving slopes per decimal year exactly as EGRET does; the default `'center'` uses the calendar midpoint of each block.
+* Timezone-aware timestamps are analysed in local wall-clock time: block boundaries, `months` and reported block times are local (tz-naive), so calendar and water years start at local midnight.
+* `block_origin` never drops observations: block edges always span the record, calendar-anchored frequencies snap to their anchors with a `UserWarning`, and an origin far outside the record only sets the phase of the blocks.
 * Exported `quantile_trend_test`, `QuantileTrendResult`, `summarize_quantile_regimes`, `plot_quantile_trend`, and `plot_quantile_kendall` in top-level `MannKS` namespace.
 
 ## 0.6.3 — code audit & correctness release

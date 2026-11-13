@@ -1,0 +1,34 @@
+{
+  "scenarios": {
+    "calendar_year_ties": {
+      "dataset": "ties",
+      "description": "Calendar year (Jan-Dec), flows rounded to 0.1 (heavy ties)",
+      "paLong": 12,
+      "paStart": 1
+    },
+    "climate_year": {
+      "dataset": "smooth",
+      "description": "Climate year (Apr-Mar), continuous flows, record starts/ends mid-year (partial years dropped)",
+      "paLong": 12,
+      "paStart": 4
+    },
+    "water_year_ties": {
+      "dataset": "ties",
+      "description": "Water year (Oct-Sep), flows rounded to 0.1 (heavy ties), partial first/last years",
+      "paLong": 12,
+      "paStart": 10
+    },
+    "winter_djf": {
+      "dataset": "ties",
+      "description": "Seasonal period of analysis Dec-Feb (90/91 days: exercises leapOdd)",
+      "paLong": 3,
+      "paStart": 12
+    }
+  },
+  "versions": {
+    "EGRET": "3.0.12",
+    "R": "4.3.3",
+    "rkt": "1.9",
+    "zyp": "0.11.1"
+  }
+}

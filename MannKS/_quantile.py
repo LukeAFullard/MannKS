@@ -115,6 +115,10 @@ def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):
             origin = pd.Timestamp(block_origin)
             if origin.tzinfo is not None:
                 origin = origin.tz_convert(None)
+            origin_unaligned = (
+                not isinstance(start_offset, pd.offsets.Tick)
+                and not start_offset.is_on_offset(origin)
+            )
             while origin > t_min_ts:
                 prev = origin - start_offset
                 if prev >= origin:
@@ -143,6 +147,35 @@ def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):
             edges_dt = pd.date_range(start=origin, periods=len(edges_dt) + 1, freq=start_offset)
             if prev_last is not None and pd.Timestamp(edges_dt[-1]) <= prev_last:
                 break
+
+        # Calendar-anchored offsets (e.g. 'YS-APR', 'QS', 'MS') cannot start a
+        # block between anchors: ``pd.date_range`` rolls an unaligned origin
+        # *forward* to the next anchor.  Say so, and make sure the first edge
+        # never lands after the first observation (which would silently drop
+        # every observation before it).
+        first_edge = pd.Timestamp(edges_dt[0])
+        if block_origin is not None and origin_unaligned:
+            warnings.warn(
+                f"`block_origin` ({pd.Timestamp(block_origin)}) is not aligned with "
+                f"block_frequency '{block_frequency}'; block edges fall on that frequency's "
+                f"calendar anchors instead (first edge {first_edge}). Use an anchored frequency "
+                f"(e.g. 'YS-JUL') or a fixed-length Timedelta to start blocks elsewhere.",
+                UserWarning,
+            )
+        lead = []
+        while first_edge > t_min_ts:
+            prev_edge = first_edge - start_offset
+            if prev_edge >= first_edge:
+                break
+            lead.append(prev_edge)
+            first_edge = prev_edge
+        if lead:
+            edges_dt = pd.DatetimeIndex(lead[::-1]).append(edges_dt)
+        # An origin far before the record only fixes the phase of the blocks:
+        # drop leading edges whose block ends at or before the first observation.
+        n_skip = int(np.searchsorted(edges_dt.to_numpy(), t_min_ts.to_datetime64(), side='right')) - 1
+        if n_skip > 0:
+            edges_dt = edges_dt[n_skip:]
         return edges_dt.to_numpy()
     else:
         width = float(block_frequency)
@@ -277,6 +310,15 @@ def _assign_blocks(
     global_step_sec = float(np.median(pos_all_diffs)) if len(pos_all_diffs) > 0 else (86400.0 if is_datetime else np.nan)
 
     indices = (np.searchsorted(edge_nums, t_nums, side='right') - 1).astype(np.intp, copy=False)
+    n_unassigned = int(np.sum((indices < 0) | (indices > len(edges) - 2)))
+    if n_unassigned:
+        # Block edges must span every observation; anything else is a bug in
+        # `_block_edges`, and dropping data silently is never acceptable.
+        raise RuntimeError(
+            f"Internal error: {n_unassigned} observation(s) fall outside the block edges "
+            f"[{edges[0]}, {edges[-1]}). Please report this with your `block_frequency` "
+            f"and `block_origin`."
+        )
 
     summary_records = []
     valid_groups = []
@@ -341,6 +383,19 @@ def _assign_blocks(
 
     summary_df = pd.DataFrame(summary_records)
     return valid_groups, summary_df, np.array(block_centers)
+
+def _egret_decimal_year(timestamps) -> np.ndarray:
+    """
+    EGRET ``DecYear`` of each timestamp's calendar day: the day is placed at
+    noon, i.e. ``year + (day_of_year - 0.5) / days_in_year`` (EGRET
+    ``populateDateColumns``).  Verified against EGRET 3.0.12.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(timestamps))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    days_in_year = np.where(idx.is_leap_year, 366.0, 365.0)
+    return (idx.year + (idx.dayofyear - 0.5) / days_in_year).to_numpy(dtype=float)
+
 
 def _plotting_positions(M: int):
     ranks = np.arange(1, M + 1, dtype=float)
@@ -485,7 +540,62 @@ def _sampling_diagnostic(block_centers, block_sizes):
         'flag': flag
     }
 
-def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True):
+def _centered_systematic_indices(n: int, k: int) -> np.ndarray:
+    """``k`` evenly spread, distinct positions in ``range(n)`` (``k <= n``), centred in their strata."""
+    return np.floor((np.arange(k) + 0.5) * n / k).astype(np.intp)
+
+
+def _sub_interval_keys(df: pd.DataFrame, is_datetime: bool, agg_unit):
+    """Sub-interval key per observation of one block, plus the pandas period used for labelling."""
+    n_bins = 12
+    if is_datetime:
+        dt_col = pd.to_datetime(df['t_original'])
+        if getattr(dt_col.dt, 'tz', None) is not None:
+            dt_col = dt_col.dt.tz_localize(None)
+        if agg_unit == 'month':
+            sub_key = (dt_col.dt.year * 100 + dt_col.dt.month).to_numpy()
+            freq_str = 'ME'
+        elif agg_unit == 'day':
+            sub_key = dt_col.dt.floor('D').to_numpy()
+            freq_str = 'D'
+        elif agg_unit == 'hour':
+            sub_key = dt_col.dt.floor('h').to_numpy()
+            freq_str = 'h'
+        else:
+            sub_key = dt_col.dt.floor('min').to_numpy()
+            freq_str = 'min'
+        if pd.Series(sub_key).nunique() >= 2 or len(df) < 2:
+            return sub_key, freq_str
+    t_vals = df['t'].to_numpy(dtype=float)
+    span = t_vals.max() - t_vals.min()
+    if span <= 0:
+        return np.zeros(len(df), dtype=np.intp), None
+    # Exactly `n_bins` equal-width bins; the right endpoint belongs to the last bin.
+    sub_key = np.minimum(np.floor((t_vals - t_vals.min()) / (span / n_bins)), n_bins - 1).astype(np.intp)
+    return sub_key, None
+
+
+def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True, info: dict = None):
+    """
+    Equalize the sampling of the valid blocks.
+
+    ``'thin'``: systematic thinning of every block to the smallest block size.
+
+    ``'aggregate'``: robust median within sub-intervals of every block, computed
+    on a **common support**: every sub-interval of every block is first thinned
+    (systematically, in time order) to ``k`` observations, where ``k`` is the
+    smallest number of observations found in any populated sub-interval of any
+    valid block.  The median of 4 weekly values has a much narrower sampling
+    distribution than a single monthly value, so medians taken over *different*
+    numbers of observations are not comparable between blocks: without the
+    common support a monthly-to-weekly change of sampling frequency makes the
+    later blocks look compressed (spurious upward trends in low quantiles and
+    downward trends in high quantiles).  With ``k == 1`` the mode reduces to
+    stratified thinning (one observation per sub-interval).
+
+    If ``info`` is a dict it receives ``'aggregate_support'`` (``k``) and
+    ``'aggregate_unit'``.
+    """
     if mode == 'none' or not valid_group_dfs:
         return valid_group_dfs
     elif mode == 'thin':
@@ -501,7 +611,6 @@ def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True):
         return thinned
     elif mode == 'aggregate':
         from ._helpers import _aggregate_by_group
-        aggregated = []
         agg_unit = None
         if is_datetime:
             spans_days = []
@@ -518,48 +627,28 @@ def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True):
             else:
                 agg_unit = 'minute'
 
+        keyed = []
+        support = None
         for df in valid_group_dfs:
-            if is_datetime:
-                dt_col = pd.to_datetime(df['t_original'])
-                if getattr(dt_col.dt, 'tz', None) is not None:
-                    dt_col = dt_col.dt.tz_convert(None)
-                if agg_unit == 'month':
-                    sub_key = dt_col.dt.year * 100 + dt_col.dt.month
-                    freq_str = 'ME'
-                elif agg_unit == 'day':
-                    sub_key = dt_col.dt.floor('D')
-                    freq_str = 'D'
-                elif agg_unit == 'hour':
-                    sub_key = dt_col.dt.floor('h')
-                    freq_str = 'h'
-                else:
-                    sub_key = dt_col.dt.floor('min')
-                    freq_str = 'min'
-                if pd.Series(sub_key).nunique() < 2 and len(df) >= 2:
-                    t_vals = df['t'].to_numpy(dtype=float)
-                    span = t_vals.max() - t_vals.min()
-                    if span > 0:
-                        step = span / 12.0
-                        sub_key = np.floor((t_vals - t_vals.min()) / step).astype(np.intp)
-                        freq_str = None
-            else:
-                t_vals = df['t'].to_numpy(dtype=float)
-                span = t_vals.max() - t_vals.min()
-                step = span / 12.0 if span > 0 else 1.0
-                sub_key = np.floor((t_vals - t_vals.min()) / step).astype(np.intp)
-                freq_str = None
-            df_tmp = df.assign(_sub_key=np.asarray(sub_key))
-            agg_df = pd.DataFrame([
-                _aggregate_by_group(
-                    g.drop(columns='_sub_key'),
-                    'robust_median',
-                    is_datetime,
-                    period=freq_str,
-                    return_dict=True,
-                )
-                for _, g in df_tmp.groupby('_sub_key', sort=True)
-            ])
-            aggregated.append(agg_df.sort_values('t', kind='stable').reset_index(drop=True))
+            sub_key, freq_str = _sub_interval_keys(df, is_datetime, agg_unit)
+            keyed.append((df.assign(_sub_key=np.asarray(sub_key)), freq_str))
+            _, counts = np.unique(np.asarray(sub_key), return_counts=True)
+            block_min = int(counts.min())
+            support = block_min if support is None else min(support, block_min)
+        support = max(1, int(support))
+        if info is not None:
+            info['aggregate_support'] = support
+            info['aggregate_unit'] = agg_unit if is_datetime else 'bin'
+
+        aggregated = []
+        for df_tmp, freq_str in keyed:
+            rows = []
+            for _, g in df_tmp.groupby('_sub_key', sort=True):
+                g = g.drop(columns='_sub_key')
+                if len(g) > support:
+                    g = g.iloc[_centered_systematic_indices(len(g), support)]
+                rows.append(_aggregate_by_group(g, 'robust_median', is_datetime, period=freq_str, return_dict=True))
+            aggregated.append(pd.DataFrame(rows).sort_values('t', kind='stable').reset_index(drop=True))
         return aggregated
     else:
         raise ValueError(f"Unknown equalize mode: '{mode}'.")

@@ -27,6 +27,7 @@ from ._quantile import (
     _equalize_blocks,
     _mk_s_matrix,
     _normalize_start_freq,
+    _egret_decimal_year,
 )
 
 _Quantile_Trend_Tuple = namedtuple('Quantile_Trend_Test', [
@@ -347,6 +348,7 @@ def quantile_trend_test(
     target_length='min',
     standardization='interpolate',
     quantile_method='hazen',
+    block_time='center',
     min_size_per_block=10,
     min_blocks=5,
     min_coverage=0.9,
@@ -387,7 +389,10 @@ def quantile_trend_test(
         ``'value'``, ``'censored'``, and ``'cen_type'`` (or as returned by
         ``prepare_censored_data``).
     t : array-like
-        Observation times (datetime-like or numeric).
+        Observation times (datetime-like or numeric). Timezone-aware timestamps
+        are analysed in their own local wall-clock time: block boundaries, the
+        ``months`` filter and all reported block times are local (e.g. a calendar
+        year starts at local midnight on 1 January), and are returned tz-naive.
     block_frequency : str or float, default 'YE'
         Duration of time blocks. For datetime-like ``t``, a pandas offset string
         such as ``'YE'`` (annual calendar year), ``'5YE'`` (5-year epochs),
@@ -395,7 +400,12 @@ def quantile_trend_test(
         specifying block width.
     block_origin : datetime-like, numeric, or None, default None
         Fixed anchor point for block boundaries. If None, calendar boundaries
-        or data minimum are used.
+        or data minimum are used. Calendar-anchored frequencies (``'YE'``,
+        ``'YS-OCT'``, ``'QE'``, ``'ME'`` ...) can only start a block on their own
+        anchor, so an origin between anchors only selects the phase of multi-period
+        blocks (e.g. which years start a ``'5YE'`` block) and a ``UserWarning``
+        reports the edges actually used; no observation is ever dropped. A
+        timezone-aware origin is converted to the timezone of ``t``.
     months : sequence of int or None, default None
         Months to include within each annual block (1-12). If specified, filters
         observations to selected seasons before block analysis.
@@ -418,6 +428,16 @@ def quantile_trend_test(
         - ``'egret'``: Exact USGS EGRET leap-year rank-reduction method (365 ranks).
     quantile_method : str, default 'hazen'
         Percentile calculation method passed to ``numpy.quantile`` (e.g. ``'hazen'``, ``'linear'``, ``'weibull'``).
+    block_time : {'center', 'egret'}, default 'center'
+        Time coordinate given to each block in the trend tests:
+        - ``'center'``: Calendar midpoint of the block ``[block_start, block_end)``.
+        - ``'egret'``: USGS EGRET ``midDecYear`` — the mean of the EGRET decimal
+          year (``year + (day_of_year - 0.5) / days_in_year``) of the first and
+          last observation in the block. Slopes are then per (decimal) year,
+          exactly as in EGRET. Requires datetime ``t`` and ``slope_scaling='year'``.
+          Together with ``standardization='egret'``, ``transform='log'``,
+          and ``require_complete=True`` this reproduces EGRET's
+          ``makeSortQ`` / ``trendSortQ`` output (see ``validation/43_Quantile_Kendall``).
     min_size_per_block : int, default 10
         Minimum number of observations required to retain a block.
     min_blocks : int, default 5
@@ -436,7 +456,13 @@ def quantile_trend_test(
           ``linspace``) down to the minimum valid block sample size.
         - ``'aggregate'``: Computes censored-aware ``'robust_median'`` within monthly
           sub-intervals (multi-month blocks), daily/hourly/minute sub-intervals (shorter
-          datetime blocks), or 12 sub-intervals (numeric time).
+          datetime blocks), or 12 sub-intervals (numeric time). Every sub-interval is
+          first thinned to a common number of observations ``k`` (the smallest count
+          in any populated sub-interval of any valid block, reported as
+          ``sampling_diagnostic['aggregate_support']``), because medians of different
+          numbers of observations are not comparable between blocks. When sampling
+          frequency changed over the record ``k`` is typically 1 and the mode reduces
+          to stratified thinning (one observation per sub-interval).
     censor_quantile_method : {'propagate', 'substitute', 'error'}, default 'propagate'
         Handling of censored values during quantile standardization:
         - ``'propagate'``: Tracks censoring flags through order statistics and applies
@@ -548,6 +574,8 @@ def quantile_trend_test(
         raise ValueError("`censor_quantile_method` must be 'propagate', 'substitute', or 'error'.")
     if transform not in ('none', 'log', 'pct_of_median'):
         raise ValueError("`transform` must be 'none', 'log', or 'pct_of_median'.")
+    if block_time not in ('center', 'egret'):
+        raise ValueError("`block_time` must be 'center' or 'egret'.")
     if engine not in ('trend_test', 'fast'):
         raise ValueError("`engine` must be 'trend_test' or 'fast'.")
     if isinstance(min_size_per_block, (bool, np.bool_)) or not isinstance(min_size_per_block, (int, np.integer)) or int(min_size_per_block) < 1:
@@ -600,6 +628,32 @@ def quantile_trend_test(
     module_notes = []
     module_warnings = []
 
+    # Timezone-aware timestamps are analysed in local wall-clock time, so that
+    # "calendar year", "water year" and `months` mean what they mean locally.
+    t_work = t
+    data_tz = None
+    if _is_datetime_like(t_arr):
+        try:
+            t_idx = pd.DatetimeIndex(pd.Index(t))
+        except (TypeError, ValueError):
+            t_idx = None
+        if t_idx is not None and t_idx.tz is not None:
+            data_tz = t_idx.tz
+            t_work = t_idx.tz_localize(None)
+            module_notes.append(
+                f"timezone-aware timestamps analysed in local wall-clock time ({data_tz}); "
+                "block boundaries and block times are tz-naive local times"
+            )
+    origin_work = block_origin
+    if block_origin is not None and _is_datetime_like(t_arr):
+        try:
+            origin_ts = pd.Timestamp(block_origin)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid `block_origin` {block_origin!r} for datetime data.")
+        if origin_ts.tzinfo is not None:
+            origin_ts = (origin_ts.tz_convert(data_tz) if data_tz is not None else origin_ts.tz_convert('UTC')).tz_localize(None)
+        origin_work = origin_ts
+
     def _empty_result(is_dt, blocks_df=None):
         return QuantileTrendResult(
             results=pd.DataFrame(columns=_RESULTS_COLUMNS),
@@ -626,9 +680,15 @@ def quantile_trend_test(
         with warnings.catch_warnings(record=True) as outer_w_log:
             warnings.simplefilter("always")
     
-            data_filtered, is_datetime = _prepare_data(x, t, hicensor)
+            data_filtered, is_datetime = _prepare_data(x, t_work, hicensor)
             data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
     
+            if block_time == 'egret':
+                if not is_datetime:
+                    raise ValueError("`block_time='egret'` requires datetime-like `t`.")
+                if slope_scaling != 'year':
+                    raise ValueError("`block_time='egret'` reports slopes per decimal year and requires `slope_scaling='year'`.")
+
             if len(data_filtered) < 2:
                 warnings.warn("Insufficient data for Quantile-Kendall analysis.", UserWarning)
                 for w in outer_w_log:
@@ -655,7 +715,7 @@ def quantile_trend_test(
                             warnings.warn(f"Cross-year `months={list(months)}` used with calendar-year block frequency.", UserWarning)
     
             valid_groups, blocks_df, block_centers = _assign_blocks(
-                data=data_filtered, block_frequency=block_frequency, block_origin=block_origin,
+                data=data_filtered, block_frequency=block_frequency, block_origin=origin_work,
                 months=months, min_size_per_block=min_size_per_block, min_coverage=min_coverage,
                 require_complete=require_complete, is_datetime=is_datetime,
             )
@@ -672,6 +732,12 @@ def quantile_trend_test(
             if n_valid_blocks < 10:
                 module_notes.append(f"block count ({n_valid_blocks}) below recommended minimum (10)")
     
+            egret_times = None
+            if block_time == 'egret':
+                first_obs = [g['t_original'].iloc[0] for g in valid_groups]
+                last_obs = [g['t_original'].iloc[-1] for g in valid_groups]
+                egret_times = 0.5 * (_egret_decimal_year(first_obs) + _egret_decimal_year(last_obs))
+
             block_sizes = np.array([len(g) for g in valid_groups], dtype=np.intp)
             samp_diag = _sampling_diagnostic(block_centers, block_sizes)
             if samp_diag['flag'] and equalize == 'none':
@@ -680,9 +746,18 @@ def quantile_trend_test(
                 module_notes.append(drift_msg)
     
             if equalize != 'none':
-                valid_groups = _equalize_blocks(valid_groups, equalize, is_datetime=is_datetime)
+                eq_info = {}
+                valid_groups = _equalize_blocks(valid_groups, equalize, is_datetime=is_datetime, info=eq_info)
                 block_sizes = np.array([len(g) for g in valid_groups], dtype=np.intp)
                 samp_diag = _sampling_diagnostic(block_centers, block_sizes)
+                if equalize == 'aggregate':
+                    k_sup = int(eq_info.get('aggregate_support', 1))
+                    samp_diag['aggregate_support'] = k_sup
+                    module_notes.append(
+                        f"equalize='aggregate': each sub-interval value is the robust median of "
+                        f"{k_sup} observation(s) (common support across all blocks)"
+                        + ("; equivalent to stratified thinning" if k_sup == 1 else "")
+                    )
                 if samp_diag['flag']:
                     module_notes.append(
                         f"Residual sampling-frequency imbalance remains after equalize='{equalize}' "
@@ -745,7 +820,7 @@ def quantile_trend_test(
                 if has_non_pos:
                     module_notes.append("transform='pct_of_median' encountered non-positive quantile median; set to NaN.")
     
-            eff_slope_scaling = slope_scaling if is_datetime else None
+            eff_slope_scaling = slope_scaling if (is_datetime and egret_times is None) else None
             if eff_slope_scaling:
                 try:
                     _get_slope_scaling_factor(eff_slope_scaling)
@@ -768,14 +843,21 @@ def quantile_trend_test(
                 and not np.isnan(work_matrix).any()
             )
     
-            t_numeric_blocks = _to_numeric_time(block_centers)
+            if egret_times is not None:
+                t_numeric_blocks = egret_times
+                t_for_trend = egret_times
+                trend_is_datetime = False
+            else:
+                t_numeric_blocks = _to_numeric_time(block_centers)
+                t_for_trend = block_centers
+                trend_is_datetime = is_datetime
             col_warning_counts = Counter()
             results_list = []
     
             if use_fast_engine:
                 comp_mode = 'fast'
                 fast_rows = _fast_uncensored_matrix_trends(
-                    M_matrix=work_matrix, t_numeric=t_numeric_blocks, is_datetime=is_datetime,
+                    M_matrix=work_matrix, t_numeric=t_numeric_blocks, is_datetime=trend_is_datetime,
                     alpha=alpha, slope_scaling=eff_slope_scaling, x_unit=eff_x_unit,
                     continuous_confidence=continuous_confidence, category_map=category_map,
                     ci_method=mk_kwargs.get('ci_method', 'direct'),
@@ -799,7 +881,7 @@ def quantile_trend_test(
                     with warnings.catch_warnings(record=True) as col_w:
                         warnings.simplefilter("always")
                         res_k = trend_test(
-                            x=x_input, t=block_centers, alpha=alpha, hicensor=False,
+                            x=x_input, t=t_for_trend, alpha=alpha, hicensor=False,
                             category_map=category_map, continuous_confidence=continuous_confidence,
                             slope_scaling=eff_slope_scaling, x_unit=eff_x_unit, min_size=None,
                             random_state=random_state, **mk_kwargs,
@@ -831,12 +913,23 @@ def quantile_trend_test(
                         'analysis_notes': res_k.analysis_notes,
                     })
     
-            scale_unit_label = (
-                eff_slope_scaling.lower()
-                if (eff_slope_scaling and is_datetime)
-                else ("second" if is_datetime else "unit of t")
-            )
+            if egret_times is not None:
+                scale_unit_label = "year"
+            else:
+                scale_unit_label = (
+                    eff_slope_scaling.lower()
+                    if (eff_slope_scaling and is_datetime)
+                    else ("second" if is_datetime else "unit of t")
+                )
+            _sec_per_year = 365.25 * 86400.0
             for k, row_dict in enumerate(results_list):
+                if egret_times is not None:
+                    # The trend engines saw numeric decimal years: slopes are per year.
+                    row_dict['slope_units'] = f"{eff_x_unit} per year"
+                    for src, dst in (('slope', 'slope_per_second'), ('lower_ci', 'lower_ci_per_second'),
+                                     ('upper_ci', 'upper_ci_per_second')):
+                        v = row_dict[src]
+                        row_dict[dst] = float(v / _sec_per_year) if pd.notna(v) else np.nan
                 slp = row_dict['slope']
                 lo = row_dict['lower_ci']
                 hi = row_dict['upper_ci']
