@@ -37,13 +37,20 @@ MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 
 The time domain $T = [t_{\min}, t_{\max}]$ is partitioned into $B$ consecutive, non-overlapping blocks $b_1, b_2, \dots, b_B$ defined by `block_frequency` (e.g., annual `'YE'`, water year `'YS-OCT'`, or multi-year `'5YE'`).
 
-For each block $k \in \{1, \dots, B\}$:
+For each block $k = 1, \dots, B$:
 1. All valid observations $(x_{i, k}, t_{i, k})$ within the block are collected.
 2. The temporal coverage $C_k$ is computed:
-   $$C_k = \min\!\left(1,\; \frac{\max(t_{i, k}) - \min(t_{i, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}}}\right)$$
+
+   $$
+   C_k = \min\left(1, \frac{\max(t_{i, k}) - \min(t_{i, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}}}\right)
+   $$
+
    where $\Delta t_{\text{med}, k}$ is the median spacing between distinct observation times in the block (defaulting to 1 day for single-observation datetime blocks). Blocks with coverage $C_k < C_{\min}$ (specified by `min_coverage`) or sample count $N_k < N_{\min}$ (specified by `min_size_per_block`) are rejected as incomplete.
 3. The remaining observations are sorted in ascending order to obtain the empirical order statistics:
-   $$x_{(1), k} \le x_{(2), k} \le \dots \le x_{(n_k), k}$$
+
+   $$
+   x_{(1), k} \le x_{(2), k} \le \dots \le x_{(n_k), k}
+   $$
 
 ### 2. Length Standardization
 
@@ -51,7 +58,11 @@ Because blocks may contain different numbers of observations $n_k$ (e.g., 365 vs
 
 * **Linear Interpolation (`standardization='interpolate'`):**
   Evaluates quantiles at uniform non-exceedance probabilities:
-  $$u_j = \frac{j - 1}{M - 1}, \quad j = 1, \dots, M$$
+
+  $$
+  u_j = \frac{j - 1}{M - 1}, \quad j = 1, \dots, M
+  $$
+
 * **EGRET Parity (`standardization='egret'`):**
   Replicates EGRET's exact leap-year adjustment: for 366-day leap years, the middle rank ($j=183$) is dropped (`leapOdd`) or averaged with its neighbor (`leapEven`), maintaining exactly 365 ranks per block.
 * **Explicit Quantiles (`quantiles=[q_1, q_2, \dots]`):**
@@ -61,10 +72,18 @@ The resulting standardized values form a $B \times M$ matrix $\mathbf{X}$, where
 
 ### 3. Weibull Plotting Positions & Dual Normal Coordinates
 
-For plotting and reporting, each rank $j \in \{1, \dots, M\}$ is mapped to a non-exceedance probability using Weibull plotting positions:
-$$p_j = \frac{j}{M + 1}$$
+For plotting and reporting, each rank $j = 1, \dots, M$ is mapped to a non-exceedance probability using Weibull plotting positions:
+
+$$
+p_j = \frac{j}{M + 1}
+$$
+
 To visualize extreme tails with high resolution, probabilities are mapped to standard normal quantiles (Z-scale):
-$$Z_j = \Phi^{-1}(p_j)$$
+
+$$
+Z_j = \Phi^{-1}(p_j)
+$$
+
 where $\Phi^{-1}$ is the standard normal quantile function (`scipy.stats.norm.ppf`). When `x_scale='normal'`, the plot displays data on the linear $Z$-scale while labeling primary tick marks with intuitive non-exceedance probabilities (`.001`, `.01`, `.05`, `.10`, `.25`, `.50`, `.75`, `.90`, `.95`, `.99`, `.999`).
 
 ### 4. Permutation Field Significance
@@ -221,7 +240,7 @@ result = quantile_trend_test(
   Main trend results table with one row per quantile rank:
   * `rank`: Integer index from $1$ to $M$.
   * `quantile`: Nominal percentile in $[0, 1]$.
-  * `plotting_position`: Weibull non-exceedance probability $p = j / (M + 1)$ for `'auto'`/`int` grids, or user-supplied percentile clipped to $[1/(n_{\text{med}}+1),\, n_{\text{med}}/(n_{\text{med}}+1)]$ for explicit quantile sequences.
+  * `plotting_position`: Weibull non-exceedance probability $p = j / (M + 1)$ for `'auto'`/`int` grids, or user-supplied percentile clipped to $[1/(n_{\text{med}}+1), n_{\text{med}}/(n_{\text{med}}+1)]$ for explicit quantile sequences.
   * `z_position`: Standard normal quantile $Z = \Phi^{-1}(p)$.
   * `slope`: Sen's / ATS slope in scaled units (e.g. $\text{mg/L/year}$, or natural-log units per year when `transform='log'`).
   * `lower_ci`, `upper_ci`: $(1 - \alpha)$ confidence bounds for `slope`.

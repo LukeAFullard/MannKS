@@ -383,8 +383,8 @@ When applying Quantile-Kendall to monthly monitoring datasets over **10 to 20 ye
 Within an annual block of 12 monthly samples:
 - The 12th (highest) sample has non-exceedance probability $p \\approx 0.92$ (Weibull $12/13$) or $p \\approx 0.96$ (Hazen $(12 - 0.5)/12$).
 - The 11th (second-highest) sample has $p \\approx 0.85$ to $0.88$.
-- **The 92nd percentile** is interpolated between the 11th and 12th samples ($1 + 0.92 \\times 11 = 11.12$ in 1-based rank: $0.88\\,x_{(11)} + 0.12\\,x_{(12)}$), primarily tracking the **second-highest monthly value** of the year.
-- **The 95th percentile** uses Type-7 linear interpolation ($1 + 0.95 \\times 11 = 11.45$ in 1-based rank, or index $10.45$ in 0-based indexing: $0.55\\,x_{(11)} + 0.45\\,x_{(12)}$), blending nearly equally between the second-highest and highest monthly values.
+- **The 92nd percentile** is interpolated between the 11th and 12th samples ($1 + 0.92 \\times 11 = 11.12$ in 1-based rank: $0.88 x_{(11)} + 0.12 x_{(12)}$), primarily tracking the **second-highest monthly value** of the year.
+- **The 95th percentile** uses Type-7 linear interpolation ($1 + 0.95 \\times 11 = 11.45$ in 1-based rank, or index $10.45$ in 0-based indexing: $0.55 x_{(11)} + 0.45 x_{(12)}$), blending nearly equally between the second-highest and highest monthly values.
 
 In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests whether the **annual peak runoff events are intensifying** over time.
 

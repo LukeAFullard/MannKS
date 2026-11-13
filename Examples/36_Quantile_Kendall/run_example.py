@@ -433,7 +433,7 @@ regimes2 = summarize_quantile_regimes(
 ## Case 3: Sparse Irregular Censored Groundwater
 
 ### Scientific Background
-Ambient groundwater quality networks typically do not record daily or weekly data. Instead, wells are visited irregularly (8 to 18 times per year) over a 25-year period. In addition, organic contaminants and pesticides frequently fall below the analytical laboratory detection limit ($< 0.5\\ \\mu g/L$).
+Ambient groundwater quality networks typically do not record daily or weekly data. Instead, wells are visited irregularly (8 to 18 times per year) over a 25-year period. In addition, organic contaminants and pesticides frequently fall below the analytical laboratory detection limit ($< 0.5$ μg/L).
 
 MannKS solves this by:
 1. Validating block coverage (`min_coverage=0.70`) to ensure visits span at least 70% of each annual block.

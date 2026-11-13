@@ -62,12 +62,16 @@ Empty boundary blocks at the very start/end of the record are ignored. Every rem
 
 1. **`min_size_per_block`** (default `10`): Minimum number of valid observations in the block ($n_k \ge N_{\min}$).
 2. **`min_coverage`** (default `0.9`): Minimum fraction of the nominal block duration spanned by the block's observations:
-   $$C_k = \min\!\left(1,\; \frac{(t_{\max, k} - t_{\min, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}, k}}\right)$$
+
+   $$
+   C_k = \min\left(1, \frac{(t_{\max, k} - t_{\min, k}) + \Delta t_{\text{med}, k}}{\Delta t_{\text{block}, k}}\right)
+   $$
+
    where $\Delta t_{\text{med}, k}$ is the median spacing between distinct observation times in block $k$ (defaulting to 1 day for single-observation datetime blocks, or $0$ for numeric singletons). This ensures, for example, that a partial monitoring year beginning in October is not treated as representative of a full annual distribution.
    * For monthly or irregular ambient sampling where 1–4 visits may be missed, consider lowering `min_coverage` (e.g. `0.70`) and `min_size_per_block` (e.g. `8`).
 3. **`require_complete`** (default `False`): Stricter check requiring $n_k \ge \mathrm{round}(\Delta t_{\text{block}, k} / \Delta t_{\text{global}})$, where $\Delta t_{\text{global}}$ is the global median time step. Useful for strict EGRET-style complete daily records.
 
-The total number of surviving blocks $B$ must satisfy $B \ge \max(2, \text{min\_blocks})$ (`min_blocks` defaults to `5`). If fewer blocks survive, `computation_mode='insufficient'` is returned with an empty `results` table and a `UserWarning`.
+The total number of surviving blocks $B$ must satisfy $B \ge \max(2, B_{\min})$, where $B_{\min}$ is `min_blocks` (defaults to `5`). If fewer blocks survive, `computation_mode='insufficient'` is returned with an empty `results` table and a `UserWarning`.
 
 ### Step 4: Sampling Frequency Drift Diagnostic & Equalization (`equalize`)
 **Why this matters:** In order statistics, sample extremes depend on sample size $n_k$. For a completely stationary distribution, the expected sample maximum of $n=52$ weekly draws is strictly larger than that of $n=12$ monthly draws, and the expected minimum is strictly smaller. If a monitoring program intensifies over time (e.g., monthly in decade 1, weekly in decade 2), a naive quantile analysis will produce **spurious upward trends in upper quantiles and spurious downward trends in lower quantiles**.
@@ -96,7 +100,7 @@ Blocks are standardized to a common target length $M$ via `quantiles`, `target_l
 * **`quantiles`** (default `'auto'`):
   * `'auto'`: Determines $M$ from `target_length` (`'min'` default, `'median'`, `'max'`, or explicit int $\ge 2$) and evaluates on `u_grid = np.linspace(0.0, 1.0, M)`. Plotting positions use Weibull ranks $p_j = j / (M + 1)$ for $j = 1, \dots, M$.
   * `int` ($M \ge 1$): Evaluates $M$ interior quantiles at Weibull probabilities $u_j = p_j = j / (M + 1)$ (requires `standardization='interpolate'`).
-  * Sequence of floats in $[0, 1]$ (e.g., `[0.10, 0.25, 0.50, 0.75, 0.90, 0.95]`): Evaluates those exact percentiles in sorted order (requires `standardization='interpolate'`). For $Z$-scale plotting, `plotting_position` is clipped to $[1/(n_{\text{med}}+1),\, n_{\text{med}}/(n_{\text{med}}+1)]$ so `0.0` or `1.0` does not produce $\pm\infty$.
+  * Sequence of floats in $[0, 1]$ (e.g., `[0.10, 0.25, 0.50, 0.75, 0.90, 0.95]`): Evaluates those exact percentiles in sorted order (requires `standardization='interpolate'`). For $Z$-scale plotting, `plotting_position` is clipped to $[1/(n_{\text{med}}+1), n_{\text{med}}/(n_{\text{med}}+1)]$ so `0.0` or `1.0` does not produce $\pm\infty$.
 * **`standardization`** (default `'interpolate'`):
   * **`'interpolate'`**: Computes `np.quantile(sorted_vals, u_grid, method=quantile_method)`. Works with any block size $n_k \ge 2$ and any `quantiles` specification.
   * **`'egret'`**: Exact USGS EGRET rank-reduction mode (`quantiles='auto'` and `target_length='min'`—or integer matching `min(block_sizes)`—only). Requires every valid block to have size $M$ or $M+1$ (typically 365 and 366 for complete daily years). Blocks of size $M+1$ are reduced by dropping the middle rank if $n_k$ is odd (`leapOdd`) or averaging the two middle ranks if $n_k$ is even (`leapEven`). Raises `ValueError` if any block's size differs from $M$ or $M+1$.
@@ -110,15 +114,19 @@ Blocks are standardized to a common target length $M$ via `quantiles`, `target_l
 Applied to the $B \times M$ standardized matrix prior to trend estimation:
 
 * **`'none'`** (or `None`, default): No transformation. `slope` is in `x_unit` per `slope_scaling` unit; `slope_pct` is computed relative to each quantile's across-block median: $100 \times \text{slope} / \text{median}_j$.
-* **`'log'`**: Natural logarithm $\ln(x + \text{log\_offset})$. All standardized values (after `log_offset` if supplied) must be strictly $> 0$.
-  * `slope`, `lower_ci`, and `upper_ci` remain in natural-log units per time unit ($\ln(x) / \text{time}$), while `slope_pct` (and its CI columns `lower_ci_pct`, `upper_ci_pct`) exponentiate Sen's slope $b$ into compound percentage change per time unit:
-    $$\text{slope\_pct} = 100 \times (e^b - 1)$$
+* **`'log'`**: Natural logarithm $\ln(x + c)$, where $c$ is `log_offset` (or $c = 0$ if `log_offset=None`). All standardized values (after adding `log_offset` if supplied) must be strictly $> 0$.
+  * `slope`, `lower_ci`, and `upper_ci` remain in natural-log units per time unit ($\ln(x) / \text{time}$), while `slope_pct` (and its CI columns `lower_ci_pct`, `upper_ci_pct`) exponentiates Sen's slope $b$ into compound percentage change per time unit:
+
+    $$
+    100 \times (e^b - 1)
+    $$
+
   * `slope_units` is labeled `% per <time_unit>` (used as the primary y-axis on `plot_quantile_trend`). If any standardized quantile is censored under `censor_quantile_method='propagate'`, `sens_slope_method='ats'` is required (`'lwp'`/`'drop_ambiguous'` heuristic multipliers are invalid on negative log-values and raise `ValueError`).
   * This reproduces USGS EGRET's `% per year` trend reporting and makes slopes comparable across vastly different flow magnitudes (e.g., baseflow vs. peak flood).
 * **`'pct_of_median'`**: Expresses each quantile column as a percentage of its across-block median ($100 \times x_{k,j} / \text{median}_j$). Columns whose median is $\le 0$ are set to `NaN` with an analysis note.
 
 ### Step 7: Per-Quantile Trend Estimation (`engine`, `**mk_kwargs`)
-For each quantile column $j \in \{1, \dots, M\}$, a Mann-Kendall trend test is run against the block centers `block_centers`:
+For each quantile column $j = 1, \dots, M$, a Mann-Kendall trend test is run against the block centers `block_centers`:
 
 * **`engine='trend_test'`** (default): Calls [`MannKS.trend_test`](MannKS/trend_test.py) column-by-column. Supports the full MannKS feature set: censored interval scoring, Akritas-Theil-Sen (`sens_slope_method='ats'`), autocorrelation corrections (`autocorr_method='auto'`, `'yue_wang'`, `'block_bootstrap'`), `ci_method='direct'` or `'lwp'`, `tau_method='a'` or `'b'`, and `continuous_confidence` classifications.
 * **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\mathrm{Var}(S)$ (with tie correction), Kendall's $\tau$ (`tau_method='a'` or `'b'`), $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals (`ci_method='direct'` or `'lwp'`) across all $M$ quantiles simultaneously. Note that for uncensored data, `sens_slope_method='ats'` reduces identically to standard pairwise Sen's slope, so it remains compatible with `engine='fast'`. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
@@ -132,7 +140,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 2. Recomputes the Mann-Kendall $Z$-statistics across all $M$ columns for each permutation.
 3. Reports two global permutation $p$-values (using $(1 + \text{exceedances}) / (P + 1)$):
    * **`p_count`**: Probability under $H_0$ of observing $\ge$ `n_significant` quantiles with $|Z| > z_{1-\alpha/2}$.
-   * **`p_max_z`**: Probability under $H_0$ of observing $\max_j |Z_j| \ge \text{max\_abs\_z}$ (Westfall-Young max-$T$ global test).
+   * **`p_max_z`**: Probability under $H_0$ of observing $\max_j |Z_j| \ge Z_{\max}$, where $Z_{\max}$ is the observed `max_abs_z` (Westfall-Young max-$T$ global test).
 
 ---
 
@@ -146,7 +154,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 | `months` | `None` | sequence of `1..12` or `None` | Filter to specific calendar months before blocking (datetime `t` only). |
 | `quantiles` | `'auto'` | `'auto'`, `int`, or sequence in `[0, 1]` | `'auto'` builds $M$ ranks from `target_length`; `int` evaluates $M$ Weibull quantiles $j/(M+1)$; sequence evaluates explicit probabilities. |
 | `target_length` | `'min'` | `'min'`, `'median'`, `'max'`, or `int >= 2` | Target grid size $M$ when `quantiles='auto'`. `'egret'` requires `'min'` (or matching integer). |
-| `standardization` | `'interpolate'` | `'interpolate'`, `'egret'` | `'interpolate'` uses `np.quantile`; `'egret'` matches USGS EGRET `leapOdd`/`leapEven` (requires `quantiles='auto'`, `target_length='min'`, and $n_k \in \{M, M+1\}$). |
+| `standardization` | `'interpolate'` | `'interpolate'`, `'egret'` | `'interpolate'` uses `np.quantile`; `'egret'` matches USGS EGRET `leapOdd`/`leapEven` (requires `quantiles='auto'`, `target_length='min'`, and $n_k = M$ or $M+1$). |
 | `quantile_method` | `'linear'` | `numpy.quantile` method str | Interpolation rule (`'linear'`, `'weibull'`, `'hazen'`, etc.) when `standardization='interpolate'`. |
 | `min_size_per_block` | `10` | `int >= 1` | Minimum observations needed to keep a block (set to `8` or `9` for monthly data with occasional missed visits). |
 | `min_blocks` | `5` | `int >= 1` | Minimum valid blocks required to run the test ($< 10$ produces coarse p-values and low power). |
@@ -188,7 +196,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 ## 6. Statistical Limitations & Assumptions
 
 1. **Statistical Power Depends on Block Count ($B$), Not Raw Sample Count ($N$):** Because Mann-Kendall is applied across the $B$ blocks, having 365 daily observations per year for 6 years still yields only $B = 6$ points per quantile test (minimum achievable two-sided $p$-value with $B=5$ is $0.083$; with $B=6$ it is $0.024$, and only if strictly monotonic). Aim for **$B \ge 10$** blocks (and ideally $20+$ for noisy tail quantiles).
-2. **Tail Volatility in Small Blocks (e.g., Monthly Data):** With $N \approx 12$ samples/year, `quantile=0.95` under linear interpolation is $0.55\,x_{(11)} + 0.45\,x_{(12)}$—tracking the top two monthly values of the year. It remains statistically valid (Type I error is calibrated), but single-year storm outliers increase variance and widen CIs, especially over shorter 10-year spans. Note also that `standardization='interpolate'` cannot extrapolate beyond the block's sample minimum and maximum.
+2. **Tail Volatility in Small Blocks (e.g., Monthly Data):** With $N \approx 12$ samples/year, `quantile=0.95` under linear interpolation is $0.55 x_{(11)} + 0.45 x_{(12)}$—tracking the top two monthly values of the year. It remains statistically valid (Type I error is calibrated), but single-year storm outliers increase variance and widen CIs, especially over shorter 10-year spans. Note also that `standardization='interpolate'` cannot extrapolate beyond the block's sample minimum and maximum.
 3. **Inter-Block Autocorrelation:** Non-overlapping blocks share no raw observations, but multi-year persistence (e.g., slow groundwater aquifers, multi-year climate cycles) can still correlate consecutive block quantiles. Pass `autocorr_method='yue_wang'` or `'block_bootstrap'` via `**mk_kwargs` if multi-year serial correlation is suspected.
 4. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows assuming blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and permutes numeric values without censored-interval scoring (a warning is raised if censored data or `autocorr_method != 'none'` are present).
 5. **Monotonicity Per Quantile:** Like all Mann-Kendall methods, each quantile test detects monotonic shifts over the full period. If a quantile reverses direction mid-record (e.g. rises then falls), inspect `result.get_quantile_series(q)` or apply `segmented_trend_test` to that extracted quantile series.

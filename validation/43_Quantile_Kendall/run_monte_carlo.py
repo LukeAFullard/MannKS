@@ -553,8 +553,8 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 | **Kendall's $\\tau$** | `{p_egret['tau_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-12}}$)** |
 | **Z-Statistic ($Z$)** | `< 1e-10` | **Exact to Machine Precision** |
 | **p-value ($p$)** | `{p_egret['p_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-10}}$)** |
-| **Theil-Sen Slope (%/year)** | `{p_egret['slope_rel_diff']:.4f}%` | **$< 0.5\%$ relative difference** (due to 365 vs 365.25 day year) |
-| **Interpolate Mode vs. EGRET** | `{p_egret['interp_slope_rel']:.3f}%` | **Mean difference $< 0.5\%$** (Subsampling noise negligible) |
+| **Theil-Sen Slope (%/year)** | `{p_egret['slope_rel_diff']:.4f}%` | **$< 0.5$% relative difference** (due to 365 vs 365.25 day year) |
+| **Interpolate Mode vs. EGRET** | `{p_egret['interp_slope_rel']:.3f}%` | **Mean difference $< 0.5$%** (Subsampling noise negligible) |
 
 ### Visual Parity
 ![USGS EGRET Parity Comparison](egret_parity_comparison.png)
@@ -600,7 +600,7 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 ## 4. Confidence Interval Empirical Coverage
 
 ### Methodology
-Evaluated {ci['n_reps']} Monte Carlo realizations of a known linear location shift (true slope $\\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \\alpha) = 95\%$ coverage.
+Evaluated {ci['n_reps']} Monte Carlo realizations of a known linear location shift (true slope $\\beta = 0.15$ units/year) across all quantiles. Verified empirical $(1 - \\alpha) =$ 95% coverage.
 
 ### Coverage Results
 | Quantile Rank ($p$) | Nominal Coverage | Empirical Coverage | Status |
