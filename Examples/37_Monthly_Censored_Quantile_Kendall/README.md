@@ -68,7 +68,7 @@ censored_df = prepare_censored_data(raw_data_strings)
 ### Step 2: Configure Parameters for Monthly Data
 For monthly data ($N \approx 12$ per block), choose parameters tailored to the monthly sampling frequency, including regulatory NPS-FM percentiles:
 - `quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95]`: Spans baseflow (10th/25th), median (50th), storm runoff flush (75th/90th), and NPS-FM regulatory thresholds (92nd and 95th).
-- `standardization='interpolate'`: Uses robust linear percentile interpolation to estimate quantiles from 8–12 monthly points per block.
+- `standardization='interpolate'`: Uses quantile interpolation (default `quantile_method='hazen'`) to estimate quantiles from 8–12 monthly points per block.
 - `min_size_per_block=8`: Requires at least 8 samples per year, allowing years with 1–4 missed months to be retained while dropping severely compromised years (e.g., 2012 with only 5 samples).
 - `min_blocks=10`: Ensures at least 10 valid annual blocks exist across the 20-year span.
 - `censor_quantile_method='propagate'`: Flags order statistics at or below detection limits as censored without distorting uncensored upper quantiles.
@@ -80,7 +80,7 @@ result = quantile_trend_test(
     t=dates,
     block_frequency='YE',               # Group by calendar year
     quantiles=[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95],
-    standardization='interpolate',       # Linear interpolation
+    standardization='interpolate',       # Default Hazen quantile interpolation
     censor_quantile_method='propagate',  # Rigorous censor tracking
     sens_slope_method='ats',             # Akritas-Theil-Sen
     min_size_per_block=8,               # Tolerate up to 4 missing months
@@ -96,13 +96,13 @@ result = quantile_trend_test(
 
 | Quantile | Sen's Slope (mg/L/yr) | 95% Confidence Interval | p-value | Classification | % Censored | Valid Blocks |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **0.10** | -0.00236 | [-0.00332, -0.00135] | 1.0550e-02 | Highly Likely Decreasing | 44.4% | 18 |
-| **0.25** | -0.00211 | [-0.00268, -0.00142] | 3.9684e-05 | Highly Likely Decreasing | 16.7% | 18 |
+| **0.10** | -0.00262 | [-0.00700, -0.00127] | 2.5146e-02 | Highly Likely Decreasing | 61.1% | 18 |
+| **0.25** | -0.00212 | [-0.00272, -0.00149] | 1.0494e-04 | Highly Likely Decreasing | 16.7% | 18 |
 | **0.50** | -0.00202 | [-0.00310, -0.00084] | 6.5203e-04 | Highly Likely Decreasing | 0.0% | 18 |
-| **0.75** | +0.01275 | [+0.00683, +0.01948] | 8.5842e-04 | Highly Likely Increasing | 0.0% | 18 |
-| **0.90** | +0.01659 | [+0.01163, +0.02137] | 7.8377e-06 | Highly Likely Increasing | 0.0% | 18 |
-| **0.92** | +0.01698 | [+0.01261, +0.02062] | 2.6422e-06 | Highly Likely Increasing | 0.0% | 18 |
-| **0.95** | +0.01739 | [+0.01360, +0.02016] | 3.8175e-06 | Highly Likely Increasing | 0.0% | 18 |
+| **0.75** | +0.01195 | [+0.00918, +0.01679] | 1.1138e-05 | Highly Likely Increasing | 0.0% | 18 |
+| **0.90** | +0.01737 | [+0.01307, +0.02061] | 3.8175e-06 | Highly Likely Increasing | 0.0% | 18 |
+| **0.92** | +0.01741 | [+0.01377, +0.02049] | 3.8175e-06 | Highly Likely Increasing | 0.0% | 18 |
+| **0.95** | +0.01744 | [+0.01355, +0.02008] | 1.2450e-06 | Highly Likely Increasing | 0.0% | 18 |
 
 ### Key Findings
 1. **Low Quantiles ($p = 0.10, 0.25$)**: Exhibit significant downward slopes with non-zero censoring proportions (`prop_censored`). The Akritas-Theil-Sen estimator correctly accounts for changing detection limits without artificial step-trend artifacts.
@@ -118,11 +118,11 @@ In water quality management under the **New Zealand National Policy Statement fo
 When applying Quantile-Kendall to monthly monitoring datasets over **10 to 20 years**:
 
 ### 1. Order-Statistic Behavior for $N \approx 12$ Samples/Year
-Within an annual block of 12 monthly samples:
-- The 12th (highest) sample has non-exceedance probability $p \approx 0.92$ (Weibull $12/13$) or $p \approx 0.96$ (Hazen $(12 - 0.5)/12$).
-- The 11th (second-highest) sample has $p \approx 0.85$ to $0.88$.
-- **The 92nd percentile** is interpolated between the 11th and 12th samples ($1 + 0.92 \times 11 = 11.12$ in 1-based rank: $0.88 x_{(11)} + 0.12 x_{(12)}$), primarily tracking the **second-highest monthly value** of the year.
-- **The 95th percentile** uses Type-7 linear interpolation ($1 + 0.95 \times 11 = 11.45$ in 1-based rank, or index $10.45$ in 0-based indexing: $0.55 x_{(11)} + 0.45 x_{(12)}$), blending nearly equally between the second-highest and highest monthly values.
+Within an annual block of 12 monthly samples under default Hazen interpolation (`quantile_method='hazen'`, 0-based virtual index $v = p N - 0.5$):
+- The 12th (highest) sample corresponds to Hazen non-exceedance probability $(12 - 0.5)/12 \approx 0.958$ (vs. Weibull $12/13 \approx 0.923$).
+- The 11th (second-highest) sample corresponds to $(11 - 0.5)/12 = 0.875$.
+- **The 92nd percentile** has virtual index $0.92 \times 12 - 0.5 = 10.54$ in 0-based indexing ($0.46 x_{(11)} + 0.54 x_{(12)}$), blending nearly equally between the second-highest and highest monthly values.
+- **The 95th percentile** has virtual index $0.95 \times 12 - 0.5 = 10.90$ in 0-based indexing ($0.10 x_{(11)} + 0.90 x_{(12)}$), heavily weighted toward the annual maximum (with $N \le 10$ visits, $v$ clamps directly to $x_{(N)}$).
 
 In hydrological terms, evaluating trends in the 92nd and 95th percentiles tests whether the **annual peak runoff events are intensifying** over time.
 
@@ -157,7 +157,7 @@ plot_quantile_trend(
 | Scenario / Decision | Recommendation | Rationale |
 | :--- | :--- | :--- |
 | **Quantile Selection** | Include median, quartiles, and regulatory percentiles: `[0.10, 0.25, 0.50, 0.75, 0.90, 0.92, 0.95]` | Provides full distributional coverage while capturing critical NPS-FM regulatory thresholds. |
-| **Interpolation Method** | `standardization='interpolate'` (default) | Handles varying block sizes ($N=8$ to $12$) smoothly via linear percentile interpolation. |
+| **Interpolation Method** | `standardization='interpolate'`, `quantile_method='hazen'` (default) | Handles varying block sizes ($N=8$ to $12$) using symmetric Hazen plotting positions. |
 | **Missing Month Tolerance** | `min_size_per_block=8` (or 9) | Prevents losing entire years just because 1 or 2 monthly visits were missed. |
 | **Missing Year Spacing** | Supported natively | Mann-Kendall evaluates pairwise time differences $\Delta t = t_j - t_i$; missing years do not bias test statistics. |
 | **Censored Data** | `censor_quantile_method='propagate'` | Ensures lower percentiles retain `< DL` flags while upper percentiles remain completely uncensored. |

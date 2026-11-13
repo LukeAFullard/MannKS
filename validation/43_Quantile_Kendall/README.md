@@ -29,7 +29,7 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 | **Z-Statistic ($Z$)** | `< 1e-10` | **Exact to Machine Precision** |
 | **p-value ($p$)** | `1.01e-16` | **Exact to Machine Precision ($< 10^{-10}$)** |
 | **Theil-Sen Slope (%/year)** | `0.2074%` | **$< 0.5$% relative difference** (due to 365 vs 365.25 day year) |
-| **Interpolate Mode vs. EGRET** | `0.455%` | **Mean difference $< 0.5$%** (Subsampling noise negligible) |
+| **Interpolate Mode vs. EGRET** | `1.510%` (`0.0251` %/yr abs) | **Minor half-rank shift** (default `'hazen'` interpolation on uniform grid vs. EGRET ranks) |
 
 ### Visual Parity
 ![USGS EGRET Parity Comparison](egret_parity_comparison.png)
@@ -44,13 +44,13 @@ Evaluated 300 Monte Carlo realizations of stationary standard normal noise under
 ### Calibration Results
 | Quantile Rank ($p$) | Nominal $\alpha$ | Empirical Rejection Rate | Status |
 | :--- | :--- | :--- | :--- |
-| **0.05** | 0.05 | 0.0433 | Calibrated within 95% MC bounds |
-| **0.10** | 0.05 | 0.0433 | Calibrated within 95% MC bounds |
-| **0.25** | 0.05 | 0.0467 | Calibrated within 95% MC bounds |
+| **0.05** | 0.05 | 0.0600 | Calibrated within 95% MC bounds |
+| **0.10** | 0.05 | 0.0467 | Calibrated within 95% MC bounds |
+| **0.25** | 0.05 | 0.0400 | Calibrated within 95% MC bounds |
 | **0.50** | 0.05 | 0.0333 | Calibrated within 95% MC bounds |
-| **0.75** | 0.05 | 0.0400 | Calibrated within 95% MC bounds |
-| **0.90** | 0.05 | 0.0167 | Calibrated within 95% MC bounds |
-| **0.95** | 0.05 | 0.0333 | Calibrated within 95% MC bounds |
+| **0.75** | 0.05 | 0.0433 | Calibrated within 95% MC bounds |
+| **0.90** | 0.05 | 0.0267 | Calibrated within 95% MC bounds |
+| **0.95** | 0.05 | 0.0400 | Calibrated within 95% MC bounds |
 
 ### Calibration Plot
 ![Type I Error Calibration](type1_error_calibration.png)
@@ -67,11 +67,11 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 ### Monte Carlo Verification Results (250 Replications)
 | Analytical Strategy | Quantile | False Rejection Rate | Assessment |
 | :--- | :--- | :--- | :--- |
-| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **15.2%** | Severely Inflated ($> 3\times$ nominal $\alpha$) |
-| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **16.4%** | Severely Inflated ($> 3\times$ nominal $\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.08$ (Lowest) | **50.4%** | Severely Inflated ($\gg$ nominal $\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.92$ (Highest) | **44.4%** | Severely Inflated ($\gg$ nominal $\alpha$) |
 | **MannKS Diagnostic (`flag`)** | Global | **100.0%** | 100% Detection of Drift Artifact |
-| **Equalized (`equalize='thin'`)** | $p = 0.09$ (Lowest) | **5.2%** | **Restored to Nominal $\alpha = 0.05$** |
-| **Equalized (`equalize='thin'`)** | $p = 0.91$ (Highest) | **4.4%** | **Restored to Nominal $\alpha = 0.05$** |
+| **Equalized (`equalize='thin'`)** | $p = 0.08$ (Lowest) | **5.6%** | **Restored to Nominal $\alpha = 0.05$** |
+| **Equalized (`equalize='thin'`)** | $p = 0.92$ (Highest) | **5.2%** | **Restored to Nominal $\alpha = 0.05$** |
 
 ### Drift Plot
 ![Sampling Drift Validation](sampling_drift_validation.png)
@@ -86,11 +86,11 @@ Evaluated 250 Monte Carlo realizations of a known linear location shift (true sl
 ### Coverage Results
 | Quantile Rank ($p$) | Nominal Coverage | Empirical Coverage | Status |
 | :--- | :--- | :--- | :--- |
-| **0.10** | 95.0% | 96.00% | Certified Valid |
+| **0.10** | 95.0% | 94.80% | Certified Valid |
 | **0.25** | 95.0% | 96.40% | Certified Valid |
 | **0.50** | 95.0% | 95.60% | Certified Valid |
 | **0.75** | 95.0% | 96.80% | Certified Valid |
-| **0.90** | 95.0% | 94.40% | Certified Valid |
+| **0.90** | 95.0% | 94.00% | Certified Valid |
 
 ### CI Coverage Plot
 ![Confidence Interval Coverage](ci_coverage_validation.png)
@@ -101,8 +101,8 @@ Evaluated 250 Monte Carlo realizations of a known linear location shift (true sl
 
 ### Multiplicity Challenge
 When testing $M=15$ quantiles simultaneously under $H_0$ (150 Monte Carlo replications with 199 block permutations each), a naive rule ("declare trend if *any* quantile has $p < 0.05$") suffers from severe multiplicity inflation compared to the permutation field-significance rule (`p_count < 0.05` or `p_max_z < 0.05`):
-- **Naive Joint False Alarm Rate**: **34.0%**
-- **MannKS Permutation Field Significance**: **7.3%** (Calibrated near nominal $\alpha = 0.05$)
+- **Naive Joint False Alarm Rate**: **33.3%**
+- **MannKS Permutation Field Significance**: **6.0%** (Calibrated near nominal $\alpha = 0.05$)
 
 ---
 

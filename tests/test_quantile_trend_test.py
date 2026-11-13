@@ -929,3 +929,18 @@ class TestEdgeCasesAndValidationRegressions:
         )
         assert len(res_tz.results) == 3
         assert (res_tz.results['slope'] > 0.0).all()
+
+    def test_default_quantile_method_is_hazen(self):
+        # Verify quantile_trend_test defaults to quantile_method='hazen'
+        rng = np.random.default_rng(77)
+        dates = pd.date_range('2010-01-15', periods=10 * 12, freq='MS')
+        vals = rng.lognormal(mean=0.0, sigma=0.8, size=len(dates))
+
+        res_default = quantile_trend_test(vals, dates, block_frequency='YE', quantiles=[0.05, 0.50, 0.95])
+        res_hazen = quantile_trend_test(vals, dates, block_frequency='YE', quantiles=[0.05, 0.50, 0.95], quantile_method='hazen')
+        res_linear = quantile_trend_test(vals, dates, block_frequency='YE', quantiles=[0.05, 0.50, 0.95], quantile_method='linear')
+
+        pd.testing.assert_frame_equal(res_default.matrix, res_hazen.matrix)
+        pd.testing.assert_frame_equal(res_default.results, res_hazen.results)
+        # Tail quantile 0.95 on N=12 monthly blocks differs between Hazen (v=10.90) and Type-7 linear (v=10.45)
+        assert not np.allclose(res_default.matrix.iloc[:, -1], res_linear.matrix.iloc[:, -1])

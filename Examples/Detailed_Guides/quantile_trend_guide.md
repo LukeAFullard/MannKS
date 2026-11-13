@@ -23,7 +23,7 @@ MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 | :--- | :--- | :--- |
 | **Observation Frequency** | Daily data only ($N=365$ or $366$ days/year). | Any frequency: daily, weekly, monthly, multi-year, or irregular visits. |
 | **Blocking Duration** | Strict annual blocks (Water Year, Climate Year, Calendar Year). | Flexible: annual (`'YE'`), multi-year (`'5YE'`), seasonal/quarterly (`'QE'`), or numeric intervals. |
-| **Leap-Year Standardization** | Rank reduction dropping or averaging middle ranks (`leapOdd`/`leapEven`). | `'egret'` exact mode OR `'interpolate'` linear quantile mapping OR explicit percentiles (`quantiles=[0.1, 0.5, 0.9]`). |
+| **Leap-Year Standardization** | Rank reduction dropping or averaging middle ranks (`leapOdd`/`leapEven`). | `'egret'` exact mode OR `'interpolate'` quantile mapping (default `'hazen'`) OR explicit percentiles (`quantiles=[0.1, 0.5, 0.9]`). |
 | **Censored Data** | Uncensored streamflow only. | Native handling of detection limits (`<DL`, `>DL`) with Akritas-Theil-Sen (ATS) slope estimation. |
 | **Coverage Filtering** | Implicitly requires continuous daily records. | Explicit `min_coverage` parameter to reject incomplete blocks with temporal gaps. |
 | **Sampling Drift Guard** | Not supported. | Built-in `sampling_diagnostic` and `equalize='thin'` / `'aggregate'`. |
@@ -56,8 +56,8 @@ For each block $k = 1, \dots, B$:
 
 Because blocks may contain different numbers of observations $n_k$ (e.g., 365 vs 366 days, or 10 vs 14 irregular visits), the order statistics must be standardized to a common target dimension $M$:
 
-* **Linear Interpolation (`standardization='interpolate'`):**
-  Evaluates quantiles at uniform non-exceedance probabilities:
+* **Quantile Interpolation (`standardization='interpolate'`):**
+  Evaluates quantiles via `numpy.quantile(..., method=quantile_method)` (default `'hazen'`, i.e., Hyndman & Fan Type 5 with virtual 0-based index $\mathrm{clip}(u n_k - 0.5, 0, n_k - 1)$) at uniform probabilities:
 
   $$
   u_j = \frac{j - 1}{M - 1}, \quad j = 1, \dots, M
@@ -197,7 +197,8 @@ result = quantile_trend_test(
 | `block_origin` | str, Timestamp, or float | `None` | Fixed anchor for block boundaries. If `None`, anchored at data start or year boundary. |
 | `quantiles` | int, sequence, or str | `'auto'` | Quantile configuration. `'auto'` uses the standardized block length (`target_length`). An integer specifies $M$ evenly spaced quantiles. A sequence of floats (e.g. `[0.1, 0.5, 0.9]`) specifies explicit non-exceedance probabilities in $[0, 1]$. |
 | `target_length` | str or int | `'min'` | Target standardized sample size $M$ when `quantiles='auto'`: `'min'`, `'median'`, `'max'`, or an explicit integer $\ge 2$. |
-| `standardization` | str | `'interpolate'` | Method for standardizing block lengths: `'interpolate'` (linear quantile interpolation) or `'egret'` (exact leap-year rank reduction). |
+| `standardization` | str | `'interpolate'` | Method for standardizing block lengths: `'interpolate'` (`numpy.quantile` interpolation) or `'egret'` (exact leap-year rank reduction). |
+| `quantile_method` | str | `'hazen'` | Percentile calculation method passed to `numpy.quantile` (e.g., `'hazen'`, `'linear'`, `'weibull'`, `'median_unbiased'`) when `standardization='interpolate'`. |
 | `min_coverage` | float | `0.9` | Minimum fraction of block duration $[t_{\min}, t_{\max}]$ that must be spanned by observations (0.0 to 1.0). Incomplete blocks below this threshold are excluded. |
 | `min_size_per_block` | int | `10` | Minimum number of observations required to retain a block. |
 | `min_blocks` | int | `5` | Minimum number of valid blocks required to perform trend analysis. |
@@ -329,5 +330,5 @@ See [Example 37](../37_Monthly_Censored_Quantile_Kendall/README.md) for a comple
 2. **Cross-Quantile Dependence & Multiple Testing:** Adjacent quantiles within the same block are strongly correlated. Individual quantile p-values are marginal (unadjusted); use `field_significance=True` when testing a global null hypothesis across the entire quantile spectrum.
 3. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows of the standardized quantile matrix, which assumes blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and evaluates numeric standardized values without censored-interval scoring.
 4. **Log Transformation Requires Positive Values:** `transform='log'` requires all standardized block values to be strictly $> 0$ (after adding `log_offset` if provided). Zero-flow or negative-value series must use `transform='none'` (or a positive `log_offset`).
-5. **Linear Interpolation & Tail Extrapolation:** When `quantiles` requests extreme percentiles (e.g., `0.99`) on a small block ($N = 10$–$12$), `standardization='interpolate'` cannot extrapolate beyond the observed sample minimum and maximum—it reflects the block's largest/smallest order statistics.
+5. **Quantile Interpolation & Tail Extrapolation:** When `quantiles` requests extreme percentiles (e.g., `0.99`) on a small block ($N = 10$–$12$), `standardization='interpolate'` cannot extrapolate beyond the observed sample minimum and maximum—it reflects the block's largest/smallest order statistics.
 6. **Temporal Coverage with Cross-Year Seasons:** `min_coverage` measures the span from first to last observation in a block. If `months` spans a calendar-year boundary (e.g., `[12, 1, 2]` with `block_frequency='YE'`), observations in January and December of the same calendar year span the full year and inflate coverage; use a shifted block origin such as `'YE-NOV'` (blocks starting Dec 1) for cross-year seasons.

@@ -215,6 +215,7 @@ def validate_egret_parity():
     slope_rel_diff = np.max(np.abs(mannks_egret['slope_pct'] - egret_res['slope_pct']) / np.abs(egret_res['slope_pct'])) * 100
 
     interp_slope_rel = np.mean(np.abs(mannks_interp['slope_pct'] - egret_res['slope_pct']) / np.abs(egret_res['slope_pct'])) * 100
+    interp_slope_abs = np.mean(np.abs(mannks_interp['slope_pct'] - egret_res['slope_pct']))
 
     print(f"  Exact EGRET Parity Mode:")
     print(f"    Max |S| difference:       {s_diff:.2e} (Exact: 0)")
@@ -223,7 +224,7 @@ def validate_egret_parity():
     print(f"    Max |p| difference:      {p_diff:.2e} (Machine epsilon: < 1e-10)")
     print(f"    Max Slope % difference:  {slope_rel_diff:.4f}% (< 0.5% due to 365 vs 365.25 day year)")
     print(f"  Interpolation Mode vs EGRET:")
-    print(f"    Mean Slope % difference: {interp_slope_rel:.3f}% (Sub-sampling noise negligible)")
+    print(f"    Mean Slope % difference: {interp_slope_rel:.3f}% ({interp_slope_abs:.4f} %/yr abs)")
 
     # Plot Comparison
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=150)
@@ -262,6 +263,7 @@ def validate_egret_parity():
         'p_diff': p_diff,
         'slope_rel_diff': slope_rel_diff,
         'interp_slope_rel': interp_slope_rel,
+        'interp_slope_abs': interp_slope_abs,
     }
 
 
@@ -346,8 +348,8 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         t_arr = pd.to_datetime(t_list)
         x_arr = np.array(x_list)
 
-        # 1. Raw Analysis (equalize='none')
-        res_raw = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles=10, equalize='none', min_size_per_block=10)
+        # 1. Raw Analysis (equalize='none', default quantiles='auto' spans min to max ranks: p=0.08 and p=0.92)
+        res_raw = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='none', min_size_per_block=10)
         df_raw = res_raw.to_frame()
         if res_raw.sampling_diagnostic['flag']:
             raw_flags += 1
@@ -357,7 +359,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
             raw_rejections_high += 1
 
         # 2. Equalized Analysis (equalize='thin')
-        res_eq = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles=10, equalize='thin', min_size_per_block=10)
+        res_eq = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='thin', min_size_per_block=10)
         df_eq = res_eq.to_frame()
         if df_eq.iloc[0]['h']:
             eq_rejections_low += 1
@@ -372,15 +374,15 @@ def validate_sampling_drift_trap(n_reps: int = 300):
 
     print(f"  Sampling Diagnostic Detection Rate: {rate_raw_flag*100:.1f}%")
     print(f"  Raw Unequalized False Trend Rates (Nominal alpha = 0.05):")
-    print(f"    Lowest Quantile (p=0.09): False Downward Rate = {rate_raw_low*100:.1f}% (Severely Inflated)")
-    print(f"    Highest Quantile (p=0.91): False Upward Rate   = {rate_raw_high*100:.1f}% (Severely Inflated)")
+    print(f"    Lowest Quantile (p=0.08): False Downward Rate = {rate_raw_low*100:.1f}% (Severely Inflated)")
+    print(f"    Highest Quantile (p=0.92): False Upward Rate   = {rate_raw_high*100:.1f}% (Severely Inflated)")
     print(f"  Equalized (equalize='thin') False Trend Rates:")
-    print(f"    Lowest Quantile (p=0.09): False Trend Rate     = {rate_eq_low*100:.1f}% (Calibrated to nominal alpha)")
-    print(f"    Highest Quantile (p=0.91): False Trend Rate    = {rate_eq_high*100:.1f}% (Calibrated to nominal alpha)")
+    print(f"    Lowest Quantile (p=0.08): False Trend Rate     = {rate_eq_low*100:.1f}% (Calibrated to nominal alpha)")
+    print(f"    Highest Quantile (p=0.92): False Trend Rate    = {rate_eq_high*100:.1f}% (Calibrated to nominal alpha)")
 
     # Plot Drift Trap Comparison
     fig, ax = plt.subplots(figsize=(8.5, 4.8), dpi=150)
-    categories = ['Lowest Quantile (p=0.09)\nSpurious Downward', 'Highest Quantile (p=0.91)\nSpurious Upward']
+    categories = ['Lowest Quantile (p=0.08)\nSpurious Downward', 'Highest Quantile (p=0.92)\nSpurious Upward']
     x_indices = np.arange(len(categories))
     width = 0.35
 
@@ -554,7 +556,7 @@ A 15-year daily streamflow record (April 2000 to March 2015, including multiple 
 | **Z-Statistic ($Z$)** | `< 1e-10` | **Exact to Machine Precision** |
 | **p-value ($p$)** | `{p_egret['p_diff']:.2e}` | **Exact to Machine Precision ($< 10^{{-10}}$)** |
 | **Theil-Sen Slope (%/year)** | `{p_egret['slope_rel_diff']:.4f}%` | **$< 0.5$% relative difference** (due to 365 vs 365.25 day year) |
-| **Interpolate Mode vs. EGRET** | `{p_egret['interp_slope_rel']:.3f}%` | **Mean difference $< 0.5$%** (Subsampling noise negligible) |
+| **Interpolate Mode vs. EGRET** | `{p_egret['interp_slope_rel']:.3f}%` (`{p_egret['interp_slope_abs']:.4f}` %/yr abs) | **Minor half-rank shift** (default `'hazen'` interpolation on uniform grid vs. EGRET ranks) |
 
 ### Visual Parity
 ![USGS EGRET Parity Comparison](egret_parity_comparison.png)
@@ -586,11 +588,11 @@ When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-re
 ### Monte Carlo Verification Results ({drift['n_reps']} Replications)
 | Analytical Strategy | Quantile | False Rejection Rate | Assessment |
 | :--- | :--- | :--- | :--- |
-| **Naive Raw (`equalize='none'`)** | $p = 0.09$ (Lowest) | **{drift['rate_raw_low']*100:.1f}%** | Severely Inflated ($> 3\\times$ nominal $\\alpha$) |
-| **Naive Raw (`equalize='none'`)** | $p = 0.91$ (Highest) | **{drift['rate_raw_high']*100:.1f}%** | Severely Inflated ($> 3\\times$ nominal $\\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.08$ (Lowest) | **{drift['rate_raw_low']*100:.1f}%** | Severely Inflated ($\\gg$ nominal $\\alpha$) |
+| **Naive Raw (`equalize='none'`)** | $p = 0.92$ (Highest) | **{drift['rate_raw_high']*100:.1f}%** | Severely Inflated ($\\gg$ nominal $\\alpha$) |
 | **MannKS Diagnostic (`flag`)** | Global | **{drift['rate_raw_flag']*100:.1f}%** | 100% Detection of Drift Artifact |
-| **Equalized (`equalize='thin'`)** | $p = 0.09$ (Lowest) | **{drift['rate_eq_low']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
-| **Equalized (`equalize='thin'`)** | $p = 0.91$ (Highest) | **{drift['rate_eq_high']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
+| **Equalized (`equalize='thin'`)** | $p = 0.08$ (Lowest) | **{drift['rate_eq_low']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
+| **Equalized (`equalize='thin'`)** | $p = 0.92$ (Highest) | **{drift['rate_eq_high']*100:.1f}%** | **Restored to Nominal $\\alpha = 0.05$** |
 
 ### Drift Plot
 ![Sampling Drift Validation](sampling_drift_validation.png)

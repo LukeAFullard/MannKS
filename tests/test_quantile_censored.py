@@ -100,6 +100,46 @@ class TestCensorPropagationUnit:
                 lt_mult=0.5, gt_mult=1.1,
             )
 
+    def test_hazen_exact_censor_bracketing_and_node_snapping(self):
+        # 12 sorted values: index 0 is uncensored 1.0, index 1 is <2.0,
+        # index 6 is uncensored 7.0 (while index 5 is <6.0 and index 7 is >8.0),
+        # index 10 is >11.0, index 11 is uncensored 12.0.
+        vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])
+        cens = np.array([False, True, False, False, False, True, False, True, False, False, True, False])
+        types = np.array(['not', 'lt', 'not', 'not', 'not', 'lt', 'not', 'gt', 'not', 'not', 'gt', 'not'], dtype=object)
+        df = pd.DataFrame({'value': vals, 'censored': cens, 'cen_type': types})
+
+        # Under Hazen (n=12):
+        # - u=0.04 -> v = 12*0.04 - 0.5 = -0.02 -> clipped to 0.0 (only index 0 uncensored 1.0; no bleed from idx 1 <2.0)
+        # - u=0.96 -> v = 12*0.96 - 0.5 = 11.02 -> clipped to 11.0 (only index 11 uncensored 12.0; no bleed from idx 10 >11.0)
+        u_grid = np.array([0.04, 0.96])
+        std_vals, std_cens, std_type = _standardize_block(
+            group_df=df, M=2, standardization='interpolate',
+            quantile_method='hazen', censor_quantile_method='propagate',
+            lt_mult=0.5, gt_mult=1.1, u_grid=u_grid,
+        )
+        assert np.allclose(std_vals, [1.0, 12.0])
+        assert not std_cens.any()
+        assert list(std_type) == ['not', 'not']
+
+        # Exact integer node snapping under Hazen (n=10, u=0.55):
+        # 10*0.55 - 0.5 = 5.000000000000001 in IEEE-754 float; must snap to index 5 (not ceil to 6)
+        vals10 = np.arange(1.0, 11.0)
+        cens10 = np.zeros(10, dtype=bool)
+        types10 = np.full(10, 'not', dtype=object)
+        cens10[6] = True
+        types10[6] = 'gt'
+        df10 = pd.DataFrame({'value': vals10, 'censored': cens10, 'cen_type': types10})
+        sv10, sc10, st10 = _standardize_block(
+            group_df=df10, M=1, standardization='interpolate',
+            quantile_method='hazen', censor_quantile_method='propagate',
+            lt_mult=0.5, gt_mult=1.1, u_grid=np.array([0.55]),
+        )
+        assert np.isclose(sv10[0], 6.0)
+        assert not sc10[0]
+        assert st10[0] == 'not'
+
+
 
 class TestCensoredQuantileTrendIntegration:
     """Integration tests for quantile_trend_test with censored inputs."""

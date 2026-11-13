@@ -346,7 +346,7 @@ def quantile_trend_test(
     quantiles='auto',
     target_length='min',
     standardization='interpolate',
-    quantile_method='linear',
+    quantile_method='hazen',
     min_size_per_block=10,
     min_blocks=5,
     min_coverage=0.9,
@@ -377,7 +377,7 @@ def quantile_trend_test(
     shifts such as extremes warming or drying faster than medians.
 
     The method standardizes sample sizes across blocks, extracts order statistics
-    (or linear interpolated quantiles), and conducts Mann-Kendall trend tests and
+    (or interpolated quantiles), and conducts Mann-Kendall trend tests and
     Sen's / Akritas-Theil-Sen slope estimation for each quantile level.
 
     Parameters
@@ -414,10 +414,10 @@ def quantile_trend_test(
         (or an integer matching the minimum valid block size).
     standardization : {'interpolate', 'egret'}, default 'interpolate'
         Method for standardizing unequal block lengths:
-        - ``'interpolate'``: Linear quantile interpolation across block order statistics.
+        - ``'interpolate'``: Quantile interpolation across block order statistics via ``numpy.quantile``.
         - ``'egret'``: Exact USGS EGRET leap-year rank-reduction method (365 ranks).
-    quantile_method : str, default 'linear'
-        Percentile calculation method passed to ``numpy.quantile`` (e.g. ``'linear'``, ``'weibull'``).
+    quantile_method : str, default 'hazen'
+        Percentile calculation method passed to ``numpy.quantile`` (e.g. ``'hazen'``, ``'linear'``, ``'weibull'``).
     min_size_per_block : int, default 10
         Minimum number of observations required to retain a block.
     min_blocks : int, default 5

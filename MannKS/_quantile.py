@@ -428,7 +428,25 @@ def _standardize_block(
             lt_mask = s_cens & (s_type == 'lt')
             gt_mask = s_cens & (s_type == 'gt')
 
-            v_pos = u_grid * (n_obs - 1)
+            _hf_ab = {
+                'interpolated_inverted_cdf': (0.0, 1.0),
+                'hazen': (0.5, 0.5),
+                'weibull': (0.0, 0.0),
+                'linear': (1.0, 1.0),
+                'median_unbiased': (1.0 / 3.0, 1.0 / 3.0),
+                'normal_unbiased': (3.0 / 8.0, 3.0 / 8.0),
+            }
+            if quantile_method in _hf_ab:
+                a_hf, b_hf = _hf_ab[quantile_method]
+                v_pos = np.clip(
+                    n_obs * u_grid + a_hf + u_grid * (1.0 - a_hf - b_hf) - 1.0,
+                    0.0,
+                    float(n_obs - 1),
+                )
+                v_pos = np.where(np.abs(v_pos - np.round(v_pos)) < 1e-12, np.round(v_pos), v_pos)
+            else:
+                v_pos = np.clip(u_grid * (n_obs - 1), 0.0, float(n_obs - 1))
+
             lo_idx = np.clip(np.floor(v_pos).astype(np.intp), 0, n_obs - 1)
             hi_idx = np.clip(np.ceil(v_pos).astype(np.intp), 0, n_obs - 1)
             neighbor_lt = lt_mask[lo_idx] | lt_mask[hi_idx]
