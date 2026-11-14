@@ -1,10 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 — dependency minimums & continuous integration
+
+Packaging-only release. No library code or numerical results changed from 0.7.0.
 
 ### Packaging & Testing
 * **Minimum dependency versions corrected** to the lowest versions on which the full test suite actually passes (verified on Python 3.9 with numpy 1.23.0 and pandas 2.2.0): `scipy >= 1.10` (was 1.9; `kendalltau(...).statistic` does not exist in 1.9), `matplotlib >= 3.6.0` (was 3.3.0) and `seaborn >= 0.13.0` (was 0.11.0; `boxplot(legend=...)`). No library code or numerical results changed.
 * **Test fix**: the `np.intp` / 32-bit compatibility tests monkeypatch `numpy.repeat` globally and so also intercepted SciPy's own `np.repeat` call inside `scipy.stats.rankdata` (SciPy 1.13–1.15), failing three tests on those SciPy versions. The checks now apply to calls made from MannKS modules only, and assert that they were exercised.
+* **Test fix**: `test_ci_and_sen_probability_match_sorted_reference` compared interpolated (`'lwp'`) confidence limits bit-for-bit against `np.interp`, which differs in the last bit on macOS arm64. The `'direct'` method is still compared exactly; `'lwp'` allows an absolute difference of 1e-12.
 * **Continuous integration**: added `.github/workflows/tests.yml`, running the suite on pull requests and pushes to `main` against the minimum supported versions, a SciPy 1.14 pin, and the latest versions on Linux, Windows and macOS.
 
 ## 0.7.0 — Generalized Quantile-Kendall release
