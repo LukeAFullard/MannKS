@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Packaging & Testing
+* **Minimum dependency versions corrected** to the lowest versions on which the full test suite actually passes (verified on Python 3.9 with numpy 1.23.0 and pandas 2.2.0): `scipy >= 1.10` (was 1.9; `kendalltau(...).statistic` does not exist in 1.9), `matplotlib >= 3.6.0` (was 3.3.0) and `seaborn >= 0.13.0` (was 0.11.0; `boxplot(legend=...)`). No library code or numerical results changed.
+* **Test fix**: the `np.intp` / 32-bit compatibility tests monkeypatch `numpy.repeat` globally and so also intercepted SciPy's own `np.repeat` call inside `scipy.stats.rankdata` (SciPy 1.13–1.15), failing three tests on those SciPy versions. The checks now apply to calls made from MannKS modules only, and assert that they were exercised.
+* **Continuous integration**: added `.github/workflows/tests.yml`, running the suite on pull requests and pushes to `main` against the minimum supported versions, a SciPy 1.14 pin, and the latest versions on Linux, Windows and macOS.
+
 ## 0.7.0 — Generalized Quantile-Kendall release
 
 Major feature release introducing frequency-agnostic, censor-aware, and drift-protected **Generalized Quantile-Kendall Trend Analysis** (`quantile_trend_test`), generalizing the USGS EGRET methodology (*Hirsch et al., 2015*) to arbitrary time series frequencies, multi-year blocks, and ambient monitoring networks.

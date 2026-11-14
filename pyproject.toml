@@ -31,9 +31,9 @@ packages = [{ include = "MannKS" }]
 python = ">=3.9"
 numpy = ">=1.23"
 pandas = ">=2.2"
-scipy = ">=1.9"
-matplotlib = ">=3.3.0"
-seaborn = ">=0.11.0"
+scipy = ">=1.10"
+matplotlib = ">=3.6.0"
+seaborn = ">=0.13.0"
 piecewise-regression = "^1.5.0"
 
 [tool.poetry.group.dev.dependencies]
