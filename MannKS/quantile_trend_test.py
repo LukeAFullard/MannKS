@@ -29,6 +29,7 @@ from ._quantile import (
     _normalize_start_freq,
     _egret_decimal_year,
     _auto_u_grid,
+    _snap_near_ties,
 )
 
 _Quantile_Trend_Tuple = namedtuple('Quantile_Trend_Test', [
@@ -817,6 +818,14 @@ def quantile_trend_test(
                 cens_rows[b_idx, :] = sc
                 type_rows[b_idx, :] = st
     
+            if standardization == 'interpolate':
+                # Interpolated quantiles that are mathematically equal can differ in
+                # the last floating-point bits; make them exactly equal so that ties
+                # across blocks are ties for the Mann-Kendall test.  ('egret' keeps
+                # order statistics untouched, exactly as EGRET does.)
+                for k in range(M):
+                    val_rows[:, k] = _snap_near_ties(val_rows[:, k])
+
             has_any_censored = bool(cens_rows.any())
             n_mixed = int(std_info.get('n_mixed_brackets', 0))
             if n_mixed:

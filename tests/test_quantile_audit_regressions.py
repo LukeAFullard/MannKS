@@ -486,3 +486,55 @@ class TestValidationAndWarnings:
             res = quantile_trend_test(x, t, quantiles=[0.5], min_blocks=2, block_frequency=pd.Timedelta('365D'))
             assert len(res.matrix) == B
             assert res.results['p'].iloc[0] == pytest.approx(p_min, abs=2e-4)
+
+
+class TestInterpolationTiesAreTies:
+    """Floating-point noise from quantile interpolation must not break ties."""
+
+    def test_snap_near_ties(self):
+        from MannKS._quantile import _snap_near_ties
+        v = np.array([1.8, 0.5 * (1.7 + 1.9), 1.8000000000000005, 1.9, np.nan, 0.0, 1e-300, -2.5, -2.5000000000000004])
+        out = _snap_near_ties(v)
+        assert out[0] == out[1] == out[2] == min(v[0], v[1], v[2])
+        assert out[3] == 1.9 and np.isnan(out[4])
+        assert out[5] == 0.0 and out[6] == 1e-300   # genuinely different values stay different
+        assert out[7] == out[8]
+        np.testing.assert_allclose(out[[0, 1, 2, 3, 7, 8]], v[[0, 1, 2, 3, 7, 8]], rtol=1e-12)
+        distinct = np.array([1.0, 1.0 + 1e-9, 2.0])
+        np.testing.assert_array_equal(_snap_near_ties(distinct), distinct)
+
+    @pytest.fixture
+    def rounded(self):
+        t = pd.date_range('2000-01-01', '2019-12-31', freq='7D')
+        x = np.round(np.random.default_rng(1).lognormal(1.0, 0.5, len(t)), 1)   # 1-decimal data: many ties
+        return x, t
+
+    def test_matrix_columns_have_no_floating_point_near_ties(self, rounded):
+        x, t = rounded
+        m = quantile_trend_test(x, t).matrix.to_numpy()
+        for k in range(m.shape[1]):
+            u = np.unique(m[:, k])
+            assert len(u) == len(np.unique(np.round(u, 9)))
+
+    def test_statistics_equal_those_of_decimally_rounded_quantiles(self, rounded):
+        # Before the fix S was off by one and Var(S) by up to ~70 in some ranks.
+        from MannKS import trend_test
+        x, t = rounded
+        res = quantile_trend_test(x, t)
+        for k in (13, 31):
+            col = res.matrix.iloc[:, k].to_numpy()
+            ref = trend_test(np.round(col, 9), res.matrix.index, min_size=None)
+            assert res.results['s'].iloc[k] == ref.s
+            assert res.results['var_s'].iloc[k] == pytest.approx(ref.var_s)
+
+    @pytest.mark.parametrize('kw', [dict(), dict(tau_method='a'), dict(ci_method='lwp'),
+                                    dict(transform='log'), dict(transform='pct_of_median'),
+                                    dict(quantile_method='linear'), dict(target_length='max')])
+    def test_fast_engine_equals_trend_test_engine_on_tied_data(self, rounded, kw):
+        x, t = rounded
+        a = quantile_trend_test(x, t, engine='trend_test', **kw).results
+        b = quantile_trend_test(x, t, engine='fast', **kw).results
+        for c in ['s', 'var_s', 'Tau', 'z', 'p', 'slope', 'lower_ci', 'upper_ci', 'slope_pct', 'C']:
+            np.testing.assert_allclose(a[c].to_numpy(float), b[c].to_numpy(float), rtol=1e-9, atol=1e-12,
+                                       equal_nan=True, err_msg=c)
+        assert (a['classification'] == b['classification']).all()

@@ -552,6 +552,35 @@ def _standardize_block(
 
     return std_vals, std_cens, std_type
 
+def _snap_near_ties(values: np.ndarray, rtol: float = 1e-12) -> np.ndarray:
+    """
+    Make values that agree to within floating-point rounding exactly equal.
+
+    Interpolated quantiles that are mathematically identical (e.g. the mean of
+    1.7 and 1.9 in one block and an observed 1.8 in another) come out of
+    floating-point arithmetic differing in the last bits.  Mann-Kendall treats
+    such values as different, which silently breaks ties and changes both S
+    and its tie-corrected variance.  Values whose difference is at most
+    ``rtol * max(|a|, |b|)`` (chained through sorted order) are set to the
+    smallest value of their group.
+    """
+    out = np.array(values, dtype=float, copy=True)
+    finite = np.isfinite(out)
+    if finite.sum() < 2:
+        return out
+    idx = np.flatnonzero(finite)
+    order = idx[np.argsort(out[idx], kind='stable')]
+    sv = out[order]
+    gap = np.diff(sv)
+    tol = rtol * np.maximum(np.abs(sv[1:]), np.abs(sv[:-1]))
+    new_group = np.concatenate(([True], gap > tol))
+    if new_group.all():
+        return out
+    group_start = np.maximum.accumulate(np.where(new_group, np.arange(len(sv)), 0))
+    out[order] = sv[group_start]
+    return out
+
+
 def _sampling_diagnostic(block_centers, block_sizes):
     if len(block_sizes) < 3:
         return {'tau_n_vs_time': 0.0, 'p_n_vs_time': 1.0, 'n_min': int(block_sizes.min()) if len(block_sizes)>0 else 0, 'n_max': int(block_sizes.max()) if len(block_sizes)>0 else 0, 'ratio_max_min': 1.0, 'flag': False}
