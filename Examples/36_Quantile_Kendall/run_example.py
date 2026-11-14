@@ -235,7 +235,7 @@ CASE4_ANALYSES = [
 ]
 
 
-def run_case_4(output_dir: str, n_reps: int = 200):
+def run_case_4(output_dir: str, n_reps: int = 1000):
     """
     Case 4: Sampling Frequency Drift Trap & Equalization (20 years)
     - True underlying data is completely stationary lognormal (zero trend).

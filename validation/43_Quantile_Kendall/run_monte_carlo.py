@@ -63,7 +63,7 @@ def validate_egret_parity():
     """Compares MannKS with the genuine EGRET R code on every parity scenario."""
     live = egret_parity.r_available()
     source = "live EGRET run through rpy2" if live else "stored EGRET output (tests/data/egret_qk); R not available"
-    print(f"\n[1/5] Validating parity with USGS EGRET ({source})...")
+    print(f"\n[1/6] Validating parity with USGS EGRET ({source})...")
 
     rows = []
     versions = None
@@ -140,9 +140,15 @@ def validate_egret_parity():
     }
 
 
+def _qtt(*args, **kwargs):
+    """quantile_trend_test with the vectorized engine (identical results on uncensored data; faster)."""
+    kwargs.setdefault('engine', 'fast')
+    return quantile_trend_test(*args, **kwargs)
+
+
 def validate_type1_error(n_reps: int = 400, alpha: float = 0.05):
     """Monte Carlo study evaluating empirical Type I error under stationary H0 across quantiles."""
-    print(f"\n[2/5] Running Type I error calibration ({n_reps} Monte Carlo reps, alpha={alpha})...")
+    print(f"\n[2/6] Running Type I error calibration ({n_reps} Monte Carlo reps, alpha={alpha})...")
     rng = np.random.default_rng(101)
     n_blocks = 20
     n_per_block = 30
@@ -154,7 +160,7 @@ def validate_type1_error(n_reps: int = 400, alpha: float = 0.05):
     for rep in range(n_reps):
         # Stationary standard normal noise under H0
         x = rng.normal(size=len(dates))
-        res = quantile_trend_test(
+        res = _qtt(
             x, dates,
             block_frequency='YE',
             quantiles=q_probs,
@@ -196,7 +202,7 @@ def validate_type1_error(n_reps: int = 400, alpha: float = 0.05):
 
 def validate_sampling_drift_trap(n_reps: int = 300):
     """Monte Carlo verification demonstrating the sampling frequency drift trap and equalization remedy."""
-    print(f"\n[3/5] Validating Sampling Frequency Drift Trap & Equalization ({n_reps} Monte Carlo reps)...")
+    print(f"\n[3/6] Validating Sampling Frequency Drift Trap & Equalization ({n_reps} Monte Carlo reps)...")
     rng = np.random.default_rng(202)
 
     # 20 years: years 1-10 have 12 visits/year; years 11-20 have 52 visits/year
@@ -228,12 +234,12 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         # All "order-statistic" analyses use quantile_method='linear', for which rank 1 / rank 12 are
         # each year's minimum / maximum (plotting positions p=0.08 and p=0.92): the worst case.
         # 0. Raw analysis with the package default (Hazen ranks)
-        df_hz = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='none', min_size_per_block=10).to_frame()
+        df_hz = _qtt(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='none', min_size_per_block=10).to_frame()
         hazen_rejections_low += int(df_hz.iloc[0]['h'])
         hazen_rejections_high += int(df_hz.iloc[-1]['h'])
 
         # 1. Raw analysis of order statistics (equalize='none')
-        res_raw = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='none', min_size_per_block=10)
+        res_raw = _qtt(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='none', min_size_per_block=10)
         df_raw = res_raw.to_frame()
         if res_raw.sampling_diagnostic['flag']:
             raw_flags += 1
@@ -243,7 +249,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
             raw_rejections_high += 1
 
         # 2. Equalized Analysis (equalize='thin')
-        res_eq = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='thin', min_size_per_block=10)
+        res_eq = _qtt(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='thin', min_size_per_block=10)
         df_eq = res_eq.to_frame()
         if df_eq.iloc[0]['h']:
             eq_rejections_low += 1
@@ -251,7 +257,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
             eq_rejections_high += 1
 
         # 3. Equalized Analysis (equalize='aggregate': monthly sub-intervals on a common support)
-        res_agg = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='aggregate', min_size_per_block=10)
+        res_agg = _qtt(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='aggregate', min_size_per_block=10)
         df_agg = res_agg.to_frame()
         if df_agg.iloc[0]['h']:
             agg_rejections_low += 1
@@ -317,7 +323,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
 
 def validate_ci_coverage(n_reps: int = 350, alpha: float = 0.05):
     """Validates that nominal 95% confidence intervals achieve >= (1 - alpha) empirical coverage."""
-    print(f"\n[4/5] Validating Confidence Interval Empirical Coverage ({n_reps} Monte Carlo reps)...")
+    print(f"\n[4/6] Validating Confidence Interval Empirical Coverage ({n_reps} Monte Carlo reps)...")
     rng = np.random.default_rng(303)
     n_blocks = 25
     n_per_block = 20
@@ -331,7 +337,7 @@ def validate_ci_coverage(n_reps: int = 350, alpha: float = 0.05):
 
     for _ in range(n_reps):
         x = true_slope * t_years + rng.normal(scale=1.2, size=len(dates))
-        res = quantile_trend_test(
+        res = _qtt(
             x, dates,
             block_frequency='YE',
             quantiles=q_probs,
@@ -370,8 +376,8 @@ def validate_ci_coverage(n_reps: int = 350, alpha: float = 0.05):
 
 def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.05):
     """Validates global permutation field significance false discovery rate under H0."""
-    n_permutations = 199
-    print(f"\n[5/5] Validating Permutation Field Significance Calibration ({n_reps} Monte Carlo reps, {n_permutations} permutations)...")
+    n_permutations = 499
+    print(f"\n[5/6] Validating Permutation Field Significance Calibration ({n_reps} Monte Carlo reps, {n_permutations} permutations)...")
     rng = np.random.default_rng(404)
     n_blocks = 20
     n_per_block = 25
@@ -385,7 +391,7 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
 
     for rep_idx in range(n_reps):
         x = rng.normal(size=len(dates))
-        res = quantile_trend_test(
+        res = _qtt(
             x, dates,
             block_frequency='YE',
             quantiles=M,
@@ -421,6 +427,38 @@ def validate_field_significance_calibration(n_reps: int = 250, alpha: float = 0.
     }
 
 
+def validate_serial_correlation(n_reps: int = 1000, alpha: float = 0.05):
+    """
+    Type I error and power of the unadjusted p-value and of the Zhang
+    pre-whitened p-value (prewhiten='zhang', EGRET's pValueAdj) when the
+    annual blocks are serially correlated.
+    """
+    print(f"\n[6/6] Serial correlation: unadjusted vs Zhang pre-whitened p-value ({n_reps} Monte Carlo reps)...")
+    rng = np.random.default_rng(606)
+    n_blocks, n_per_block = 30, 24
+    dates = pd.date_range("1990-01-08", periods=n_blocks * n_per_block, freq="15D")
+    dates = dates[dates.year < 1990 + n_blocks]
+    year_idx = (dates.year - 1990).to_numpy()
+    q_probs = [0.10, 0.50, 0.90]
+    rows = []
+    for rho, slope in [(0.0, 0.0), (0.3, 0.0), (0.6, 0.0), (0.0, 0.04), (0.3, 0.04), (0.6, 0.04)]:
+        rej = np.zeros(len(q_probs))
+        rej_adj = np.zeros(len(q_probs))
+        innov_sd = np.sqrt(1.0 - rho ** 2)          # unit-variance annual effect for every rho
+        for _ in range(n_reps):
+            eff = np.empty(n_blocks)
+            eff[0] = rng.normal()
+            for k in range(1, n_blocks):
+                eff[k] = rho * eff[k - 1] + innov_sd * rng.normal()
+            x = eff[year_idx] + slope * year_idx + rng.normal(scale=0.5, size=len(dates))
+            df = _qtt(x, dates, block_frequency='YE', quantiles=q_probs, alpha=alpha, prewhiten='zhang').to_frame()
+            rej += (df['p'].to_numpy() < alpha)
+            rej_adj += (df['p_adj'].to_numpy() < alpha)
+        rows.append({'rho': rho, 'slope': slope, 'p': rej / n_reps, 'p_adj': rej_adj / n_reps})
+        print(f"  rho={rho:.1f} slope={slope:.2f}: reject p {np.round(rej / n_reps, 3)}  p_adj {np.round(rej_adj / n_reps, 3)}")
+    return {'rows': rows, 'q_probs': q_probs, 'n_reps': n_reps, 'n_blocks': n_blocks}
+
+
 # ==============================================================================
 # Markdown Report Generator
 # ==============================================================================
@@ -433,17 +471,26 @@ def generate_validation_report(results: dict):
     drift = results['drift']
     ci = results['ci']
     field = results['field']
+    serial = results['serial']
     nl = chr(10)
+    serial_rows = nl.join(
+        f"| {r['rho']:.1f} | {'none' if r['slope'] == 0 else format(r['slope'], '.2f') + ' / yr'} | "
+        + " | ".join(f"{v*100:.1f}%" for v in r['p']) + " | "
+        + " | ".join(f"{v*100:.1f}%" for v in r['p_adj']) + " |"
+        for r in serial['rows']
+    )
+    se_serial = np.sqrt(0.05 * 0.95 / serial['n_reps'])
 
     ver = eg['versions'] or {}
     ver_str = ", ".join(f"{k} {v}" for k, v in ver.items())
     parity_rows = nl.join(
         f"| `{r['name']}` | {r['paStart']} / {r['paLong']} | {r['n_ranks']} x {r['n_years']} | {r['n_tied_ranks']} | "
-        f"`{r['sortQ']:.1e}` | `{r['S']:.1e}` | `{r['varS']:.1e}` | `{r['tau']:.1e}` | `{r['p']:.1e}` | "
+        f"`{r['sortQ']:.1e}` | `{r['S']:.1e}` | `{r['varS']:.1e}` | `{r['tau']:.1e}` | `{r['p']:.1e}` | `{r['pAdj']:.1e}` | "
         f"`{r['slopeLog']:.1e}` | `{r['slopePct']:.1e}` |"
         for r in eg['rows']
     )
     scen_rows = nl.join(f"| `{r['name']}` | {r['description']} |" for r in eg['rows'])
+    worst_adj = max(r['pAdj'] for r in eg['rows'])
     worst = max(max(r[k] for k in ('sortQ', 'S', 'varS', 'tau', 'p', 'slopeLog', 'slopePct')) for r in eg['rows'])
     n_rep_d = drift['n_reps']
 
@@ -467,8 +514,9 @@ This report is generated by [`run_monte_carlo.py`](run_monte_carlo.py); every nu
 3. **Sampling-frequency drift**: the artifact, the diagnostic, and both equalization modes.
 4. **Confidence-interval coverage** of the per-quantile slopes.
 5. **Permutation field significance** under $H_0$.
+6. **Serial correlation**: false-positive rate and power of the unadjusted and the Zhang pre-whitened p-value.
 
-Monte Carlo sample sizes are modest (a few hundred replicates), so each rate is shown with the 95% binomial Monte Carlo band it should fall in; read the tables as "consistent with nominal", not as proof of exact calibration.
+Each Monte Carlo study uses 1,000 to 2,000 replicates (vectorized `engine='fast'`, which gives the same results as the default engine on uncensored data). Every rate is shown with the 95% binomial Monte Carlo band it should fall in if the nominal level holds exactly; with 1,000 replicates that band is about $\pm 1.4$ percentage points around 5%.
 
 ---
 
@@ -489,6 +537,7 @@ Monte Carlo sample sizes are modest (a few hundred replicates), so each rate is 
 | `time = (DecYear[first] + DecYear[last]) / 2` | `block_time='egret'` |
 | `rkt(time, log(Q))`, `slopePct = 100 * (exp(B) - 1)` | `transform='log'`, `slope_scaling='year'` (`slope` is `slopeLog`, `slope_pct` is `slopePct`) |
 | `rkt` `tau` (tau-b), `sl` (two-sided, continuity-corrected, tie-corrected) | `tau_method='b'` (default), `p` |
+| `zyp.zhang(log(Q), time)[6]` (`pValueAdj`) | `prewhiten='zhang'` (`p_adj`) |
 | `freq = iRank / (nFreq + 1)`, `z = qnorm(freq)` | `plotting_position`, `z_position` |
 
 ### Scenarios
@@ -497,16 +546,17 @@ Monte Carlo sample sizes are modest (a few hundred replicates), so each rate is 
 {scen_rows}
 
 ### Results: maximum absolute difference, MannKS minus EGRET
-| Scenario | `paStart` / `paLong` | ranks x years | ranks with ties | `sortQ` matrix | $S$ | $\mathrm{{Var}}(S)$ | $\tau$ | $p$ (`pValue`) | `slopeLog` | `slopePct` |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Scenario | `paStart` / `paLong` | ranks x years | ranks with ties | `sortQ` matrix | $S$ | $\mathrm{{Var}}(S)$ | $\tau$ | $p$ (`pValue`) | `p_adj` (`pValueAdj`) | `slopeLog` | `slopePct` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 {parity_rows}
 
-The largest difference in any quantity in any scenario is `{worst:.1e}`: with the settings above MannKS reproduces EGRET to floating-point rounding, including tied values and both leap-year reductions (`leapEven` for 366-day years, `leapOdd` for 91-day Dec-Feb seasons).
+Apart from `pValueAdj`, the largest difference in any quantity in any scenario is `{worst:.1e}`: with the settings above MannKS reproduces EGRET to floating-point rounding. `pValueAdj` agrees to `{worst_adj:.1e}`, which is the precision EGRET itself has for it: zyp's final test (`Kendall::Kendall`) is computed in single precision. This includes tied values and both leap-year reductions (`leapEven` for 366-day years, `leapOdd` for 91-day Dec-Feb seasons).
 
 ### What is *not* the same as EGRET
 * **Default time axis.** Without `block_time='egret'` MannKS places each block at its calendar midpoint and scales by a 365.25-day year. $S$, $\mathrm{{Var}}(S)$, $\tau$ and $p$ are unchanged (they only use the order of the blocks); the slope differs by at most `{eg['centre_rel']:.4f}%` of its value in the `climate_year` scenario (magenta line in the right-hand panel below).
 * **Default standardization.** `standardization='interpolate'` (interpolated Hazen quantiles: leap years are read at 365 Hazen positions instead of being rank-reduced) is a different estimator: mean slope difference `{eg['interp_slope_rel']:.3f}%` (`{eg['interp_slope_abs']:.4f}` %/yr) in the `climate_year` scenario.
-* **Serial-correlation-adjusted p-value.** EGRET's `trendSortQ` also returns `pValueAdj` (`zyp::zyp.zhang` trend-free pre-whitening) and `plotQuantileKendall` colours its points by `pValueAdj` (red $< 0.05$, black $\le 0.1$, grey otherwise). MannKS does not implement Zhang pre-whitening: `p` reproduces EGRET's unadjusted `pValue`, and `plot_quantile_trend` colours by `p` with bands at $\alpha$ and $2\alpha$. `pValueAdj` is stored in the fixtures for reference only. Use `autocorr_method` for MannKS's own serial-correlation corrections.
+* **Plot colours.** EGRET's `plotQuantileKendall` colours points by `pValueAdj`: red $< 0.05$, black $\le 0.1$, grey otherwise. `plot_quantile_trend(result, color_by='p_adj')` uses the same p-value with bands at $\alpha$ and $2\alpha$ (identical for $\alpha = 0.05$ except that a p-value of exactly 0.1 is grey). The default `color_by='p'` uses the unadjusted p-value.
+* **Platform note for `pValueAdj`.** Zhang's iteration does not always converge; when it does not, where it stops depends on the last bit of the lag-1 autocorrelation. MannKS reproduces R's arithmetic for that number (including an extended-precision mean) and matched zyp's slope, autocorrelation and iteration count exactly on 6,000 random series on x86-64 Linux. On platforms without 80-bit `long double` (e.g. Windows/MSVC, some ARM builds) a non-converging series could stop at a different iteration.
 * **Records with gaps.** EGRET's `makeSortQ` stops with an error when a year inside the record has missing days; MannKS drops that block (`require_complete=True`) and continues.
 
 ### Visual Parity
@@ -517,7 +567,7 @@ The largest difference in any quantity in any scenario is `{worst:.1e}`: with th
 ## 2. Type I Error Rate
 
 ### Methodology
-{t1['n_reps']} Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks; rejection rate of each per-quantile test at nominal $\alpha = 0.05$. The Mann-Kendall normal approximation with continuity correction is slightly conservative for 20 blocks.
+{t1['n_reps']} Monte Carlo realizations of stationary standard normal noise under $H_0$ across 20 annual blocks; rejection rate of each per-quantile test at nominal $\alpha = 0.05$. The Mann-Kendall normal approximation with continuity correction is slightly conservative for 20 blocks, so rates a little below 5% are expected.
 
 ### Results
 | Quantile ($p$) | Nominal $\alpha$ | Empirical Rejection Rate | Monte Carlo check |
@@ -583,7 +633,23 @@ Testing $M=15$ quantiles simultaneously under $H_0$ ({field['n_reps']} Monte Car
 | `p_max_z < 0.05` | **{field['rate_max_z']*100:.1f}%** | {_mc_status(field['rate_max_z'], 0.05, field['n_reps'])} |
 | `p_count < 0.05` **or** `p_max_z < 0.05` | **{field['rate_field']*100:.1f}%** | {_mc_status(field['rate_field'], 0.05, field['n_reps'])} |
 
-Each field statistic is a level-$\alpha$ test on its own; rejecting when *either* is below $\alpha$ is two tests and is slightly above $\alpha$. Choose one statistic in advance. The permutation assumes exchangeable blocks: with strong between-block autocorrelation the field test is anti-conservative (see the methodology document, section 6).
+Each field statistic is a level-$\alpha$ test on its own (both are somewhat conservative, `p_count` more so because the count of significant quantiles is discrete); rejecting when *either* is below $\alpha$ is two tests and is slightly above $\alpha$. Choose one statistic in advance. The permutation assumes exchangeable blocks: with strong between-block autocorrelation the field test is anti-conservative (see the methodology document, section 6).
+
+---
+
+## 6. Serial Correlation: Unadjusted vs. Zhang Pre-Whitened p-Value
+
+`prewhiten='zhang'` adds `p_adj`, the Mann-Kendall p-value after Zhang's iterative trend-free pre-whitening (a port of `zyp::zyp.zhang`; EGRET's `pValueAdj`). This study checks what the adjustment buys.
+
+### Methodology
+{serial['n_reps']} realizations per row; {serial['n_blocks']} annual blocks of 24 observations; each year has a random level that follows an AR(1) process across years with lag-1 correlation $\rho$ (unit variance for every $\rho$), plus independent within-year noise (sd 0.5), with or without a linear trend. Rejection rates at $\alpha = 0.05$ for the 10th, 50th and 90th percentiles. For the no-trend rows the 95% Monte Carlo band around 5% is [{(0.05 - 1.96 * se_serial)*100:.1f}%, {(0.05 + 1.96 * se_serial)*100:.1f}%].
+
+### Results
+| $\rho$ | Trend | `p`: q10 | `p`: q50 | `p`: q90 | `p_adj`: q10 | `p_adj`: q50 | `p_adj`: q90 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+{serial_rows}
+
+Rows without a trend are false-positive rates (should be 5%); rows with a trend are power. Read them together: an adjustment that lowers the false-positive rate under serial correlation also costs power when a trend is present. In this design pre-whitening removes roughly half of the excess false positives but does not restore the nominal level, and with independent years ($\rho = 0$) it is slightly conservative. That is a property of Zhang's method with about 30 blocks, shared by EGRET's `pValueAdj`, not of this implementation (which reproduces zyp exactly). For stronger protection use `autocorr_method='block_bootstrap'` or `'yue_wang'`, or longer records.
 
 ---
 
@@ -613,10 +679,11 @@ if __name__ == "__main__":
     print("=" * 70)
 
     res_egret = validate_egret_parity()
-    res_type1 = validate_type1_error(n_reps=300, alpha=0.05)
-    res_drift = validate_sampling_drift_trap(n_reps=250)
-    res_ci = validate_ci_coverage(n_reps=250, alpha=0.05)
-    res_field = validate_field_significance_calibration(n_reps=150, alpha=0.05)
+    res_type1 = validate_type1_error(n_reps=2000, alpha=0.05)
+    res_drift = validate_sampling_drift_trap(n_reps=1000)
+    res_ci = validate_ci_coverage(n_reps=1000, alpha=0.05)
+    res_field = validate_field_significance_calibration(n_reps=1000, alpha=0.05)
+    res_serial = validate_serial_correlation(n_reps=1000, alpha=0.05)
 
     all_results = {
         'egret': res_egret,
@@ -624,6 +691,7 @@ if __name__ == "__main__":
         'drift': res_drift,
         'ci': res_ci,
         'field': res_field,
+        'serial': res_serial,
     }
 
     generate_validation_report(all_results)

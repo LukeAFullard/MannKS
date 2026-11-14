@@ -20,6 +20,7 @@ from ._stats import (
     _mk_score_and_var_censored,
     _normalize_sens_slope_method,
 )
+from ._zhang import zhang_prewhitened_test
 from ._quantile import (
     _assign_blocks,
     _standardize_block,
@@ -153,7 +154,7 @@ _RESULTS_COLUMNS = [
     'slope_pct', 'lower_ci_pct', 'upper_ci_pct', 'slope_per_second', 'lower_ci_per_second',
     'upper_ci_per_second', 'intercept', 'slope_units', 'p', 'h', 'z', 'C', 'Cd', 'Tau',
     's', 'var_s', 'trend', 'classification', 'n_blocks', 'prop_censored', 'acf1',
-    'n_effective', 'analysis_notes',
+    'n_effective', 'p_adj', 'tau_adj', 'acf1_adj', 'analysis_notes',
 ]
 
 def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardization, max_quantiles, quantile_method='hazen'):
@@ -369,6 +370,7 @@ def quantile_trend_test(
     slope_scaling='year',
     x_unit='units',
     engine='trend_test',
+    prewhiten='none',
     field_significance=False,
     n_permutations=999,
     max_quantiles=2000,
@@ -510,6 +512,17 @@ def quantile_trend_test(
         If None, defaults to ``'units'``.
     engine : {'trend_test', 'fast'}, default 'trend_test'
         Computational engine for trend estimation across quantiles.
+    prewhiten : {'none', 'zhang'}, default 'none'
+        Optional serial-correlation-adjusted p-value for every quantile:
+        - ``'none'``: ``p_adj``, ``tau_adj`` and ``acf1_adj`` are NaN.
+        - ``'zhang'``: Zhang's iterative trend-free pre-whitening followed by a
+          Mann-Kendall test, a port of ``zyp::zyp.zhang``. This is the
+          ``pValueAdj`` that USGS EGRET uses to colour its Quantile-Kendall plot.
+          Adds ``p_adj`` (adjusted two-sided p-value), ``tau_adj`` (Kendall's tau
+          of the pre-whitened series) and ``acf1_adj`` (lag-1 autocorrelation
+          removed) to ``results``. ``p``, ``h``, ``slope`` and the classification
+          are unchanged. Not defined for quantiles with censored values (NaN).
+          Use ``plot_quantile_trend(..., color_by='p_adj')`` to colour by it.
     field_significance : bool, default False
         Whether to compute simultaneous field significance across all quantiles via permutation.
     n_permutations : int, default 999
@@ -584,6 +597,10 @@ def quantile_trend_test(
         raise ValueError("`censor_quantile_method` must be 'propagate', 'substitute', or 'error'.")
     if transform not in ('none', 'log', 'pct_of_median'):
         raise ValueError("`transform` must be 'none', 'log', or 'pct_of_median'.")
+    if prewhiten is None:
+        prewhiten = 'none'
+    if prewhiten not in ('none', 'zhang'):
+        raise ValueError("`prewhiten` must be 'none' or 'zhang'.")
     if block_time not in ('center', 'egret'):
         raise ValueError("`block_time` must be 'center' or 'egret'.")
     if engine not in ('trend_test', 'fast'):
@@ -984,6 +1001,30 @@ def quantile_trend_test(
                     else ("second" if is_datetime else "unit of t")
                 )
             _sec_per_year = 365.25 * 86400.0
+            # Serial-correlation-adjusted p-value (zyp / EGRET pValueAdj)
+            n_adj_censored = 0
+            if prewhiten == 'zhang':
+                if egret_times is not None or not is_datetime:
+                    t_adj = np.asarray(t_numeric_blocks, dtype=float)
+                else:
+                    t_adj = np.asarray(t_numeric_blocks, dtype=float) / (365.25 * 86400.0)
+            for k, row_dict in enumerate(results_list):
+                row_dict['p_adj'] = np.nan
+                row_dict['tau_adj'] = np.nan
+                row_dict['acf1_adj'] = np.nan
+                if prewhiten == 'zhang':
+                    if cens_rows[:, k].any():
+                        n_adj_censored += 1
+                    elif not np.isnan(work_matrix[:, k]).any():
+                        zres = zhang_prewhitened_test(work_matrix[:, k], t_adj)
+                        row_dict['p_adj'] = zres['p']
+                        row_dict['tau_adj'] = zres['tau']
+                        row_dict['acf1_adj'] = zres['acf1']
+            if n_adj_censored:
+                module_notes.append(
+                    f"prewhiten='zhang': p_adj is not defined for {n_adj_censored} quantile(s) with censored values (NaN)"
+                )
+
             for k, row_dict in enumerate(results_list):
                 if egret_times is not None:
                     # The trend engines saw numeric decimal years: slopes are per year.

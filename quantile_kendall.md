@@ -127,7 +127,7 @@ Each block needs one time value for the trend test:
 * **`'center'`** (default): the calendar midpoint of the block $[b_{\text{start}}, b_{\text{end}})$; slopes are scaled to `slope_scaling` units using a 365.25-day year.
 * **`'egret'`**: EGRET's `midDecYear`, the mean of the EGRET decimal year of the first and the last observation in the block, where a day's decimal year is $\text{year} + (\text{day of year} - 0.5) / \text{days in year}$. The trend test then runs on decimal years, so slopes are per year exactly as in EGRET. Requires datetime `t` and `slope_scaling='year'`.
 
-The choice only affects slopes and their confidence limits ($S$, $\mathrm{Var}(S)$, $\tau$ and $p$ depend only on the order of the blocks). Combined with `standardization='egret'`, `transform='log'` and `require_complete=True`, `block_time='egret'` reproduces the output of EGRET's `makeSortQ` and `trendSortQ` to floating-point rounding; see the [validation report](validation/43_Quantile_Kendall/README.md) for the setting-by-setting correspondence and for what is deliberately not reproduced (EGRET's `zyp` pre-whitened `pValueAdj`).
+The choice only affects slopes and their confidence limits ($S$, $\mathrm{Var}(S)$, $\tau$ and $p$ depend only on the order of the blocks). Combined with `standardization='egret'`, `transform='log'` and `require_complete=True`, `block_time='egret'` reproduces the output of EGRET's `makeSortQ` and `trendSortQ` to floating-point rounding; see the [validation report](validation/43_Quantile_Kendall/README.md) for the setting-by-setting correspondence (add `prewhiten='zhang'` for EGRET's `pValueAdj`).
 
 ### Step 6: Optional Value Transformation (`transform`, `log_offset`)
 Applied to the $B \times M$ standardized matrix prior to trend estimation:
@@ -150,6 +150,20 @@ For each quantile column $j = 1, \dots, M$, a Mann-Kendall trend test is run aga
 * **`engine='trend_test'`** (default): Calls [`MannKS.trend_test`](MannKS/trend_test.py) column-by-column. Supports the full MannKS feature set: censored interval scoring, Akritas-Theil-Sen (`sens_slope_method='ats'`), autocorrelation corrections (`autocorr_method='auto'`, `'yue_wang'`, `'block_bootstrap'`), `ci_method='direct'` or `'lwp'`, `tau_method='a'` or `'b'`, and `continuous_confidence` classifications.
 * **`engine='fast'`**: Vectorized matrix implementation ([`_fast_uncensored_matrix_trends`](MannKS/quantile_trend_test.py)) that computes $S$, $\mathrm{Var}(S)$ (with tie correction), Kendall's $\tau$ (`tau_method='a'` or `'b'`), $Z$, $p$-value, pairwise Sen's slopes, and confidence intervals (`ci_method='direct'` or `'lwp'`) across all $M$ quantiles simultaneously. Note that for uncensored data, `sens_slope_method='ats'` reduces identically to standard pairwise Sen's slope, so it remains compatible with `engine='fast'`. Ideal for large $M$ (e.g., daily data with $M=365$ or $1826$).
   * *Automatic fallback:* If censored data, `NaN`s, `autocorr_method != 'none'`, `mk_test_method == 'lwp'`, `tie_break_method == 'lwp'`, `large_dataset_mode in ('fast', 'aggregate')` (or `'auto'` with $> 5000$ blocks), or `max_pairs is not None` are requested, `quantile_trend_test` automatically falls back to `engine='trend_test'` so results remain exact.
+
+### Step 7b: Serial-Correlation-Adjusted p-Value (`prewhiten`)
+Annual (or other) block quantiles are often serially correlated, which makes the plain Mann-Kendall test reject too often. EGRET addresses this with the `zyp` package, and colours its Quantile-Kendall plot by the adjusted p-value (`pValueAdj`).
+
+**`prewhiten='zhang'`** reproduces it. For every quantile column it applies Zhang's iterative trend-free pre-whitening (Zhang et al., 2000; Wang & Swail, 2001), a step-by-step port of `zyp::zyp.zhang`:
+1. Compute the lag-1 autocorrelation $c$ of the series. If $c < 0.05$, test the series as it is.
+2. Otherwise pre-whiten, $y_i = (x_{i+1} - c x_i)/(1 - c)$, estimate the Sen slope $b$ of $y$, recompute $c$ from the detrended series $x - b t$, and repeat until $c$ and $b$ stop changing (at most 500 iterations).
+3. Run a Mann-Kendall test on the final pre-whitened series.
+
+Three columns are added to `results`: `p_adj` (the adjusted two-sided p-value), `tau_adj` (Kendall's $\tau$ of the pre-whitened series) and `acf1_adj` (the autocorrelation removed). `p`, `h`, `slope`, confidence limits and `classification` are **not** changed; `p_adj` is an additional column, and `plot_quantile_trend(result, color_by='p_adj')` colours by it as EGRET does.
+
+* `p_adj` matches zyp and EGRET to about $10^{-7}$. That is the precision of the reference itself: zyp's final test (`Kendall::Kendall`) works in single precision, so values equal to single precision are tied. MannKS reproduces that behaviour rather than "improving" it.
+* It is not defined for quantiles that contain censored values (`NaN`, with an analysis note), or when zyp itself returns `NA` (constant series, fewer than three non-zero values).
+* Pre-whitening reduces, but does not eliminate, the excess false positives under serial correlation, and costs power when a trend is present; see section 6 of the [validation report](validation/43_Quantile_Kendall/README.md). `autocorr_method='yue_wang'` or `'block_bootstrap'` (via `**mk_kwargs`) are MannKS's alternatives, which change `p` itself.
 
 ### Step 8: Simultaneous Field Significance (`field_significance`)
 Testing $M$ quantiles at once creates a multiple-testing problem: if $M=20$ and $\alpha=0.05$, at least one false positive is likely by chance even under $H_0$. Standard Bonferroni or FDR corrections ignore the strong cross-correlation between adjacent order statistics within each block.
@@ -191,6 +205,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 | `slope_scaling` | `'year'` | `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`, `None` | Time unit for `slope`, `lower_ci`, `upper_ci`, and `slope_pct` (datetime `t` only). |
 | `x_unit` | `'units'` | `str` or `None` | Variable unit label for reporting and plot axes (`None` defaults to `'units'`). |
 | `engine` | `'trend_test'` | `'trend_test'`, `'fast'` | `'fast'` accelerates large uncensored grids (automatically falls back when needed). |
+| `prewhiten` | `'none'` | `'none'`, `None`, `'zhang'` | `'zhang'` adds the serial-correlation-adjusted `p_adj` (Zhang trend-free pre-whitening; EGRET's `pValueAdj`), plus `tau_adj` and `acf1_adj`. |
 | `field_significance` | `False` | `bool` | Runs row-permutation global test across all quantiles. |
 | `n_permutations` | `999` | `int >= 1` | Number of permutations when `field_significance=True`. |
 | `max_quantiles` | `2000` | `int >= 1` | Safety cap on the number of quantiles $M$. |
@@ -204,6 +219,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 
 * **`plot_quantile_trend(result, ...)`** (aliased as `plot_quantile_kendall`):
   * `x_scale='normal'` (default): Plots quantiles on a standard normal probit $Z$-axis ($Z = \Phi^{-1}(p)$) with probability tick labels (`.001` to `.999`) and a secondary top $Z$-axis, expanding visual resolution in the tails (USGS EGRET style). Use `x_scale='linear'` for uniform $[0, 1]$ spacing (often clearer when plotting a small set of explicit quantiles).
+  * `color_by='p_adj'`: the same bands using the Zhang pre-whitened p-value (requires `prewhiten='zhang'`); with $\alpha = 0.05$ this is EGRET's colouring.
   * `color_by='p'` (default): Highlights $p < \alpha$ (orange-red), $\alpha \le p < 2\alpha$ (dark charcoal), and $p \ge 2\alpha$ (gray). Use `color_by='classification'` to color by Increasing/Decreasing/No Trend.
   * `show_ci=True`: Plots $(1-\alpha)$ confidence interval whiskers per quantile.
   * `show_fdc=True`: Overlays the across-block median empirical distribution (Flow / Concentration Duration Curve) on a secondary right y-axis.
@@ -217,7 +233,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 
 1. **Statistical Power Depends on Block Count ($B$), Not Raw Sample Count ($N$):** Because Mann-Kendall is applied across the $B$ blocks, having 365 daily observations per year for 6 years still yields only $B = 6$ points per quantile test (the smallest attainable two-sided $p$-value, reached only by a strictly monotonic series, is $0.089$ with $B=4$, $0.027$ with $B=5$ and $0.0085$ with $B=6$ under the continuity-corrected normal approximation). Aim for **$B \ge 10$** blocks (and ideally $20+$ for noisy tail quantiles).
 2. **Tail Volatility in Small Blocks (e.g., Monthly Data):** With $N \approx 12$ samples/year, `quantile=0.95` under default Hazen interpolation has 0-based virtual index $v = 0.95 \times 12 - 0.5 = 10.90$, giving $0.10 x_{(11)} + 0.90 x_{(12)}$—heavily weighted toward the annual maximum (with $N \le 10$, $v \ge 9.0$ clamps directly to $x_{(N)}$). It remains statistically valid (Type I error is calibrated), but single-year storm outliers increase variance and widen CIs, especially over shorter 10-year spans. Note also that `standardization='interpolate'` cannot extrapolate beyond the block's sample minimum and maximum.
-3. **Inter-Block Autocorrelation:** Non-overlapping blocks share no raw observations, but multi-year persistence (e.g., slow groundwater aquifers, multi-year climate cycles) can still correlate consecutive block quantiles. Pass `autocorr_method='yue_wang'` or `'block_bootstrap'` via `**mk_kwargs` if multi-year serial correlation is suspected.
+3. **Inter-Block Autocorrelation:** Non-overlapping blocks share no raw observations, but multi-year persistence (e.g., slow groundwater aquifers, multi-year climate cycles) can still correlate consecutive block quantiles. Pass `autocorr_method='yue_wang'` or `'block_bootstrap'` via `**mk_kwargs`, or request the EGRET-style adjusted p-value with `prewhiten='zhang'`, if multi-year serial correlation is suspected.
 4. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows assuming blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and permutes numeric values without censored-interval scoring (a warning is raised if censored data or `autocorr_method != 'none'` are present).
 5. **Monotonicity Per Quantile:** Like all Mann-Kendall methods, each quantile test detects monotonic shifts over the full period. If a quantile reverses direction mid-record (e.g. rises then falls), inspect `result.get_quantile_series(q)` or apply `segmented_trend_test` to that extracted quantile series.
 6. **Censoring & Tie Behavior:**
@@ -237,4 +253,7 @@ When **`field_significance=True`**, MannKS runs a **block-row permutation test**
 **References:**
 * Hirsch, R. M., Archfield, S. A., & De Cicco, L. A. (2015). A bootstrap method for estimating uncertainty of water quality trends. *Environmental Modelling & Software*, 73, 148–166.
 * Hirsch, R. M., & De Cicco, L. A. (2015). User guide to Exploration and Graphics for RivEr Trends (EGRET) and dataRetrieval: R packages for surface-water quality and streamflow. *USGS Techniques and Methods*, Book 4, Chapter A10.
+* Zhang, X., Vincent, L. A., Hogg, W. D., & Niitsoo, A. (2000). Temperature and precipitation trends in Canada during the 20th century. *Atmosphere-Ocean*, 38(3), 395–429.
+* Wang, X. L., & Swail, V. R. (2001). Changes of extreme wave heights in Northern Hemisphere oceans and related atmospheric circulation regimes. *Journal of Climate*, 14(10), 2204–2221.
+* Bronaugh, D., & Werner, A. (2019). *zyp: Zhang + Yue-Pilon Trends Package*. R package.
 * Akritas, M. G., Murphy, S. A., & LaValley, M. P. (1995). The Theil-Sen estimator with doubly censored data and applications to astronomy. *Journal of the American Statistical Association*, 90(429), 170–177.

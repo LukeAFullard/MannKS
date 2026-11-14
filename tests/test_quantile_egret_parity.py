@@ -286,6 +286,8 @@ def _assert_matches_egret(mannks_result, egret):
     np.testing.assert_allclose(df['p'].to_numpy(), res['pValue'].to_numpy(), atol=1e-12)
     np.testing.assert_allclose(df['slope'].to_numpy(), res['slopeLog'].to_numpy(), rtol=1e-10, atol=1e-13)
     np.testing.assert_allclose(df['slope_pct'].to_numpy(), res['slopePct'].to_numpy(), rtol=1e-10, atol=1e-11)
+    # pValueAdj (zyp.zhang): the R routine is single precision
+    np.testing.assert_allclose(df['p_adj'].to_numpy(), res['pValueAdj'].to_numpy(), atol=1e-6)
     np.testing.assert_allclose(df['plotting_position'].to_numpy(), res['freq'].to_numpy(), atol=1e-14)
     np.testing.assert_allclose(df['z_position'].to_numpy(), res['z'].to_numpy(), atol=1e-12)
 

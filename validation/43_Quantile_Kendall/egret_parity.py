@@ -88,6 +88,7 @@ def mannks_settings(pa_start: int, pa_long: int) -> dict:
         block_time='egret',            # time = (DecYear[first] + DecYear[last]) / 2
         slope_scaling='year',
         tau_method='b',                # rkt reports tau-b (the MannKS default)
+        prewhiten='zhang',             # zyp.zhang: EGRET's pValueAdj -> results['p_adj']
         min_size_per_block=1,
         min_blocks=2,
     )
@@ -152,6 +153,7 @@ def compare(mannks_result, egret: dict) -> dict:
         'varS': md(df['var_s'], res['varS']),
         'tau': md(df['Tau'], res['tau']),
         'p': md(df['p'], res['pValue']),
+        'pAdj': md(df['p_adj'], res['pValueAdj']),
         'slopeLog': md(df['slope'], res['slopeLog']),
         'slopePct': md(df['slope_pct'], res['slopePct']),
         'freq': md(df['plotting_position'], res['freq']),

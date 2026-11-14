@@ -476,15 +476,15 @@ res_eq = quantile_trend_test(
 
 In this realization 3 of 12 ranks are significant at $\alpha = 0.05$ in the raw analysis and 1 after thinning. The data contain no trend at all, so every one of them is a false positive. A single realization cannot show whether a method is calibrated: any individual rank is significant by chance in 5% of stationary series, with or without equalization, and thinning does not change what the retained samples happen to look like.
 
-### False-Positive Rates over 200 Stationary Realizations
-The meaningful comparison is the rate at which each analysis declares a trend ($\alpha = 0.05$) at the lowest and highest rank when the same sampling design is repeated on 200 independent stationary series:
+### False-Positive Rates over 1000 Stationary Realizations
+The meaningful comparison is the rate at which each analysis declares a trend ($\alpha = 0.05$) at the lowest and highest rank when the same sampling design is repeated on 1000 independent stationary series:
 
 | analysis                                      | lowest rank (annual min) | highest rank (annual max) |
 | --------------------------------------------- | ------------------------ | ------------------------- |
-| Order-statistic ranks, raw                    | 57.5%                    | 50.0%                     |
-| Default Hazen ranks, raw                      | 5.5%                     | 5.5%                      |
-| Order-statistic ranks, `equalize='thin'`      | 6.5%                     | 6.5%                      |
-| Order-statistic ranks, `equalize='aggregate'` | 6.0%                     | 3.5%                      |
+| Order-statistic ranks, raw                    | 57.8%                    | 53.9%                     |
+| Default Hazen ranks, raw                      | 5.7%                     | 7.6%                      |
+| Order-statistic ranks, `equalize='thin'`      | 4.0%                     | 3.1%                      |
+| Order-statistic ranks, `equalize='aggregate'` | 3.2%                     | 3.8%                      |
 
 Raw order statistics are declared trending roughly half the time. The default Hazen ranks are much closer to the nominal 5%, and both equalization modes bring the order-statistic analysis back to it (see the [validation report](../../validation/43_Quantile_Kendall/README.md) for a larger study).
 

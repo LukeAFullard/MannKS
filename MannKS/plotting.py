@@ -832,10 +832,13 @@ def plot_quantile_trend(
           primary tick marks labeled with standard probabilities (.001 to .999)
           and a secondary top x-axis displaying standard normal Z values [-3, 3].
         - 'linear': Quantiles plotted linearly against non-exceedance probability [0, 1].
-    color_by : {'p', 'classification'}, default 'p'
+    color_by : {'p', 'p_adj', 'classification'}, default 'p'
         Color coding for plotted points:
         - 'p': Colored by significance: p < alpha (orange highlight),
           alpha <= p < 2*alpha (charcoal/intermediate), and p >= 2*alpha (gray).
+        - 'p_adj': As 'p', but using the Zhang pre-whitened p-value (requires
+          `quantile_trend_test(..., prewhiten='zhang')`). With alpha = 0.05 this is
+          the colouring of EGRET's Quantile-Kendall plot.
         - 'classification': Colored by MannKS trend classification category:
           Increasing (blue/navy), Decreasing (red/orange), and No Trend / Indeterminate (gray).
     show_ci : bool, default False
@@ -898,8 +901,10 @@ def plot_quantile_trend(
 
         if x_scale not in ('normal', 'linear'):
             raise ValueError(f"Unsupported x_scale: '{x_scale}'. Must be 'normal' or 'linear'.")
-        if color_by not in ('p', 'classification'):
-            raise ValueError(f"Unsupported color_by: '{color_by}'. Must be 'p' or 'classification'.")
+        if color_by not in ('p', 'p_adj', 'classification'):
+            raise ValueError(f"Unsupported color_by: '{color_by}'. Must be 'p', 'p_adj' or 'classification'.")
+        if color_by == 'p_adj' and ('p_adj' not in df.columns or df['p_adj'].isna().all()):
+            raise ValueError("color_by='p_adj' requires results computed with `prewhiten='zhang'`.")
 
         alpha_val = float(getattr(result, 'alpha', 0.05) or 0.05)
         transform = getattr(result, 'transform', 'none')
@@ -966,8 +971,9 @@ def plot_quantile_trend(
                 )
 
         # Color coding points
-        if color_by == 'p':
-            p_vals = df['p'].to_numpy(dtype=float) if 'p' in df.columns else np.full(len(df), np.nan)
+        if color_by in ('p', 'p_adj'):
+            p_name = 'p' if color_by == 'p' else 'adjusted p'
+            p_vals = df[color_by].to_numpy(dtype=float) if color_by in df.columns else np.full(len(df), np.nan)
             mask_sig = valid_x & (~np.isnan(p_vals)) & (p_vals < alpha_val)
             mask_mid = valid_x & (~np.isnan(p_vals)) & (p_vals >= alpha_val) & (p_vals < 2.0 * alpha_val)
             mask_ns = valid_x & (np.isnan(p_vals) | (p_vals >= 2.0 * alpha_val))
@@ -976,19 +982,19 @@ def plot_quantile_trend(
                 ax.scatter(
                     x[mask_sig], y[mask_sig],
                     color='#d95f02', s=35, zorder=5,
-                    label=f"p < {alpha_val:g}"
+                    label=f"{p_name} < {alpha_val:g}"
                 )
             if np.any(mask_mid):
                 ax.scatter(
                     x[mask_mid], y[mask_mid],
                     color='#252525', s=35, zorder=4,
-                    label=f"{alpha_val:g} <= p < {2.0*alpha_val:g}"
+                    label=f"{alpha_val:g} <= {p_name} < {2.0*alpha_val:g}"
                 )
             if np.any(mask_ns):
                 ax.scatter(
                     x[mask_ns], y[mask_ns],
                     color='#7f7f7f', s=35, zorder=3,
-                    label=f"p >= {2.0*alpha_val:g}"
+                    label=f"{p_name} >= {2.0*alpha_val:g}"
                 )
         else:  # color_by == 'classification'
             if 'classification' in df.columns:

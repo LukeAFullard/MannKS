@@ -27,7 +27,7 @@ MannKS v0.7.0 was developed to generalize EGRET's pioneering methodology:
 | **Censored Data** | Uncensored streamflow only. | Native handling of detection limits (`<DL`, `>DL`) with Akritas-Theil-Sen (ATS) slope estimation. |
 | **Coverage Filtering** | Implicitly requires continuous daily records. | Explicit `min_coverage` parameter to reject incomplete blocks with temporal gaps. |
 | **Sampling Drift Guard** | Not supported. | Built-in `sampling_diagnostic` and `equalize='thin'` / `'aggregate'`. |
-| **Serial Correlation** | Points coloured by `zyp` (Zhang pre-whitening) adjusted p-value. | Unadjusted Mann-Kendall `p` by default (identical to EGRET's `pValue`); `autocorr_method` options instead of `zyp`. |
+| **Serial Correlation** | Points coloured by `zyp` (Zhang pre-whitening) adjusted p-value. | Unadjusted Mann-Kendall `p` by default (identical to EGRET's `pValue`); `prewhiten='zhang'` adds `p_adj`, identical to EGRET's `pValueAdj`; `autocorr_method` options as alternatives. |
 | **Timezones** | Dates only. | Timezone-aware timestamps analysed in local wall-clock time. |
 
 With matching settings (Recipe 1) MannKS reproduces EGRET's `makeSortQ`/`trendSortQ` numbers to floating-point rounding. This is checked against the real R package in [`validation/43_Quantile_Kendall`](../../validation/43_Quantile_Kendall/README.md) and in the test suite.
@@ -124,10 +124,13 @@ result = quantile_trend_test(
     standardization='egret',      # leapOdd / leapEven rank reduction
     transform='log',              # EGRET tests log(Q); slope_pct = 100 * (exp(slope) - 1)
     block_time='egret',           # EGRET's midDecYear time axis (exact slopes)
+    prewhiten='zhang',            # EGRET's pValueAdj (zyp.zhang) in results['p_adj']
     slope_scaling='year',
     x_unit='m3/s',
 )
-# result.results: 'slope' = EGRET slopeLog, 'slope_pct' = slopePct, 'p' = pValue, 'Tau' = tau
+# result.results: 'slope' = EGRET slopeLog, 'slope_pct' = slopePct, 'p' = pValue,
+#                 'p_adj' = pValueAdj, 'Tau' = tau
+# plot_quantile_trend(result, color_by='p_adj') colours the points as EGRET does.
 # For a seasonal period of analysis (paLong < 12) add e.g. months=[12, 1, 2] with 'YS-DEC'.
 
 # Plot on USGS EGRET style normal probability scale
@@ -220,6 +223,7 @@ result = quantile_trend_test(
 | `transform` | str or None | `'none'` | Transformation applied before trend estimation: `'none'` or `None` (raw), `'log'`, or `'pct_of_median'`. With `'log'`, `slope` is in natural log units per time unit, while `slope_pct` is exponentiated as percentage change per time unit via $100(e^b - 1)$. |
 | `censor_quantile_method` | str | `'propagate'` | Handling of censored observations during quantile standardization: `'propagate'` (preserves censoring flags for ATS), `'substitute'` (replaces with multiplier), or `'error'`. |
 | `hicensor` | bool or float | `False` | Recensors all observations to the highest detection limit to eliminate false trends from improving laboratory precision. |
+| `prewhiten` | str or None | `'none'` | `'zhang'` adds `p_adj` (Zhang trend-free pre-whitened Mann-Kendall p-value, a port of `zyp::zyp.zhang`; EGRET's `pValueAdj`), `tau_adj` and `acf1_adj`. Not defined for censored quantiles. |
 | `field_significance` | bool | `False` | Computes global permutation field significance across all quantiles. |
 | `n_permutations` | int | `999` | Number of block permutations for field significance testing. |
 | `slope_scaling` | str or None | `'year'` | Time unit for slope scaling: `'year'`, `'month'`, `'week'`, `'day'`, `'hour'`, `'minute'`, `'second'`. Pass `None` for unscaled raw units (per second for datetime `t`). |
@@ -235,7 +239,7 @@ result = quantile_trend_test(
 | `result` | QuantileTrendResult | *Required* | Output object returned by `quantile_trend_test`. |
 | `save_path` | str, Path, or None | `None` | Path to save figure. If `None` and `ax` is `None`, no figure is created and `None` is returned. |
 | `x_scale` | str | `'normal'` | X-axis coordinate scaling: `'normal'` (probit Z-scale with probability tick labels `.001` to `.999`) or `'linear'` (uniform $[0, 1]$). |
-| `color_by` | str | `'p'` | Point coloring mode: `'p'` (significance bands $p < \alpha$, $\alpha \le p < 2\alpha$, $p \ge 2\alpha$) or `'classification'` (blue for increasing, orange/red for decreasing, grey for no trend). |
+| `color_by` | str | `'p'` | Point coloring mode: `'p_adj'` (as `'p'` but with the pre-whitened p-value), `'p'` (significance bands $p < \alpha$, $\alpha \le p < 2\alpha$, $p \ge 2\alpha$) or `'classification'` (blue for increasing, orange/red for decreasing, grey for no trend). |
 | `show_ci` | bool | `False` | Displays vertical error whiskers (confidence intervals) for each quantile. |
 | `show_fdc` | bool | `False` | Overlays the median Flow Duration Curve (FDC) on a secondary right-hand y-axis. |
 | `y_lim` | tuple | `None` | Manual (ymin, ymax) limits for the primary trend slope axis. |
@@ -262,6 +266,7 @@ result = quantile_trend_test(
   * `slope_pct`, `lower_ci_pct`, `upper_ci_pct`: Percentage change per unit time (exponentiated via $100(e^b - 1)$ when `transform='log'`, or relative to each quantile's median when `transform='none'`/`'pct_of_median'`).
   * `p`: Mann-Kendall two-sided p-value.
   * `h`: Boolean significance flag ($p < \alpha$).
+  * `p_adj`, `tau_adj`, `acf1_adj`: Zhang pre-whitened p-value, its Kendall $\tau$, and the lag-1 autocorrelation removed (`NaN` unless `prewhiten='zhang'`).
   * `Tau`: Kendall's $\tau$ correlation coefficient.
   * `classification`: Categorical trend description (e.g. `"Highly Likely Increasing"`).
   * `prop_censored`: Fraction of blocks where this rank is censored.
