@@ -89,9 +89,15 @@ def test_ci_and_sen_probability_match_sorted_reference():
             v[rng.random(n) < .3] = np.nan
         var = float(rng.choice([0.0, 1.0, 50.0])) * rng.random()
         tp = None if rng.random() < .5 else int(n * 3)
-        for m in ('direct', 'lwp'):
+        # 'direct' picks order statistics, so it must match exactly. 'lwp'
+        # interpolates: the reference uses np.interp, whose compiled arithmetic
+        # may be fused (FMA) on some platforms (seen on macOS arm64) and then
+        # differs from the library's plain-float result in the last bit. Slopes
+        # here are O(1), so 1e-12 allows rounding only; a wrong rank or order
+        # statistic is off by many orders of magnitude more.
+        for m, atol in (('direct', 0), ('lwp', 1e-12)):
             assert np.allclose(st._confidence_intervals(v.copy(), var, 0.1, m, tp),
-                               _ci_reference(v, var, 0.1, m, tp), equal_nan=True, rtol=0, atol=0)
+                               _ci_reference(v, var, 0.1, m, tp), equal_nan=True, rtol=0, atol=atol)
         valid = np.sort(v[~np.isnan(v)])
         if len(valid) and var >= 1e-10:
             r = [st._rank_of_zero(valid, k) for k in ('median', 'max', 'min')]
