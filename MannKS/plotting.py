@@ -1,11 +1,14 @@
 """
 This script provides plotting utilities for the MannKS package.
 """
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
+from typing import Optional, Union, Tuple, Any
+from scipy.stats import norm
 from ._helpers import _preprocessing
 from ._datetime import _get_season_func, _is_datetime_like, _get_cycle_identifier
 
@@ -791,3 +794,350 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
             fig.savefig(save_path)
     finally:
         plt.close(fig)
+
+
+def plot_quantile_trend(
+    result: Any,
+    save_path: Optional[Union[str, Any]] = None,
+    x_scale: str = 'normal',
+    color_by: str = 'p',
+    show_ci: bool = False,
+    show_fdc: bool = False,
+    y_lim: Optional[Tuple[float, float]] = None,
+    legend_loc: Optional[str] = 'upper left',
+    title: Optional[str] = None,
+    figsize: Tuple[float, float] = (10, 6),
+    ax: Optional[plt.Axes] = None,
+    dpi: int = 150,
+) -> Optional[Union[str, plt.Axes]]:
+    """
+    Plot generalized Quantile-Kendall trend results across quantiles.
+
+    Visualizes trend slope (and optional confidence intervals) as a function of
+    non-exceedance probability (quantile) on either standard normal Z-scale or
+    linear scale, with color coding by significance (p-value) or trend classification,
+    and optional Flow Duration Curve (FDC) overlay.
+
+    Parameters
+    ----------
+    result : QuantileTrendResult, namedtuple, or pd.DataFrame
+        The result object returned by `quantile_trend_test` or a DataFrame
+        containing quantile trend results.
+    save_path : str, Path, buffer, or None, default None
+        File path or writable buffer where the plot should be saved.
+        If None and ax is None, no figure is created and None is returned.
+    x_scale : {'normal', 'linear'}, default 'normal'
+        X-axis coordinate scaling:
+        - 'normal': Quantiles mapped to standard normal quantiles (Z-scale) with
+          primary tick marks labeled with standard probabilities (.001 to .999)
+          and a secondary top x-axis displaying standard normal Z values [-3, 3].
+        - 'linear': Quantiles plotted linearly against non-exceedance probability [0, 1].
+    color_by : {'p', 'p_adj', 'classification'}, default 'p'
+        Color coding for plotted points:
+        - 'p': Colored by significance: p < alpha (orange highlight),
+          alpha <= p < 2*alpha (charcoal/intermediate), and p >= 2*alpha (gray).
+        - 'p_adj': As 'p', but using the Zhang pre-whitened p-value (requires
+          `quantile_trend_test(..., prewhiten='zhang')`). With alpha = 0.05 this is
+          the colouring of EGRET's Quantile-Kendall plot.
+        - 'classification': Colored by MannKS trend classification category:
+          Increasing (blue/navy), Decreasing (red/orange), and No Trend / Indeterminate (gray).
+    show_ci : bool, default False
+        Whether to display vertical error whiskers (confidence intervals) for each quantile.
+    show_fdc : bool, default False
+        Whether to overlay the median Flow Duration Curve (FDC) across blocks
+        on a secondary right-hand y-axis (`twinx`).
+    y_lim : tuple of (float, float), optional
+        Manual (ymin, ymax) limits for the primary trend slope y-axis.
+    legend_loc : str or None, default 'upper left'
+        Location for the legend (e.g. 'upper left', 'best', etc.). If None or 'none',
+        legend is omitted.
+    title : str, optional
+        Custom title for the plot. If None, an informative default title is generated.
+    figsize : tuple of (float, float), default (10, 6)
+        Dimensions of the figure in inches when creating a new figure.
+    ax : plt.Axes, optional
+        Existing matplotlib Axes object to draw onto. If provided, `fig = ax.figure`.
+    dpi : int, default 150
+        Resolution in dots per inch for saved figure files.
+
+    Returns
+    -------
+    save_path or ax or None
+        Returns save_path if save_path is provided, ax if ax is provided and save_path is None,
+        or None if save_path is None and ax is None.
+    """
+    if save_path is None and ax is None:
+        return None
+
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    try:
+        # Extract DataFrame and metadata from result
+        if hasattr(result, 'results'):
+            df = result.results
+        elif isinstance(result, pd.DataFrame):
+            df = result
+        elif hasattr(result, 'to_frame'):
+            df = result.to_frame()
+        else:
+            raise TypeError("Expected result to be a QuantileTrendResult, namedtuple, or DataFrame.")
+
+        if df is None or df.empty:
+            ax.text(
+                0.5, 0.5, "No quantile trend results available",
+                ha='center', va='center', transform=ax.transAxes
+            )
+            if save_path is not None:
+                if hasattr(save_path, 'write'):
+                    fig.savefig(save_path, format='png', dpi=dpi, bbox_inches='tight')
+                else:
+                    fig.savefig(save_path, dpi=dpi, bbox_inches='tight')
+                return save_path
+            return ax
+
+        if x_scale not in ('normal', 'linear'):
+            raise ValueError(f"Unsupported x_scale: '{x_scale}'. Must be 'normal' or 'linear'.")
+        if color_by not in ('p', 'p_adj', 'classification'):
+            raise ValueError(f"Unsupported color_by: '{color_by}'. Must be 'p', 'p_adj' or 'classification'.")
+        if color_by == 'p_adj' and ('p_adj' not in df.columns or df['p_adj'].isna().all()):
+            raise ValueError("color_by='p_adj' requires results computed with `prewhiten='zhang'`.")
+
+        alpha_val = float(getattr(result, 'alpha', 0.05) or 0.05)
+        transform = getattr(result, 'transform', 'none')
+
+        # Determine y values, CIs, and percentage formatting
+        is_log = (transform == 'log')
+        if is_log and 'slope_pct' in df.columns and not df['slope_pct'].isna().all():
+            y = df['slope_pct'].to_numpy(dtype=float)
+            ci_low = df['lower_ci_pct'].to_numpy(dtype=float) if 'lower_ci_pct' in df.columns else None
+            ci_high = df['upper_ci_pct'].to_numpy(dtype=float) if 'upper_ci_pct' in df.columns else None
+            is_pct = True
+        elif 'slope' in df.columns:
+            y = df['slope'].to_numpy(dtype=float)
+            ci_low = df['lower_ci'].to_numpy(dtype=float) if 'lower_ci' in df.columns else None
+            ci_high = df['upper_ci'].to_numpy(dtype=float) if 'upper_ci' in df.columns else None
+            is_pct = False
+        elif 'slope_pct' in df.columns:
+            y = df['slope_pct'].to_numpy(dtype=float)
+            ci_low = df['lower_ci_pct'].to_numpy(dtype=float) if 'lower_ci_pct' in df.columns else None
+            ci_high = df['upper_ci_pct'].to_numpy(dtype=float) if 'upper_ci_pct' in df.columns else None
+            is_pct = True
+        else:
+            raise ValueError("Input result DataFrame must contain 'slope' or 'slope_pct' column.")
+
+        # Determine x coordinates
+        if x_scale == 'normal':
+            if 'z_position' in df.columns and not df['z_position'].isna().all():
+                x = df['z_position'].to_numpy(dtype=float)
+            elif 'plotting_position' in df.columns and not df['plotting_position'].isna().all():
+                x = norm.ppf(df['plotting_position'].to_numpy(dtype=float))
+            elif 'quantile' in df.columns and not df['quantile'].isna().all():
+                x = norm.ppf(df['quantile'].to_numpy(dtype=float))
+            else:
+                raise ValueError("Input result DataFrame must contain 'z_position', 'plotting_position', or 'quantile'.")
+        else:  # 'linear'
+            if 'plotting_position' in df.columns and not df['plotting_position'].isna().all():
+                x = df['plotting_position'].to_numpy(dtype=float)
+            elif 'quantile' in df.columns and not df['quantile'].isna().all():
+                x = df['quantile'].to_numpy(dtype=float)
+            else:
+                raise ValueError("Input result DataFrame must contain 'plotting_position' or 'quantile'.")
+
+        # Horizontal baseline at y = 0
+        ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7, zorder=1)
+
+        valid_x = np.isfinite(x)
+        if x_scale == 'normal' and not np.all(valid_x):
+            warnings.warn(
+                "Excluded quantile(s) with non-finite normal-scale coordinates (e.g., p=0 or p=1).",
+                UserWarning,
+            )
+
+        # Confidence intervals (error bars)
+        if show_ci and ci_low is not None and ci_high is not None:
+            yerr_low = np.where(~np.isfinite(ci_low) | ~np.isfinite(y), 0.0, np.maximum(0.0, y - ci_low))
+            yerr_high = np.where(~np.isfinite(ci_high) | ~np.isfinite(y), 0.0, np.maximum(0.0, ci_high - y))
+            valid_ci = valid_x & np.isfinite(y) & (np.isfinite(ci_low) | np.isfinite(ci_high))
+            if np.any(valid_ci):
+                ax.errorbar(
+                    x[valid_ci], y[valid_ci],
+                    yerr=[yerr_low[valid_ci], yerr_high[valid_ci]],
+                    fmt='none', ecolor='gray', elinewidth=1.0, capsize=2, alpha=0.6,
+                    zorder=2
+                )
+
+        # Color coding points
+        if color_by in ('p', 'p_adj'):
+            p_name = 'p' if color_by == 'p' else 'adjusted p'
+            p_vals = df[color_by].to_numpy(dtype=float) if color_by in df.columns else np.full(len(df), np.nan)
+            mask_sig = valid_x & (~np.isnan(p_vals)) & (p_vals < alpha_val)
+            mask_mid = valid_x & (~np.isnan(p_vals)) & (p_vals >= alpha_val) & (p_vals < 2.0 * alpha_val)
+            mask_ns = valid_x & (np.isnan(p_vals) | (p_vals >= 2.0 * alpha_val))
+
+            if np.any(mask_sig):
+                ax.scatter(
+                    x[mask_sig], y[mask_sig],
+                    color='#d95f02', s=35, zorder=5,
+                    label=f"{p_name} < {alpha_val:g}"
+                )
+            if np.any(mask_mid):
+                ax.scatter(
+                    x[mask_mid], y[mask_mid],
+                    color='#252525', s=35, zorder=4,
+                    label=f"{alpha_val:g} <= {p_name} < {2.0*alpha_val:g}"
+                )
+            if np.any(mask_ns):
+                ax.scatter(
+                    x[mask_ns], y[mask_ns],
+                    color='#7f7f7f', s=35, zorder=3,
+                    label=f"{p_name} >= {2.0*alpha_val:g}"
+                )
+        else:  # color_by == 'classification'
+            if 'classification' in df.columns:
+                cat_series = df['classification'].astype(str)
+            elif 'trend' in df.columns:
+                cat_series = df['trend'].astype(str)
+            else:
+                cat_series = pd.Series(['No Trend'] * len(df))
+
+            mask_inc = valid_x & cat_series.str.contains('increasing', case=False, na=False).to_numpy()
+            mask_dec = valid_x & cat_series.str.contains('decreasing', case=False, na=False).to_numpy()
+            mask_other = valid_x & (~(mask_inc | mask_dec))
+
+            if np.any(mask_inc):
+                ax.scatter(
+                    x[mask_inc], y[mask_inc],
+                    color='#1f78b4', s=35, zorder=5,
+                    label='Increasing'
+                )
+            if np.any(mask_dec):
+                ax.scatter(
+                    x[mask_dec], y[mask_dec],
+                    color='#e31a1c', s=35, zorder=4,
+                    label='Decreasing'
+                )
+            if np.any(mask_other):
+                ax.scatter(
+                    x[mask_other], y[mask_other],
+                    color='#7f7f7f', s=35, zorder=3,
+                    label='No Trend / Indeterminate'
+                )
+
+        # X-axis configuration
+        if x_scale == 'normal':
+            prob_ticks = [0.001, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 0.999]
+            prob_labels = ['.001', '.01', '.05', '.10', '.25', '.50', '.75', '.90', '.95', '.99', '.999']
+            z_ticks = [float(norm.ppf(p)) for p in prob_ticks]
+
+            finite_x = x[valid_x]
+            min_x = min(z_ticks[0], float(np.min(finite_x)) if len(finite_x) > 0 else z_ticks[0])
+            max_x = max(z_ticks[-1], float(np.max(finite_x)) if len(finite_x) > 0 else z_ticks[-1])
+            margin = max(0.15, (max_x - min_x) * 0.03)
+            ax.set_xlim(min_x - margin, max_x + margin)
+
+            ax.set_xticks(z_ticks)
+            ax.set_xticklabels(prob_labels)
+            ax.set_xlabel("Non-Exceedance Probability")
+
+            secax = ax.secondary_xaxis('top')
+            secax.set_xlabel("Standard Normal Quantile (Z)")
+            secax.set_xticks([-3, -2, -1, 0, 1, 2, 3])
+            secax.set_xticklabels(['-3', '-2', '-1', '0', '1', '2', '3'])
+        else:  # 'linear'
+            ax.set_xlabel("Non-Exceedance Probability")
+            ax.set_xlim(-0.02, 1.02)
+
+        # Y-axis configuration
+        if is_pct:
+            scale_unit = getattr(result, 'slope_scaling', None)
+            if not scale_unit and 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
+                u_str = str(df['slope_units'].iloc[0])
+                if 'per ' in u_str:
+                    scale_unit = u_str.split('per ')[-1].strip()
+            if not scale_unit:
+                scale_unit = 'year'
+            y_label = f"Trend (% per {scale_unit})"
+        else:
+            u_str = ""
+            if 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
+                u_str = str(df['slope_units'].iloc[0]).strip()
+            if u_str:
+                y_label = f"Trend ({u_str})"
+            else:
+                y_label = "Trend"
+        ax.set_ylabel(y_label)
+
+        if y_lim is not None:
+            ax.set_ylim(y_lim)
+
+        ax.grid(True, linestyle=':', alpha=0.6)
+
+        # Optional Flow Duration Curve overlay
+        ax_fdc = None
+        if show_fdc:
+            matrix = getattr(result, 'matrix', None)
+            if matrix is not None and hasattr(matrix, 'median') and not getattr(matrix, 'empty', True):
+                median_curve = matrix.median(axis=0).to_numpy(dtype=float)
+                if len(median_curve) == len(x):
+                    valid_fdc = valid_x & np.isfinite(median_curve)
+                    if np.any(valid_fdc):
+                        ax_fdc = ax.twinx()
+                        ax_fdc.plot(
+                            x[valid_fdc], median_curve[valid_fdc],
+                            color='navy', linestyle=':', linewidth=1.5, alpha=0.75,
+                            label='Median FDC'
+                        )
+                        unit_str = getattr(result, 'x_unit', None) or getattr(result, 'units', None) or ''
+                        if not unit_str and 'slope_units' in df.columns and len(df) > 0 and pd.notna(df['slope_units'].iloc[0]):
+                            su = str(df['slope_units'].iloc[0]).strip()
+                            if ' per ' in su and not su.startswith('%'):
+                                unit_str = su.split(' per ')[0].strip()
+                                if unit_str.startswith('ln(') and unit_str.endswith(')'):
+                                    unit_str = unit_str[3:-1]  # the FDC shows raw values
+                        if unit_str:
+                            ax_fdc.set_ylabel(f"Median Concentration / Flow ({unit_str})", color='navy')
+                        else:
+                            ax_fdc.set_ylabel("Median Concentration / Flow", color='navy')
+                        ax_fdc.tick_params(axis='y', labelcolor='navy')
+                        ax_fdc.grid(False)
+
+        # Title
+        if title is not None:
+            ax.set_title(title)
+        else:
+            freq = getattr(result, 'block_frequency', None)
+            if freq:
+                ax.set_title(f"Quantile Kendall Trend Analysis ({freq} blocks)")
+            else:
+                ax.set_title("Quantile Kendall Trend Analysis")
+
+        # Legend
+        if legend_loc is not None and str(legend_loc).lower() not in ('none', 'na', 'false'):
+            handles, labels = ax.get_legend_handles_labels()
+            if ax_fdc is not None:
+                fdc_handles, fdc_labels = ax_fdc.get_legend_handles_labels()
+                handles = handles + fdc_handles
+                labels = labels + fdc_labels
+            if handles:
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys(), loc=legend_loc, frameon=True)
+
+        if save_path is not None:
+            if hasattr(save_path, 'write'):
+                fig.savefig(save_path, format='png', dpi=dpi, bbox_inches='tight')
+            else:
+                fig.savefig(save_path, dpi=dpi, bbox_inches='tight')
+            return save_path
+        return ax
+    finally:
+        # Only close figures this function created; a caller-supplied Axes
+        # (and its figure) stays open even when `save_path` is given.
+        if created_fig:
+            plt.close(fig)
+
+
+plot_quantile_kendall = plot_quantile_trend

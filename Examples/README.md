@@ -93,6 +93,10 @@ To run the examples yourself, install the package and `tabulate` (used to print 
     *   **Goal:** Demonstrate how to use the `alpha` parameter in segmented trend analysis to control the confidence intervals of breakpoints and slopes.
 *   [**Example 35: Large Dataset Trend Analysis**](./35_Large_Data_Trend/README.md)
     *   **Goal:** Demonstrate how to efficiently analyze large datasets (n > 5,000) using fast stochastic estimators and stratified sampling.
+*   [**Example 36: Generalized Quantile-Kendall Trend Analysis**](./36_Quantile_Kendall/README.md)
+    *   **Goal:** Learn how to detect divergent trends across distribution quantiles (flood peaks vs drought baseflows, winter runoff pulses) and protect against sampling frequency drift traps.
+*   [**Example 37: Monthly Sampled Data with Missing Values & Censoring**](./37_Monthly_Censored_Quantile_Kendall/README.md)
+    *   **Goal:** Apply Quantile-Kendall to real-world monthly monitoring datasets (10–25 years), handling missing sampling visits, incomplete block dropping, changing detection limits, and divergent risk regimes.
 
 ## Detailed Guides
 
@@ -110,3 +114,4 @@ In addition to the practical examples, the following deep-dive guides are availa
 *   [**Rolling Trend Analysis Guide**](./Detailed_Guides/rolling_trend_guide.md): Moving window analysis.
 *   [**Segmented Trend Analysis Guide**](./Detailed_Guides/segmented_trend_guide.md): Structural breakpoint detection.
 *   [**Large Dataset Analysis Guide**](./Detailed_Guides/large_dataset_guide.md): Strategies for analyzing big data.
+*   [**Quantile Trend Analysis Guide**](./Detailed_Guides/quantile_trend_guide.md): Frequency-agnostic quantile trend testing, block standardization, and sampling drift protection (see also [Quantile-Kendall Statistical Methodology](../quantile_kendall.md)).

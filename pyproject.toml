@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mannks"
-version = "0.6.3"
+version = "0.7.0"
 description = "Non-parametric trend analysis for unequally spaced time series with censored data and large dataset support"
 authors = ["Luke Fullard"]
 license = "MIT"
@@ -18,7 +18,11 @@ keywords = [
     "piecewise-regression",
     "breakpoint-detection",
     "rolling-trend",
-    "bootstrap"
+    "bootstrap",
+    "quantile-kendall",
+    "quantile-trend",
+    "egret",
+    "streamflow"
 ]
 
 packages = [{ include = "MannKS" }]

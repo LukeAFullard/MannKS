@@ -1,0 +1,759 @@
+"""
+Core quantile blocking, length standardization, and sampling diagnostics
+for Generalized Quantile-Kendall Analysis (MannKS v0.7.0).
+"""
+import datetime
+import numpy as np
+import pandas as pd
+import warnings
+from scipy.stats import norm, kendalltau
+from ._datetime import _is_datetime_like, _to_numeric_time
+from ._stats import _rank_of_zero
+
+try:
+    from pandas.tseries.offsets import to_offset
+except ImportError:
+    try:
+        from pandas.tseries.frequencies import to_offset
+    except ImportError:
+        to_offset = None
+
+def _parse_block_frequency(block_frequency, is_datetime):
+    if is_datetime:
+        if to_offset is None:
+            raise ImportError("Could not import to_offset from pandas.")
+        if block_frequency is None:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
+        try:
+            offset = to_offset(block_frequency)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
+        if offset is None:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data. Use a pandas frequency string (e.g., 'YE', '5YE', 'QE').")
+        probe = pd.Timestamp('2000-01-01')
+        try:
+            if (probe + offset) <= probe:
+                raise ValueError(
+                    f"Invalid block_frequency '{block_frequency}' for datetime data. Frequency step must be positive."
+                )
+        except TypeError:
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for datetime data.")
+        return offset
+    else:
+        if isinstance(block_frequency, (bool, np.bool_)):
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number (finite).")
+        try:
+            width = float(block_frequency)
+            if not np.isfinite(width) or width <= 0:
+                raise ValueError
+            return width
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid block_frequency '{block_frequency}' for numeric data. Must be a positive number (finite).")
+
+def _normalize_start_freq(offset_or_str) -> str:
+    if isinstance(offset_or_str, (pd.Timedelta, datetime.timedelta)) and to_offset is not None:
+        offset_or_str = to_offset(offset_or_str)
+    s_raw = str(offset_or_str).strip()
+    try:
+        fs = getattr(offset_or_str, 'freqstr', None)
+        if fs:
+            s_raw = str(fs).strip()
+        else:
+            rc = getattr(offset_or_str, 'rule_code', None)
+            if rc:
+                s_raw = str(rc).strip()
+    except Exception:
+        pass
+    s = s_raw.upper()
+    end_month_map = {
+        'JAN': 'FEB', 'FEB': 'MAR', 'MAR': 'APR', 'APR': 'MAY',
+        'MAY': 'JUN', 'JUN': 'JUL', 'JUL': 'AUG', 'AUG': 'SEP',
+        'SEP': 'OCT', 'OCT': 'NOV', 'NOV': 'DEC', 'DEC': 'JAN',
+    }
+    if 'YE-' in s:
+        parts = s.split('YE-')
+        prefix = parts[0]
+        m_end = parts[1][:3]
+        m_start = end_month_map.get(m_end, 'JAN')
+        return f"{prefix}YS-{m_start}"
+    if s.endswith('YE') or s == 'Y' or s == 'A':
+        prefix = s[:-2] if s.endswith('YE') else ''
+        return f"{prefix}YS"
+    if 'QE-' in s:
+        parts = s.split('QE-')
+        prefix = parts[0]
+        m_end = parts[1][:3]
+        m_start = end_month_map.get(m_end, 'JAN')
+        return f"{prefix}QS-{m_start}"
+    if s.endswith('QE') or s == 'Q':
+        prefix = s[:-2] if s.endswith('QE') else ''
+        return f"{prefix}QS"
+    if s.endswith('ME') or s == 'M':
+        prefix = s[:-2] if s.endswith('ME') else ''
+        return f"{prefix}MS"
+    # Preserve lowercase sub-daily units required by pandas >= 2.2 without altering 'MS' (MonthStart)
+    unit_part = s_raw.lstrip('0123456789')
+    if unit_part in ('h', 'H', 'min', 's', 'ms', 'us', 'ns') or unit_part.lower() in ('h', 'min', 'us', 'ns'):
+        prefix = s_raw[:len(s_raw) - len(unit_part)]
+        return f"{prefix}{unit_part.lower()}"
+    return s
+
+def _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime):
+    if is_datetime:
+        _parse_block_frequency(block_frequency, True)
+        start_freq = _normalize_start_freq(block_frequency)
+        start_offset = to_offset(start_freq)
+
+        t_min_ts = pd.Timestamp(t_min)
+        t_max_ts = pd.Timestamp(t_max)
+        if t_min_ts.tzinfo is not None:
+            t_min_ts = t_min_ts.tz_convert(None)
+        if t_max_ts.tzinfo is not None:
+            t_max_ts = t_max_ts.tz_convert(None)
+
+        if block_origin is not None:
+            origin = pd.Timestamp(block_origin)
+            if origin.tzinfo is not None:
+                origin = origin.tz_convert(None)
+            origin_unaligned = (
+                not isinstance(start_offset, pd.offsets.Tick)
+                and not start_offset.is_on_offset(origin)
+            )
+            while origin > t_min_ts:
+                prev = origin - start_offset
+                if prev >= origin:
+                    break
+                origin = prev
+            if isinstance(start_offset, pd.offsets.Tick) and (origin + start_offset) <= t_min_ts:
+                step_td = pd.Timedelta(start_offset)
+                if step_td > pd.Timedelta(0):
+                    k_fwd = int((t_min_ts - origin) // step_td)
+                    if k_fwd > 0:
+                        origin = origin + k_fwd * step_td
+                        while origin > t_min_ts:
+                            origin = origin - step_td
+        else:
+            unit_freq = start_freq.lstrip('0123456789')
+            unit_offset = to_offset(unit_freq)
+            # Case-sensitive check: keep lowercase 's'/'ms'/'us'/'ns' distinct from 'MS' (MonthStart)
+            if unit_freq in ('s', 'ms', 'us', 'ns'):
+                origin = unit_offset.rollback(t_min_ts)
+            else:
+                origin = unit_offset.rollback(t_min_ts.normalize())
+
+        edges_dt = pd.date_range(start=origin, end=t_max_ts + start_offset, freq=start_offset)
+        while len(edges_dt) < 2 or edges_dt[-1] <= t_max_ts:
+            prev_last = pd.Timestamp(edges_dt[-1]) if len(edges_dt) > 0 else None
+            edges_dt = pd.date_range(start=origin, periods=len(edges_dt) + 1, freq=start_offset)
+            if prev_last is not None and pd.Timestamp(edges_dt[-1]) <= prev_last:
+                break
+
+        # Calendar-anchored offsets (e.g. 'YS-APR', 'QS', 'MS') cannot start a
+        # block between anchors: ``pd.date_range`` rolls an unaligned origin
+        # *forward* to the next anchor.  Say so, and make sure the first edge
+        # never lands after the first observation (which would silently drop
+        # every observation before it).
+        first_edge = pd.Timestamp(edges_dt[0])
+        if block_origin is not None and origin_unaligned:
+            warnings.warn(
+                f"`block_origin` ({pd.Timestamp(block_origin)}) is not aligned with "
+                f"block_frequency '{block_frequency}'; block edges fall on that frequency's "
+                f"calendar anchors instead (first edge {first_edge}). Use an anchored frequency "
+                f"(e.g. 'YS-JUL') or a fixed-length Timedelta to start blocks elsewhere.",
+                UserWarning,
+            )
+        lead = []
+        while first_edge > t_min_ts:
+            prev_edge = first_edge - start_offset
+            if prev_edge >= first_edge:
+                break
+            lead.append(prev_edge)
+            first_edge = prev_edge
+        if lead:
+            edges_dt = pd.DatetimeIndex(lead[::-1]).append(edges_dt)
+        # An origin far before the record only fixes the phase of the blocks:
+        # drop leading edges whose block ends at or before the first observation.
+        n_skip = int(np.searchsorted(edges_dt.to_numpy(), t_min_ts.to_datetime64(), side='right')) - 1
+        if n_skip > 0:
+            edges_dt = edges_dt[n_skip:]
+        return edges_dt.to_numpy()
+    else:
+        width = float(block_frequency)
+        t_min_f, t_max_f = float(t_min), float(t_max)
+        if block_origin is not None:
+            origin = float(block_origin)
+            if origin > t_min_f:
+                k_back = max(1, int(np.ceil((origin - t_min_f) / width)))
+                origin = origin - k_back * width
+                while origin > t_min_f:
+                    nxt = origin - width
+                    if nxt >= origin:
+                        break
+                    origin = nxt
+            elif (origin + width) <= t_min_f:
+                k_fwd = int(np.floor((t_min_f - origin) / width))
+                if k_fwd > 0:
+                    origin = origin + k_fwd * width
+                    while origin > t_min_f:
+                        nxt = origin - width
+                        if nxt >= origin:
+                            break
+                        origin = nxt
+        else:
+            origin = np.floor(t_min_f / width) * width
+            while origin > t_min_f:
+                nxt = origin - width
+                if nxt >= origin:
+                    break
+                origin = nxt
+        n_steps = max(2, int(np.ceil((t_max_f - origin) / width)) + 2)
+        edges = origin + np.arange(n_steps, dtype=float) * width
+        while edges[-1] <= t_max_f:
+            nxt = origin + len(edges) * width
+            if nxt <= edges[-1]:
+                break
+            edges = np.append(edges, nxt)
+        return edges
+
+def _expected_block_seconds(b_start_ts: pd.Timestamp, b_end_ts: pd.Timestamp, months=None) -> float:
+    nominal_sec = (b_end_ts - b_start_ts).total_seconds()
+    if months is None or nominal_sec <= 0.0:
+        return nominal_sec
+    if nominal_sec < 86400.0:
+        end_probe = b_end_ts - pd.Timedelta(nanoseconds=1)
+        if b_start_ts.month in months and end_probe.month in months:
+            return nominal_sec
+        if b_start_ts.month not in months and end_probe.month not in months:
+            return 0.0
+        boundary = end_probe.normalize()
+        sec = 0.0
+        if b_start_ts.month in months:
+            sec += max(0.0, (boundary - b_start_ts).total_seconds())
+        if end_probe.month in months:
+            sec += max(0.0, (b_end_ts - boundary).total_seconds())
+        return sec
+    day_starts = pd.date_range(b_start_ts.normalize(), (b_end_ts - pd.Timedelta(nanoseconds=1)).normalize(), freq='D')
+    total = 0.0
+    for d in day_starts:
+        if d.month in months:
+            seg_start = max(b_start_ts, d)
+            seg_end = min(b_end_ts, d + pd.Timedelta(days=1))
+            total += max(0.0, (seg_end - seg_start).total_seconds())
+    return total
+
+def _block_coverage(block_start, block_end, t_block_obs, is_datetime, months=None):
+    if len(t_block_obs) == 0:
+        return 0.0
+    if is_datetime:
+        b_start_ts = pd.Timestamp(block_start)
+        b_end_ts = pd.Timestamp(block_end)
+        duration_sec = _expected_block_seconds(b_start_ts, b_end_ts, months=months)
+
+        if duration_sec <= 0:
+            return 1.0
+        t_sec = _to_numeric_time(t_block_obs)
+        t_first, t_last = t_sec.min(), t_sec.max()
+        diffs = np.diff(np.sort(t_sec))
+        pos_diffs = diffs[diffs > 0]
+        median_spacing = float(np.median(pos_diffs)) if len(pos_diffs) > 0 else 86400.0
+        span = (t_last - t_first) + median_spacing
+        return float(min(1.0, max(0.0, span / duration_sec)))
+    else:
+        duration = float(block_end - block_start)
+        if duration <= 0:
+            return 1.0
+        t_arr = np.asarray(t_block_obs, dtype=float)
+        t_first, t_last = t_arr.min(), t_arr.max()
+        diffs = np.diff(np.sort(t_arr))
+        pos_diffs = diffs[diffs > 0]
+        median_spacing = float(np.median(pos_diffs)) if len(pos_diffs) > 0 else 0.0
+        span = (t_last - t_first) + median_spacing
+        return float(min(1.0, max(0.0, span / duration)))
+
+def _assign_blocks(
+    data: pd.DataFrame,
+    block_frequency,
+    block_origin,
+    months,
+    min_size_per_block: int,
+    min_coverage: float,
+    require_complete: bool,
+    is_datetime: bool,
+):
+    t_vals = data['t_original'].to_numpy() if is_datetime else data['t'].to_numpy()
+    if len(t_vals) == 0:
+        return [], pd.DataFrame(), np.array([])
+
+    _parse_block_frequency(block_frequency, is_datetime)
+    t_min, t_max = t_vals.min(), t_vals.max()
+    edges = _block_edges(t_min, t_max, block_frequency, block_origin, is_datetime)
+
+    active_data = data.copy()
+    if months is not None and is_datetime:
+        dt_series = pd.to_datetime(active_data['t'], unit='s')
+        active_mask = dt_series.dt.month.isin(months)
+        active_data = active_data[active_mask].reset_index(drop=True)
+
+    t_active = active_data['t_original'].to_numpy() if is_datetime else active_data['t'].to_numpy()
+    if len(t_active) == 0:
+        return [], pd.DataFrame(), np.array([])
+
+    if is_datetime:
+        t_nums = _to_numeric_time(t_active)
+        edge_nums = _to_numeric_time(edges)
+    else:
+        t_nums = np.asarray(t_active, dtype=float)
+        edge_nums = np.asarray(edges, dtype=float)
+
+    all_diffs = np.diff(np.unique(t_nums))
+    pos_all_diffs = all_diffs[all_diffs > 0]
+    global_step_sec = float(np.median(pos_all_diffs)) if len(pos_all_diffs) > 0 else (86400.0 if is_datetime else np.nan)
+
+    indices = (np.searchsorted(edge_nums, t_nums, side='right') - 1).astype(np.intp, copy=False)
+    n_unassigned = int(np.sum((indices < 0) | (indices > len(edges) - 2)))
+    if n_unassigned:
+        # Block edges must span every observation; anything else is a bug in
+        # `_block_edges`, and dropping data silently is never acceptable.
+        raise RuntimeError(
+            f"Internal error: {n_unassigned} observation(s) fall outside the block edges "
+            f"[{edges[0]}, {edges[-1]}). Please report this with your `block_frequency` "
+            f"and `block_origin`."
+        )
+
+    summary_records = []
+    valid_groups = []
+    block_centers = []
+
+    for i in range(len(edges) - 1):
+        b_start, b_end = edges[i], edges[i + 1]
+        mask = indices == i
+        group_df = active_data[mask]
+        n_obs = len(group_df)
+        if n_obs == 0 and (i == 0 or i == len(edges) - 2):
+            continue
+
+        n_censored = int(group_df['censored'].sum()) if 'censored' in group_df.columns else 0
+        obs_times = group_df['t_original'].to_numpy() if is_datetime else group_df['t'].to_numpy()
+        coverage = _block_coverage(b_start, b_end, obs_times, is_datetime, months=months)
+
+        valid = True
+        reason = "ok"
+        if n_obs < min_size_per_block:
+            valid = False
+            reason = f"below min_size_per_block ({n_obs} < {min_size_per_block})"
+        elif coverage < min_coverage:
+            valid = False
+            reason = f"coverage {coverage:.2f} < {min_coverage}"
+        elif require_complete:
+            if is_datetime:
+                expected_sec = _expected_block_seconds(pd.Timestamp(b_start), pd.Timestamp(b_end), months=months)
+                if np.isfinite(global_step_sec) and global_step_sec > 0:
+                    expected_n = int(round(expected_sec / global_step_sec))
+                else:
+                    expected_n = 1 if expected_sec > 0 else 0
+            else:
+                duration = float(b_end) - float(b_start)
+                if np.isfinite(global_step_sec) and global_step_sec > 0:
+                    expected_n = int(round(duration / global_step_sec))
+                else:
+                    expected_n = n_obs + 1 if duration > 0 else 0
+            if n_obs < expected_n:
+                valid = False
+                reason = f"incomplete block ({n_obs} < {expected_n} expected)"
+
+        if is_datetime:
+            b_center = pd.Timestamp(b_start) + (pd.Timestamp(b_end) - pd.Timestamp(b_start)) / 2
+        else:
+            b_center = 0.5 * (float(b_start) + float(b_end))
+
+        summary_records.append({
+            'block_start': b_start,
+            'block_end': b_end,
+            'block_center': b_center,
+            'n_obs': n_obs,
+            'n_censored': n_censored,
+            'coverage': coverage,
+            'valid': valid,
+            'reason': reason,
+        })
+
+        if valid and n_obs > 0:
+            valid_groups.append(group_df.sort_values('t', kind='stable').reset_index(drop=True))
+            block_centers.append(b_center)
+
+    summary_df = pd.DataFrame(summary_records)
+    return valid_groups, summary_df, np.array(block_centers)
+
+def _egret_decimal_year(timestamps) -> np.ndarray:
+    """
+    EGRET ``DecYear`` of each timestamp's calendar day: the day is placed at
+    noon, i.e. ``year + (day_of_year - 0.5) / days_in_year`` (EGRET
+    ``populateDateColumns``).  Verified against EGRET 3.0.12.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(timestamps))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    days_in_year = np.where(idx.is_leap_year, 366.0, 365.0)
+    return (idx.year + (idx.dayofyear - 0.5) / days_in_year).to_numpy(dtype=float)
+
+
+# Hyndman & Fan (alpha, beta) of the continuous numpy.quantile rules:
+# virtual 0-based index  v = n*u + alpha + u*(1 - alpha - beta) - 1
+_HF_ALPHA_BETA = {
+    'interpolated_inverted_cdf': (0.0, 1.0),
+    'hazen': (0.5, 0.5),
+    'weibull': (0.0, 0.0),
+    'linear': (1.0, 1.0),
+    'median_unbiased': (1.0 / 3.0, 1.0 / 3.0),
+    'normal_unbiased': (3.0 / 8.0, 3.0 / 8.0),
+}
+
+
+def _auto_u_grid(M: int, quantile_method: str = 'hazen') -> np.ndarray:
+    """
+    Probabilities of the ``M`` ranks for ``quantiles='auto'``.
+
+    The grid is the one that belongs to ``quantile_method``: the probabilities
+    at which a block of exactly ``M`` observations returns its own order
+    statistics, ``u_j = (j - alpha) / (M + 1 - alpha - beta)`` for the
+    Hyndman & Fan family (``(j - 0.5) / M`` for ``'hazen'``, ``(j - 1) / (M - 1)``
+    for ``'linear'``, ``j / (M + 1)`` for ``'weibull'``).  Blocks of the target
+    size therefore pass through unchanged, and larger blocks are read at the
+    same plotting positions.  Rules outside the family use the linear grid.
+    """
+    if M <= 1:
+        return np.array([0.5])
+    j = np.arange(1, M + 1, dtype=float)
+    a, b = _HF_ALPHA_BETA.get(quantile_method, (1.0, 1.0))
+    u = (j - a) / (M + 1.0 - a - b)
+    return np.clip(u, 0.0, 1.0)
+
+
+def _plotting_positions(M: int):
+    ranks = np.arange(1, M + 1, dtype=float)
+    p_grid = ranks / (M + 1.0)
+    z_grid = norm.ppf(p_grid)
+    return ranks, p_grid, z_grid
+
+def _standardize_block(
+    group_df: pd.DataFrame,
+    M: int,
+    standardization: str,
+    quantile_method: str,
+    censor_quantile_method: str,
+    lt_mult: float,
+    gt_mult: float,
+    u_grid: np.ndarray = None,
+    info: dict = None,
+):
+    vals = group_df['value'].to_numpy(dtype=float).copy()
+    censored = (
+        group_df['censored'].to_numpy(dtype=bool).copy()
+        if 'censored' in group_df.columns
+        else np.zeros(len(vals), dtype=bool)
+    )
+    cen_type = (
+        group_df['cen_type'].to_numpy(dtype=object).copy()
+        if 'cen_type' in group_df.columns
+        else np.full(len(vals), 'not', dtype=object)
+    )
+
+    if censor_quantile_method == 'error' and censored.any():
+        raise ValueError("Censored observations encountered with censor_quantile_method='error'.")
+    if censor_quantile_method == 'substitute' and censored.any():
+        vals[censored & (cen_type == 'lt')] *= lt_mult
+        vals[censored & (cen_type == 'gt')] *= gt_mult
+        censored[:] = False
+        cen_type[:] = 'not'
+
+    from ._ats import make_intervals
+    lo, hi = make_intervals(vals, censored, cen_type=cen_type, nudge=True)
+    sort_key = np.where(censored & (cen_type == 'lt'), hi, np.where(censored & (cen_type == 'gt'), lo, vals))
+    sort_idx = np.argsort(sort_key, kind='stable').astype(np.intp, copy=False)
+    s_vals = vals[sort_idx]
+    s_cens = censored[sort_idx]
+    s_type = cen_type[sort_idx]
+
+    n_obs = len(s_vals)
+    if standardization == 'egret':
+        if n_obs == M:
+            std_vals = s_vals.copy()
+            std_cens = s_cens.copy()
+            std_type = s_type.copy()
+        elif n_obs == M + 1:
+            mid = n_obs // 2
+            if n_obs % 2 == 1:
+                keep = np.ones(n_obs, dtype=bool)
+                keep[mid] = False
+                std_vals = s_vals[keep]
+                std_cens = s_cens[keep]
+                std_type = s_type[keep]
+            else:
+                merged_val = 0.5 * (s_vals[mid - 1] + s_vals[mid])
+                merged_cens = bool(s_cens[mid - 1] or s_cens[mid])
+                pair_types = {s_type[mid - 1], s_type[mid]}
+                # same precedence as the interpolating path: 'lt' before 'gt'
+                merged_type = 'lt' if 'lt' in pair_types else ('gt' if 'gt' in pair_types else 'not')
+                if info is not None and {'lt', 'gt'} <= pair_types:
+                    info['n_mixed_brackets'] = info.get('n_mixed_brackets', 0) + 1
+                keep = np.ones(n_obs, dtype=bool)
+                keep[mid] = False
+                std_vals = s_vals[keep].copy()
+                std_cens = s_cens[keep].copy()
+                std_type = s_type[keep].copy()
+                std_vals[mid - 1] = merged_val
+                std_cens[mid - 1] = merged_cens
+                std_type[mid - 1] = merged_type
+        else:
+            raise ValueError(
+                f"standardization='egret' requires block sample size n_obs ({n_obs}) "
+                f"to equal target_length ({M}) or target_length + 1 ({M + 1})."
+            )
+    else:
+        if u_grid is None:
+            u_grid = _auto_u_grid(M, quantile_method)
+        std_vals = np.quantile(s_vals, u_grid, method=quantile_method)
+        std_cens = np.zeros(M, dtype=bool)
+        std_type = np.full(M, 'not', dtype=object)
+
+        if s_cens.any() and censor_quantile_method == 'propagate':
+            lt_mask = s_cens & (s_type == 'lt')
+            gt_mask = s_cens & (s_type == 'gt')
+
+            # Position of each quantile among the order statistics, obtained from
+            # numpy itself: the quantile of the index sequence 0..n-1 is the
+            # (possibly fractional) 0-based index numpy reads, for every
+            # `quantile_method` - continuous rules interpolate between
+            # floor(v) and ceil(v); discontinuous rules return an integer
+            # index, or a half-integer when they average two neighbours.
+            v_pos = np.asarray(
+                np.quantile(np.arange(n_obs, dtype=float), u_grid, method=quantile_method), dtype=float
+            )
+            v_pos = np.clip(v_pos, 0.0, float(n_obs - 1))
+            v_pos = np.where(np.abs(v_pos - np.round(v_pos)) < 1e-9, np.round(v_pos), v_pos)
+
+            lo_idx = np.clip(np.floor(v_pos).astype(np.intp), 0, n_obs - 1)
+            hi_idx = np.clip(np.ceil(v_pos).astype(np.intp), 0, n_obs - 1)
+            neighbor_lt = lt_mask[lo_idx] | lt_mask[hi_idx]
+            neighbor_gt = gt_mask[lo_idx] | gt_mask[hi_idx]
+
+            if info is not None:
+                n_mixed = int(np.sum(neighbor_lt & neighbor_gt))
+                if n_mixed:
+                    info['n_mixed_brackets'] = info.get('n_mixed_brackets', 0) + n_mixed
+
+            for k in range(M):
+                if neighbor_lt[k]:
+                    std_cens[k] = True
+                    std_type[k] = 'lt'
+                elif neighbor_gt[k]:
+                    std_cens[k] = True
+                    std_type[k] = 'gt'
+
+    return std_vals, std_cens, std_type
+
+def _snap_near_ties(values: np.ndarray, rtol: float = 1e-12) -> np.ndarray:
+    """
+    Make values that agree to within floating-point rounding exactly equal.
+
+    Interpolated quantiles that are mathematically identical (e.g. the mean of
+    1.7 and 1.9 in one block and an observed 1.8 in another) come out of
+    floating-point arithmetic differing in the last bits.  Mann-Kendall treats
+    such values as different, which silently breaks ties and changes both S
+    and its tie-corrected variance.  Values whose difference is at most
+    ``rtol * max(|a|, |b|)`` (chained through sorted order) are set to the
+    smallest value of their group.
+    """
+    out = np.array(values, dtype=float, copy=True)
+    finite = np.isfinite(out)
+    if finite.sum() < 2:
+        return out
+    idx = np.flatnonzero(finite)
+    order = idx[np.argsort(out[idx], kind='stable')]
+    sv = out[order]
+    gap = np.diff(sv)
+    tol = rtol * np.maximum(np.abs(sv[1:]), np.abs(sv[:-1]))
+    new_group = np.concatenate(([True], gap > tol))
+    if new_group.all():
+        return out
+    group_start = np.maximum.accumulate(np.where(new_group, np.arange(len(sv)), 0))
+    out[order] = sv[group_start]
+    return out
+
+
+def _sampling_diagnostic(block_centers, block_sizes):
+    if len(block_sizes) < 3:
+        return {'tau_n_vs_time': 0.0, 'p_n_vs_time': 1.0, 'n_min': int(block_sizes.min()) if len(block_sizes)>0 else 0, 'n_max': int(block_sizes.max()) if len(block_sizes)>0 else 0, 'ratio_max_min': 1.0, 'flag': False}
+
+    t_num = _to_numeric_time(block_centers)
+    res_tau = kendalltau(t_num, block_sizes)
+    tau_val = float(res_tau.statistic) if not np.isnan(res_tau.statistic) else 0.0
+    p_val = float(res_tau.pvalue) if not np.isnan(res_tau.pvalue) else 1.0
+
+    n_min = int(block_sizes.min())
+    n_max = int(block_sizes.max())
+    ratio = float(n_max / n_min) if n_min > 0 else 1.0
+    flag = bool(p_val < 0.10 or ratio > 1.5)
+
+    return {
+        'tau_n_vs_time': tau_val,
+        'p_n_vs_time': p_val,
+        'n_min': n_min,
+        'n_max': n_max,
+        'ratio_max_min': ratio,
+        'flag': flag
+    }
+
+def _centered_systematic_indices(n: int, k: int) -> np.ndarray:
+    """``k`` evenly spread, distinct positions in ``range(n)`` (``k <= n``), centred in their strata."""
+    return np.floor((np.arange(k) + 0.5) * n / k).astype(np.intp)
+
+
+def _sub_interval_keys(df: pd.DataFrame, is_datetime: bool, agg_unit):
+    """Sub-interval key per observation of one block, plus the pandas period used for labelling."""
+    n_bins = 12
+    if is_datetime:
+        dt_col = pd.to_datetime(df['t_original'])
+        if getattr(dt_col.dt, 'tz', None) is not None:
+            dt_col = dt_col.dt.tz_localize(None)
+        if agg_unit == 'month':
+            sub_key = (dt_col.dt.year * 100 + dt_col.dt.month).to_numpy()
+            freq_str = 'ME'
+        elif agg_unit == 'day':
+            sub_key = dt_col.dt.floor('D').to_numpy()
+            freq_str = 'D'
+        elif agg_unit == 'hour':
+            sub_key = dt_col.dt.floor('h').to_numpy()
+            freq_str = 'h'
+        else:
+            sub_key = dt_col.dt.floor('min').to_numpy()
+            freq_str = 'min'
+        if pd.Series(sub_key).nunique() >= 2 or len(df) < 2:
+            return sub_key, freq_str
+    t_vals = df['t'].to_numpy(dtype=float)
+    span = t_vals.max() - t_vals.min()
+    if span <= 0:
+        return np.zeros(len(df), dtype=np.intp), None
+    # Exactly `n_bins` equal-width bins; the right endpoint belongs to the last bin.
+    sub_key = np.minimum(np.floor((t_vals - t_vals.min()) / (span / n_bins)), n_bins - 1).astype(np.intp)
+    return sub_key, None
+
+
+def _equalize_blocks(valid_group_dfs, mode: str, is_datetime: bool = True, info: dict = None):
+    """
+    Equalize the sampling of the valid blocks.
+
+    ``'thin'``: systematic thinning of every block to the smallest block size.
+
+    ``'aggregate'``: robust median within sub-intervals of every block, computed
+    on a **common support**: every sub-interval of every block is first thinned
+    (systematically, in time order) to ``k`` observations, where ``k`` is the
+    smallest number of observations found in any populated sub-interval of any
+    valid block.  The median of 4 weekly values has a much narrower sampling
+    distribution than a single monthly value, so medians taken over *different*
+    numbers of observations are not comparable between blocks: without the
+    common support a monthly-to-weekly change of sampling frequency makes the
+    later blocks look compressed (spurious upward trends in low quantiles and
+    downward trends in high quantiles).  With ``k == 1`` the mode reduces to
+    stratified thinning (one observation per sub-interval).
+
+    If ``info`` is a dict it receives ``'aggregate_support'`` (``k``) and
+    ``'aggregate_unit'``.
+    """
+    if mode == 'none' or not valid_group_dfs:
+        return valid_group_dfs
+    elif mode == 'thin':
+        min_n = min(len(df) for df in valid_group_dfs)
+        thinned = []
+        for df in valid_group_dfs:
+            n_b = len(df)
+            if n_b == min_n:
+                thinned.append(df)
+            else:
+                idx = np.round(np.linspace(0, n_b - 1, min_n)).astype(np.intp)
+                thinned.append(df.iloc[idx].reset_index(drop=True))
+        return thinned
+    elif mode == 'aggregate':
+        from ._helpers import _aggregate_by_group
+        agg_unit = None
+        if is_datetime:
+            spans_days = []
+            for df in valid_group_dfs:
+                dt_col = pd.to_datetime(df['t_original'])
+                spans_days.append((dt_col.max() - dt_col.min()).total_seconds() / 86400.0)
+            median_span_days = float(np.median(spans_days)) if spans_days else 0.0
+            if median_span_days > 45.0:
+                agg_unit = 'month'
+            elif median_span_days > 2.0:
+                agg_unit = 'day'
+            elif median_span_days > 2.0 / 24.0:
+                agg_unit = 'hour'
+            else:
+                agg_unit = 'minute'
+
+        keyed = []
+        support = None
+        for df in valid_group_dfs:
+            sub_key, freq_str = _sub_interval_keys(df, is_datetime, agg_unit)
+            keyed.append((df.assign(_sub_key=np.asarray(sub_key)), freq_str))
+            _, counts = np.unique(np.asarray(sub_key), return_counts=True)
+            block_min = int(counts.min())
+            support = block_min if support is None else min(support, block_min)
+        support = max(1, int(support))
+        if info is not None:
+            info['aggregate_support'] = support
+            info['aggregate_unit'] = agg_unit if is_datetime else 'bin'
+
+        aggregated = []
+        for df_tmp, freq_str in keyed:
+            rows = []
+            for _, g in df_tmp.groupby('_sub_key', sort=True):
+                g = g.drop(columns='_sub_key')
+                if len(g) > support:
+                    g = g.iloc[_centered_systematic_indices(len(g), support)]
+                rows.append(_aggregate_by_group(g, 'robust_median', is_datetime, period=freq_str, return_dict=True))
+            aggregated.append(pd.DataFrame(rows).sort_values('t', kind='stable').reset_index(drop=True))
+        return aggregated
+    else:
+        raise ValueError(f"Unknown equalize mode: '{mode}'.")
+
+def _mk_s_matrix(M_matrix: np.ndarray, t_numeric: np.ndarray, tau_method: str = 'b'):
+    B, K = M_matrix.shape
+    if B < 2:
+        return np.zeros(K), np.ones(K), np.zeros(K)
+    
+    i_idx, j_idx = np.triu_indices(B, k=1)
+    dt = t_numeric[j_idx] - t_numeric[i_idx]
+    valid_t = dt != 0.0
+    if not np.any(valid_t):
+        return np.zeros(K), np.ones(K), np.zeros(K)
+
+    ii, jj = i_idx[valid_t], j_idx[valid_t]
+    dM = M_matrix[jj, :] - M_matrix[ii, :]
+    dt_sign = np.sign(t_numeric[jj] - t_numeric[ii])[:, np.newaxis]
+    
+    s_scores = np.sum(dt_sign * np.sign(dM), axis=0)
+
+    # Variance and Tau adjusted for ties in values per column
+    base_var = B * (B - 1) * (2 * B + 5) / 18.0
+    n0 = B * (B - 1) / 2.0
+    var_s = np.empty(K, dtype=float)
+    tau = np.empty(K, dtype=float)
+
+    for k in range(K):
+        _, counts = np.unique(M_matrix[:, k], return_counts=True)
+        tie_counts = counts[counts > 1]
+        if len(tie_counts) > 0:
+            tie_adj = np.sum(tie_counts * (tie_counts - 1) * (2 * tie_counts + 5)) / 18.0
+            var_s[k] = max(0.0, base_var - tie_adj)
+            if tau_method == 'b':
+                n_ties = np.sum(tie_counts * (tie_counts - 1)) / 2.0
+                denom = np.sqrt(max(0.0, n0 - n_ties)) * np.sqrt(n0)
+                tau[k] = s_scores[k] / denom if denom > 0 else 0.0
+            else:
+                tau[k] = s_scores[k] / n0 if n0 > 0 else 0.0
+        else:
+            var_s[k] = base_var
+            tau[k] = s_scores[k] / n0 if n0 > 0 else 0.0
+
+    return s_scores, var_s, tau

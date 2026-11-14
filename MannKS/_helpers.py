@@ -88,8 +88,15 @@ def _aggregate_censored_median(group, is_datetime, return_dict=False):
     }
 
     # Always aggregate time using the median of the original timestamps
-    row_data['t_original'] = group['t_original'].median() if is_datetime else np.median(group['t_original'])
-    row_data['t'] = np.median(group['t'])
+    if is_datetime:
+        row_data['t_original'] = pd.Series(pd.to_datetime(group['t_original'])).median()
+    else:
+        row_data['t_original'] = np.median(group['t_original'])
+
+    if _is_datetime_like(group['t']):
+        row_data['t'] = pd.Series(pd.to_datetime(group['t'])).median()
+    else:
+        row_data['t'] = np.median(group['t'])
 
     if return_dict:
         return row_data

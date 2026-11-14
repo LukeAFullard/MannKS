@@ -40,6 +40,7 @@ Use this package when your data has:
 
 | Version | Highlights | Learn more |
 | :--- | :--- | :--- |
+| **0.7.0** | **Generalized Quantile-Kendall trend analysis.** Frequency-agnostic order-statistic trend tests generalizing USGS EGRET to arbitrary frequencies (daily, weekly, monthly, multi-year blocks), censored data with ATS slope estimation, coverage filtering, sampling frequency drift protection (`equalize='thin'`/`'aggregate'`), permutation field significance, and dual normal Z / probability plotting (`plot_quantile_trend`). | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) · [Methodology](https://github.com/LukeAFullard/MannKS/blob/main/quantile_kendall.md) · [Quantile Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md) · [Example 36](https://github.com/LukeAFullard/MannKS/tree/main/Examples/36_Quantile_Kendall) · [Example 37](https://github.com/LukeAFullard/MannKS/tree/main/Examples/37_Monthly_Censored_Quantile_Kendall) · [Validation](https://github.com/LukeAFullard/MannKS/tree/main/validation/43_Quantile_Kendall) |
 | **0.6.3** | **Scientific audit & correctness release.** Corrects direct confidence interval indexing per Gilbert (1987) Eq. 16.8, implements full interval ordering for robust right-censored Mann-Kendall, fixes plotting figure memory leaks, optimizes rolling trend search and pair-sampling memory, and aligns seasonal test result fields while preserving 100% LWP-TRENDS parity. | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) |
 | **0.6.2** | **32-bit / Pyodide compatibility.** Fixes `int64` → `int32` safe-casting error in `_iter_triu_blocks` and standardizes internal indexing arrays on pointer-sized `np.intp` across all estimators. | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) |
 | **0.6.1** | **Large data sets, robustly.** Censored data now scale like uncensored data (1,000,000 values in about a second); exact mode is 4–9× faster with a third to two-thirds of the memory; seasonal tests use every observation; a reliable fast-mode error estimate; fixes for missing dates and for bootstrap intervals on large data. | [Changelog](https://github.com/LukeAFullard/MannKS/blob/main/CHANGELOG.md) · [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md) |
@@ -115,6 +116,7 @@ Confidence: 99.23%
 - **Rolling Trends**: Analyze how trends evolve over time with `rolling_trend_test`. See [Example 31](https://github.com/LukeAFullard/MannKS/tree/main/Examples/31_Rolling_Trend_Analysis).
 - **Segmented Trends**: Automatically detect breakpoints and analyze trends in segments with `segmented_trend_test`. See [Example 32](https://github.com/LukeAFullard/MannKS/tree/main/Examples/32_Segmented_Regression).
 - **Block Bootstrap**: Robust trend testing for autocorrelated data with automatic ACF-based block size selection. See [bootstrap.md](https://github.com/LukeAFullard/MannKS/blob/main/bootstrap.md) for details and [Example 29](https://github.com/LukeAFullard/MannKS/tree/main/Examples/29_Block_Bootstrap_Autocorrelation).
+- **Generalized Quantile-Kendall Trends**: Evaluate divergent trends across all quantiles (e.g. increasing flood peaks vs declining drought baseflows) with `quantile_trend_test` and `plot_quantile_trend`. See [quantile_kendall.md](https://github.com/LukeAFullard/MannKS/blob/main/quantile_kendall.md) for methodology, the [Quantile Trend Guide](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md), and [Example 36](https://github.com/LukeAFullard/MannKS/tree/main/Examples/36_Quantile_Kendall).
 
 
 ---
@@ -215,6 +217,8 @@ See the [Large Dataset Guide](https://github.com/LukeAFullard/MannKS/blob/main/E
 - **[Rolling Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/rolling_trend_guide.md)** - Moving window analysis
 - **[Segmented Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/segmented_trend_guide.md)** - Structural breakpoint detection
 - **[Large Dataset Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/large_dataset_guide.md)** - Fast mode, accuracy and performance
+- **[Quantile-Kendall Methodology](https://github.com/LukeAFullard/MannKS/blob/main/quantile_kendall.md)** - What, why, how, and full options for Quantile-Kendall analysis
+- **[Quantile Trend Analysis](https://github.com/LukeAFullard/MannKS/blob/main/Examples/Detailed_Guides/quantile_trend_guide.md)** - Practical recipes, parameter reference, and pitfalls
 
 ### Examples
 The [Examples](https://github.com/LukeAFullard/MannKS/blob/main/Examples/README.md) folder contains step-by-step tutorials from basic to advanced usage.
@@ -247,3 +251,5 @@ This package is heavily inspired by the excellent work of **[LandWaterPeople (LW
 5.  **Sen, P.K. (1968).** Estimates of the regression coefficient based on a particular kind of rank correlation. *Journal of the American Statistical Association*, 63(324), 1379-1389.
 6.  **Fraser, C., & Whitehead, A. L. (2022).** Continuous measures of confidence in direction of environmental trends at site and other spatial scales. *Environmental Challenges*, 9, 100601.
 7.  **Fraser, C., Snelder, T., & Matthews, A. (2018).** State and trends of river water quality in the Manawatu-Whanganui region. Report for Horizons Regional Council.
+8.  **Hirsch, R.M., Archfield, S.A., & De Cicco, L.A. (2015).** A bootstrap method for estimating uncertainty of water quality trends. *Environmental Modelling & Software*, 73, 148-166.
+9.  **Hirsch, R.M., & De Cicco, L.A. (2015).** User guide to Exploration and Graphics for RivEr Trends (EGRET) and dataRetrieval: R packages for surface-water quality and streamflow. *USGS Techniques and Methods Book 4, Section A10*.

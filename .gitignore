@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 validation/r_parity/out/
 Rplots.pdf
+.venv/
+.agents/
+uv.lock
