@@ -2,6 +2,7 @@
 Regression and cross-architecture compatibility tests for pointer-sized integer
 (`np.intp`) array indexing and 32-bit environments (e.g., Pyodide/WebAssembly).
 """
+import sys
 import warnings
 import numpy as np
 import pandas as pd
@@ -31,6 +32,23 @@ from MannKS._autocorr import effective_sample_size
 from MannKS.analysis_notes import get_sens_slope_analysis_note
 
 
+def _called_from_mannks():
+    """
+    True when the function that called our `np.repeat` replacement lives in MannKS.
+
+    `monkeypatch.setattr(np, 'repeat', ...)` replaces the attribute on the shared
+    `numpy` module, so it also intercepts calls made by other libraries. SciPy
+    1.13-1.15 call `np.repeat(ranks, counts)` inside `scipy.stats.rankdata` with
+    float ranks and native-`intp` counts, which is correct on every platform but
+    is neither an index array nor affected by the patched `np.intp` name. The
+    checks below are about MannKS's own index arithmetic, so they are applied to
+    calls made from MannKS modules only and everything else is passed through.
+    """
+    # Frame 0 is this helper, frame 1 the np.repeat replacement, frame 2 its caller.
+    caller = sys._getframe(2).f_globals.get('__name__', '')
+    return caller == 'MannKS' or caller.startswith('MannKS.')
+
+
 @pytest.fixture
 def simulated_32bit_intp(monkeypatch):
     """
@@ -40,11 +58,19 @@ def simulated_32bit_intp(monkeypatch):
       to `np.int32` (`NPY_INTP`), which raises:
       `TypeError: Cannot cast array data from dtype('int64') to dtype('int32') according to the rule 'safe'`
       if `repeats` is `int64`.
+
+    The strict rule is applied to `np.repeat` calls made by MannKS (see
+    `_called_from_mannks`). Yields a list of the `repeats` dtypes seen in those
+    calls so tests can confirm the check was actually exercised.
     """
     orig_repeat = np.repeat
+    mannks_repeat_dtypes = []
 
     def strict_32bit_repeat(a, repeats, axis=None):
+        if not _called_from_mannks():
+            return orig_repeat(a, repeats, axis=axis)
         repeats_arr = np.asarray(repeats)
+        mannks_repeat_dtypes.append(repeats_arr.dtype)
         if not np.can_cast(repeats_arr.dtype, np.int32, casting='safe'):
             raise TypeError(
                 f"Cannot cast array data from {repeats_arr.dtype!r} to "
@@ -54,6 +80,7 @@ def simulated_32bit_intp(monkeypatch):
 
     monkeypatch.setattr(np, 'intp', np.int32)
     monkeypatch.setattr(np, 'repeat', strict_32bit_repeat)
+    yield mannks_repeat_dtypes
 
 
 def test_iter_triu_blocks_dtypes_and_values():
@@ -82,6 +109,8 @@ def test_iter_triu_blocks_simulated_32bit(simulated_32bit_intp):
     for i, j in blocks:
         assert i.dtype == np.int32
         assert j.dtype == np.int32
+    # The strict np.repeat check must have seen MannKS's calls (two per block).
+    assert len(simulated_32bit_intp) == 2 * len(blocks)
 
 
 def test_numpy_estimators_simulated_32bit(simulated_32bit_intp, monkeypatch):
@@ -177,16 +206,27 @@ def test_numpy_estimators_simulated_32bit(simulated_32bit_intp, monkeypatch):
     s, var_s, d, tau = _mk_score_and_var_censored(x, t, cens, cen_type)
     assert np.isfinite(s) and var_s > 0
 
+    # Guard against the strict np.repeat check silently matching nothing: the
+    # exact slope estimators above call np.repeat via `_iter_triu_blocks`.
+    assert len(simulated_32bit_intp) > 0
+
 
 @pytest.mark.parametrize("int_dtype", [np.int32, np.int64])
 def test_end_to_end_workflows_mixed_integer_dtypes(monkeypatch, int_dtype):
     """
     Run full MannKS workflows with `int32` and `int64` inputs while enforcing
-    that `np.repeat` is always called with `np.intp` arrays.
+    that MannKS always calls `np.repeat` with `np.intp` arrays. Calls made by
+    other libraries (e.g. `scipy.stats.rankdata`) are not MannKS index
+    arithmetic and are passed through unchecked; see `_called_from_mannks`.
     """
     orig_repeat = np.repeat
+    n_checked = 0
 
     def checked_repeat(a, repeats, axis=None):
+        nonlocal n_checked
+        if not _called_from_mannks():
+            return orig_repeat(a, repeats, axis=axis)
+        n_checked += 1
         a_arr = np.asarray(a)
         r_arr = np.asarray(repeats)
         assert a_arr.dtype == np.intp, f"Expected a.dtype == np.intp, got {a_arr.dtype}"
@@ -255,3 +295,6 @@ def test_end_to_end_workflows_mixed_integer_dtypes(monkeypatch, int_dtype):
     assert seg_res.segments is not None
     pred = seg_res.predict(t_int)
     assert len(pred) == n
+
+    # Guard against the check silently matching nothing.
+    assert n_checked > 0
