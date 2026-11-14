@@ -28,6 +28,7 @@ from ._quantile import (
     _mk_s_matrix,
     _normalize_start_freq,
     _egret_decimal_year,
+    _auto_u_grid,
 )
 
 _Quantile_Trend_Tuple = namedtuple('Quantile_Trend_Test', [
@@ -154,7 +155,7 @@ _RESULTS_COLUMNS = [
     'n_effective', 'analysis_notes',
 ]
 
-def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardization, max_quantiles):
+def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardization, max_quantiles, quantile_method='hazen'):
     n_med = int(np.round(np.median(block_sizes)))
     n_min = int(np.min(block_sizes))
     n_max = int(np.max(block_sizes))
@@ -192,7 +193,8 @@ def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardizatio
         if M > max_quantiles:
             raise ValueError(f"Target length M={M} exceeds `max_quantiles` ({max_quantiles}).")
         ranks = np.arange(1, M + 1, dtype=np.intp)
-        u_grid = np.linspace(0.0, 1.0, M)
+        # 'egret' keeps order statistics; label them with their Hazen probabilities.
+        u_grid = _auto_u_grid(M, 'hazen' if standardization == 'egret' else quantile_method)
         p_grid = ranks.astype(float) / (M + 1.0)
         z_grid = norm.ppf(p_grid)
         return M, ranks, u_grid, p_grid, z_grid, M
@@ -214,6 +216,8 @@ def _resolve_quantile_grid(quantiles, block_sizes, target_length, standardizatio
         if q_arr.ndim != 1 or len(q_arr) == 0 or np.any(np.isnan(q_arr)) or np.any(q_arr < 0.0) or np.any(q_arr > 1.0):
             raise ValueError("`quantiles` sequence must be a non-empty 1D sequence in [0.0, 1.0].")
         u_grid = np.sort(q_arr)
+        if len(np.unique(u_grid)) != len(u_grid):
+            raise ValueError("`quantiles` sequence must not contain duplicate probabilities.")
         M = len(u_grid)
         if M > max_quantiles:
             raise ValueError(f"Length of `quantiles` exceeds `max_quantiles` ({max_quantiles}).")
@@ -411,12 +415,15 @@ def quantile_trend_test(
         observations to selected seasons before block analysis.
     quantiles : {'auto'} or int or array-like, default 'auto'
         Quantile grid configuration:
-        - ``'auto'``: Grid determined by standardized block length (target_length).
+        - ``'auto'``: ``M`` ranks, with ``M`` set by ``target_length``. The rank
+          probabilities are those of ``quantile_method`` (``(j - 0.5) / M`` for
+          ``'hazen'``, ``(j - 1) / (M - 1)`` for ``'linear'``), so a block of
+          exactly ``M`` observations is returned as its own order statistics.
         - int: Integer number of evenly spaced quantiles.
-        - array-like: Explicit sequence of non-exceedance probabilities in ``[0.0, 1.0]``.
+        - array-like: Explicit sequence of distinct non-exceedance probabilities in ``[0.0, 1.0]``.
     target_length : {'min', 'median', 'max'} or int, default 'min'
         Standard sample size across blocks when ``quantiles='auto'``:
-        - ``'min'``: Uses the minimum valid block size (preserves order-statistic bounds).
+        - ``'min'``: Uses the minimum valid block size (no block is up-sampled).
         - ``'median'``: Uses the median valid block size.
         - ``'max'``: Uses the maximum valid block size.
         - int: Explicit integer sample size.
@@ -443,8 +450,12 @@ def quantile_trend_test(
     min_blocks : int, default 5
         Minimum number of valid blocks required to perform trend analysis.
     min_coverage : float, default 0.9
-        Minimum fraction of nominal block duration [t_min, t_max] spanned by observations (0.0 to 1.0).
-        Blocks with temporal coverage below this threshold are rejected.
+        Minimum fraction of the nominal block duration spanned by the block's
+        observations, from first to last (0.0 to 1.0). Blocks below this threshold
+        are rejected. This is a span, not a density: it does not detect gaps
+        between the first and last observation (use ``min_size_per_block``,
+        ``require_complete`` or ``equalize`` for that), and it is uninformative for
+        non-contiguous ``months`` selections.
     require_complete : bool, default False
         If True, blocks must contain at least ``round(expected_duration / global_median_step)``
         observations (e.g., all 365/366 daily observations per year).
@@ -469,12 +480,16 @@ def quantile_trend_test(
           Akritas-Theil-Sen (ATS) slope estimation by default. With ``transform='log'``,
           only ``sens_slope_method='ats'`` is supported.
         - ``'substitute'``: Substitutes censored values in raw units using ``lt_mult`` / ``gt_mult``.
+          Not recommended when detection limits change over the record: the
+          substituted values then step with the limit and create spurious trends
+          in the low quantiles (use ``'propagate'``, optionally with ``hicensor``).
         - ``'error'``: Raises an exception if censoring is present.
     transform : {'none', 'log', 'pct_of_median'} or None, default 'none'
         Data transformation applied prior to trend testing:
         - ``'none'`` or ``None``: Raw values; reports slope and percentage slope relative to median.
         - ``'log'``: Natural logarithm; ``slope`` is in natural log units per time unit and
-          ``slope_pct`` is exponentiated as ``100 * (exp(slope) - 1)`` % per time unit.
+          ``slope_pct`` is exponentiated as ``100 * (exp(slope) - 1)`` % per time unit
+          (``slope_units`` reads ``'ln(<x_unit>) per <time unit>'``).
         - ``'pct_of_median'``: Normalized as percentage of each quantile's cross-block median.
     log_offset : float or None, default None
         Constant added to values before log-transformation if non-positive values exist.
@@ -533,12 +548,6 @@ def quantile_trend_test(
         - ``warnings``: List of warnings raised during execution.
     """
     mk_kwargs = dict(mk_kwargs)
-    if 'min_samples' in mk_kwargs:
-        warnings.warn("`min_samples` is deprecated; use `min_size_per_block` instead.", DeprecationWarning, stacklevel=2)
-        min_size_per_block = mk_kwargs.pop('min_samples')
-    if 'classification' in mk_kwargs:
-        continuous_confidence = bool(mk_kwargs.pop('classification'))
-
     rejected = _REJECTED_MK_KWARGS.intersection(mk_kwargs.keys())
     if rejected:
         raise ValueError(f"Arguments {sorted(rejected)} are not supported in `quantile_trend_test`.")
@@ -582,8 +591,19 @@ def quantile_trend_test(
         raise ValueError("`min_size_per_block` must be an integer >= 1.")
     if isinstance(min_blocks, (bool, np.bool_)) or not isinstance(min_blocks, (int, np.integer)) or int(min_blocks) < 1:
         raise ValueError("`min_blocks` must be an integer >= 1.")
-    if isinstance(min_coverage, (bool, np.bool_)) or not (0.0 <= float(min_coverage) <= 1.0):
-        raise ValueError("`min_coverage` must be between 0.0 and 1.0.")
+    try:
+        _cov_ok = (not isinstance(min_coverage, (bool, np.bool_))) and 0.0 <= float(min_coverage) <= 1.0
+    except (TypeError, ValueError):
+        _cov_ok = False
+    if not _cov_ok:
+        raise ValueError("`min_coverage` must be a number between 0.0 and 1.0.")
+    try:
+        np.quantile(np.array([0.0, 1.0]), 0.5, method=quantile_method)
+    except (ValueError, TypeError, KeyError):
+        raise ValueError(
+            f"Invalid `quantile_method` {quantile_method!r}. Must be a `numpy.quantile` method "
+            "(e.g. 'hazen', 'linear', 'weibull', 'median_unbiased')."
+        )
     if isinstance(max_quantiles, (bool, np.bool_)) or not isinstance(max_quantiles, (int, np.integer)) or int(max_quantiles) < 1:
         raise ValueError("`max_quantiles` must be an integer >= 1.")
     if isinstance(n_permutations, (bool, np.bool_)) or not isinstance(n_permutations, (int, np.integer)) or int(n_permutations) < 1:
@@ -622,11 +642,21 @@ def quantile_trend_test(
 
     x_arr = np.asarray(x) if not isinstance(x, pd.DataFrame) else x
     t_arr = np.asarray(t)
+    if getattr(x_arr, 'ndim', 1) == 0 or t_arr.ndim == 0:
+        raise ValueError("`x` and `t` must be array-like sequences, not scalars.")
     if len(x_arr) != len(t_arr):
         raise ValueError(f"Input vectors `x` and `t` must have the same length.")
 
     module_notes = []
     module_warnings = []
+    warning_categories = {}   # message -> original warning category
+    captured_logs = []        # the recorder of `_run`, so warnings survive an exception
+
+    def _drain(log):
+        for w in log:
+            msg = str(w.message)
+            module_warnings.append(msg)
+            warning_categories.setdefault(msg, w.category)
 
     # Timezone-aware timestamps are analysed in local wall-clock time, so that
     # "calendar year", "water year" and `months` mean what they mean locally.
@@ -679,6 +709,7 @@ def quantile_trend_test(
         nonlocal module_warnings, module_notes
         with warnings.catch_warnings(record=True) as outer_w_log:
             warnings.simplefilter("always")
+            captured_logs.append(outer_w_log)
     
             data_filtered, is_datetime = _prepare_data(x, t_work, hicensor)
             data_filtered = data_filtered.sort_values('t', kind='stable').reset_index(drop=True)
@@ -691,8 +722,7 @@ def quantile_trend_test(
 
             if len(data_filtered) < 2:
                 warnings.warn("Insufficient data for Quantile-Kendall analysis.", UserWarning)
-                for w in outer_w_log:
-                    module_warnings.append(str(w.message))
+                _drain(outer_w_log)
                 return _empty_result(is_datetime)
     
             if months is not None:
@@ -725,8 +755,7 @@ def quantile_trend_test(
                 msg = f"Insufficient valid blocks ({n_valid_blocks}) for Quantile-Kendall analysis."
                 warnings.warn(msg, UserWarning)
                 module_notes.append(msg)
-                for w in outer_w_log:
-                    module_warnings.append(str(w.message))
+                _drain(outer_w_log)
                 return _empty_result(is_datetime, blocks_df=blocks_df)
     
             if n_valid_blocks < 10:
@@ -767,6 +796,7 @@ def quantile_trend_test(
             M, ranks, u_grid, p_grid, z_grid, target_len_resolved = _resolve_quantile_grid(
                 quantiles=quantiles, block_sizes=block_sizes, target_length=target_length,
                 standardization=standardization, max_quantiles=max_quantiles,
+                quantile_method=quantile_method,
             )
     
             lt_mult = float(mk_kwargs.get('lt_mult', 0.5))
@@ -776,16 +806,28 @@ def quantile_trend_test(
             cens_rows = np.zeros((n_valid_blocks, M), dtype=bool)
             type_rows = np.full((n_valid_blocks, M), 'not', dtype=object)
     
+            std_info = {}
             for b_idx, grp in enumerate(valid_groups):
                 sv, sc, st = _standardize_block(
                     group_df=grp, M=M, standardization=standardization, quantile_method=quantile_method,
                     censor_quantile_method=censor_quantile_method, lt_mult=lt_mult, gt_mult=gt_mult, u_grid=u_grid,
+                    info=std_info,
                 )
                 val_rows[b_idx, :] = sv
                 cens_rows[b_idx, :] = sc
                 type_rows[b_idx, :] = st
     
             has_any_censored = bool(cens_rows.any())
+            n_mixed = int(std_info.get('n_mixed_brackets', 0))
+            if n_mixed:
+                mixed_msg = (
+                    f"{n_mixed} standardized quantile value(s) are interpolated between a left-censored ('<') "
+                    "and a right-censored ('>') observation. Their true value is unbounded on both sides; they "
+                    "are flagged 'lt' by convention, which is not a valid bound. Interpret those quantiles "
+                    "with caution (see `cen_type_matrix`)."
+                )
+                warnings.warn(mixed_msg, UserWarning)
+                module_notes.append(mixed_msg)
             col_labels = [f"r{int(r)}" for r in ranks]
             index_centers = pd.Index(block_centers, name='block_center')
     
@@ -842,6 +884,17 @@ def quantile_trend_test(
                 and not _fast_incompatible
                 and not np.isnan(work_matrix).any()
             )
+            if engine == 'fast' and not use_fast_engine:
+                reasons = []
+                if has_any_censored:
+                    reasons.append("censored quantiles")
+                if np.isnan(work_matrix).any():
+                    reasons.append("NaN quantile columns")
+                if _fast_incompatible:
+                    reasons.append("options not supported by the fast engine")
+                module_notes.append(
+                    "engine='fast' not applicable (" + ", ".join(reasons) + "); used engine='trend_test'"
+                )
     
             if egret_times is not None:
                 t_numeric_blocks = egret_times
@@ -937,7 +990,8 @@ def quantile_trend_test(
                     row_dict['slope_pct'] = float(100.0 * (np.exp(slp) - 1.0)) if pd.notna(slp) else np.nan
                     row_dict['lower_ci_pct'] = float(100.0 * (np.exp(lo) - 1.0)) if pd.notna(lo) else np.nan
                     row_dict['upper_ci_pct'] = float(100.0 * (np.exp(hi) - 1.0)) if pd.notna(hi) else np.nan
-                    row_dict['slope_units'] = f"% per {scale_unit_label}"
+                    # `slope` and its CI stay in natural-log units; `slope_pct` is % per time unit.
+                    row_dict['slope_units'] = f"ln({eff_x_unit}) per {scale_unit_label}"
                 elif transform == 'pct_of_median':
                     med_k = col_medians_raw[k]
                     if pd.notna(med_k) and med_k > 0.0 and np.isfinite(med_k):
@@ -984,8 +1038,7 @@ def quantile_trend_test(
                     alpha=alpha, n_permutations=n_permutations, random_state=random_state,
                 )
     
-            for w in outer_w_log:
-                module_warnings.append(str(w.message))
+            _drain(outer_w_log)
             for msg, count in col_warning_counts.items():
                 agg_msg = f"In {count} of {M} quantiles: {msg}" if M > 1 else msg
                 module_warnings.append(agg_msg)
@@ -1005,9 +1058,19 @@ def quantile_trend_test(
     
         return final_result
 
-    res = _run()
+    try:
+        res = _run()
+    except Exception:
+        # Do not swallow warnings raised before the failure.
+        if captured_logs:
+            seen = set(module_warnings)
+            for w in captured_logs[0]:
+                if str(w.message) not in seen:
+                    seen.add(str(w.message))
+                    warnings.warn(str(w.message), w.category, stacklevel=2)
+        raise
     for w_str in res.warnings:
-        warnings.warn(w_str, UserWarning, stacklevel=2)
+        warnings.warn(w_str, warning_categories.get(w_str, UserWarning), stacklevel=2)
 
     if plot_path is not None:
         from .plotting import plot_quantile_trend

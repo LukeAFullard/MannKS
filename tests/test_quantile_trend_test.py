@@ -44,11 +44,14 @@ class TestInputValidationAndKwargs:
         with pytest.raises(ValueError, match="Significance level `alpha` must be between 0 and 1"):
             quantile_trend_test(vals, dates, alpha=1.5)
 
-    def test_deprecated_min_samples_warning(self):
+    def test_undocumented_aliases_are_rejected(self):
+        # `min_samples` / `classification` were never part of a released API.
         dates = pd.date_range('2010-01-01', periods=5 * 365, freq='D')
         vals = np.arange(len(dates), dtype=float)
-        with pytest.warns(DeprecationWarning, match="`min_samples` is deprecated"):
+        with pytest.raises(ValueError, match="Unknown keyword argument"):
             quantile_trend_test(vals, dates, min_samples=20, min_blocks=3)
+        with pytest.raises(ValueError, match="Unknown keyword argument"):
+            quantile_trend_test(vals, dates, classification=False)
 
     def test_length_mismatch_raises(self):
         with pytest.raises(ValueError, match="Input vectors `x` and `t` must have the same length"):
@@ -266,7 +269,8 @@ class TestAnalyticalScenarios:
         assert len(df) == 5
         for sp in df['slope_pct']:
             assert np.isclose(sp, expected_slope_pct, atol=1.0)
-        assert df['slope_units'].iloc[0] == '% per year'
+        # `slope` is in natural-log units; `slope_pct` is the % per year figure
+        assert df['slope_units'].iloc[0] == 'ln(units) per year'
 
     def test_stationary_series(self):
         # Stationary series: rejection rate roughly near alpha = 0.05, mostly No Trend
@@ -610,7 +614,8 @@ class TestPublicOptionsAndTransforms:
         dates = pd.date_range('2010-01-01', periods=years * 365, freq='D')
         # Data with values >= 0
         vals = (np.arange(len(dates)) / len(dates)) * 10.0
-        # Without log_offset, vals[0] == 0 would raise ValueError
+        vals[:5] = 0.0  # several exact zeros, so the lowest standardized rank is 0 for any grid
+        # Without log_offset the zeros would raise ValueError
         with pytest.raises(ValueError, match="requires all standardized block values to be > 0"):
             quantile_trend_test(
                 vals, dates, block_frequency='YE', transform='log',
@@ -746,7 +751,7 @@ class TestEdgeCasesAndValidationRegressions:
                 vals, dates, block_frequency='YE', quantiles=3,
                 transform='log', x_unit=None, slope_scaling=None, engine=eng,
             )
-            assert res_log.results['slope_units'].iloc[0] == '% per second'
+            assert res_log.results['slope_units'].iloc[0] == 'ln(units) per second'
 
     def test_invalid_slope_scaling_decade_parity_across_engines(self):
         dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
@@ -770,10 +775,10 @@ class TestEdgeCasesAndValidationRegressions:
         dates = pd.date_range('2010-01-01', periods=6 * 365, freq='D')
         vals = np.arange(len(dates), dtype=float) + 1.0
 
-        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="min_size_per_block"):
-            quantile_trend_test(vals, dates, engine='fast', min_samples=True)
-        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="min_size_per_block"):
-            quantile_trend_test(vals, dates, engine='fast', min_samples=2.5)
+        with pytest.raises(ValueError, match="min_size_per_block"):
+            quantile_trend_test(vals, dates, engine='fast', min_size_per_block=True)
+        with pytest.raises(ValueError, match="min_size_per_block"):
+            quantile_trend_test(vals, dates, engine='fast', min_size_per_block=2.5)
 
         for bad_months in ([], [0], [13], [True], '6'):
             with pytest.raises(ValueError, match="`months`"):

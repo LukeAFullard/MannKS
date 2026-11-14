@@ -295,3 +295,194 @@ class TestTimezoneAwareLocalBlocks:
                                   plot_path=str(tmp_path / 'tz.png'))
         assert (tmp_path / 'tz.png').exists()
         assert res.sampling_diagnostic['aggregate_support'] >= 1
+
+
+# ==============================================================================
+# Minor / Nit findings
+# ==============================================================================
+
+import io
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+from MannKS import plot_quantile_trend
+from MannKS._quantile import _auto_u_grid, _standardize_block
+
+_ALL_METHODS = ['hazen', 'linear', 'weibull', 'median_unbiased', 'normal_unbiased',
+                'interpolated_inverted_cdf', 'inverted_cdf', 'averaged_inverted_cdf',
+                'closest_observation', 'lower', 'higher', 'nearest', 'midpoint']
+_CONTINUOUS = _ALL_METHODS[:6]
+
+
+class TestAutoGridMatchesQuantileMethod:
+
+    @pytest.mark.parametrize('method', _CONTINUOUS)
+    @pytest.mark.parametrize('n', [2, 5, 12, 365])
+    def test_block_of_target_size_is_returned_unchanged(self, method, n):
+        # The default grid must be the one that belongs to `quantile_method`
+        # (it was linspace(0, 1, M), which is only right for 'linear').
+        vals = np.sort(np.random.default_rng(n).lognormal(size=n))
+        df = pd.DataFrame({'value': vals[::-1].copy()})
+        got, cens, _ = _standardize_block(df, n, 'interpolate', method, 'propagate', 0.5, 1.1)
+        np.testing.assert_allclose(got, vals, rtol=1e-12, atol=1e-12)
+        assert not cens.any()
+
+    def test_grids(self):
+        np.testing.assert_allclose(_auto_u_grid(4, 'hazen'), [0.125, 0.375, 0.625, 0.875])
+        np.testing.assert_allclose(_auto_u_grid(4, 'linear'), [0.0, 1 / 3, 2 / 3, 1.0])
+        np.testing.assert_allclose(_auto_u_grid(4, 'weibull'), [0.2, 0.4, 0.6, 0.8])
+        np.testing.assert_allclose(_auto_u_grid(1, 'hazen'), [0.5])
+
+    def test_end_to_end_matrix_holds_observations_of_smallest_blocks(self):
+        t = pd.date_range('2001-01-01', '2012-12-31', freq='D')
+        x = np.random.default_rng(1).lognormal(size=len(t))
+        res = quantile_trend_test(x, t)  # defaults: 'auto', 'min', 'hazen'
+        assert res.n_ranks == 365
+        np.testing.assert_allclose(res.results['quantile'], (np.arange(1, 366) - 0.5) / 365)
+        first = np.sort(x[t.year == 2001])
+        np.testing.assert_allclose(res.matrix.iloc[0].to_numpy(), first, rtol=1e-12)
+
+    def test_one_censored_observation_flags_one_rank(self):
+        vals = np.arange(1.0, 13.0)
+        cens = np.zeros(12, dtype=bool)
+        cens[0] = True
+        df = pd.DataFrame({'value': vals, 'censored': cens, 'cen_type': np.where(cens, 'lt', 'not')})
+        _, sc, st = _standardize_block(df, 12, 'interpolate', 'hazen', 'propagate', 0.5, 1.1)
+        assert sc.tolist() == [True] + [False] * 11  # was two flagged ranks with the linspace grid
+
+
+class TestCensorPropagationAllMethods:
+
+    @pytest.mark.parametrize('method', _ALL_METHODS)
+    def test_flag_iff_a_censored_order_statistic_contributes(self, method):
+        """A quantile is censored exactly when perturbing a censored observation changes it."""
+        rng = np.random.default_rng(abs(hash(method)) % 2**32)
+        for _ in range(150):
+            n = int(rng.integers(2, 25))
+            M = int(rng.integers(2, 30))
+            vals = np.cumsum(rng.uniform(1.0, 2.0, n))
+            k = int(rng.integers(0, n + 1))
+            if rng.random() < 0.5:   # left-censored prefix
+                cens = np.arange(n) < k
+                ctype = np.where(cens, 'lt', 'not')
+            else:                    # right-censored suffix
+                cens = np.arange(n) >= n - k
+                ctype = np.where(cens, 'gt', 'not')
+            u = np.linspace(0.0, 1.0, M)
+            df = pd.DataFrame({'value': vals, 'censored': cens, 'cen_type': ctype.astype(object)})
+            _, sc, _ = _standardize_block(df, M, 'interpolate', method, 'propagate', 0.5, 1.1, u_grid=u)
+            base = np.quantile(vals, u, method=method)
+            depends = np.zeros(M, dtype=bool)
+            for i in np.flatnonzero(cens):
+                v2 = vals.copy()
+                v2[i] += 0.25
+                depends |= ~np.isclose(np.quantile(v2, u, method=method), base, rtol=0, atol=1e-12)
+            np.testing.assert_array_equal(sc, depends)
+
+    def test_mixed_lt_gt_bracket_is_reported(self):
+        df = pd.DataFrame({'value': [1.0, 2.0, 3.0, 4.0], 'censored': [False, True, True, False],
+                           'cen_type': ['not', 'lt', 'gt', 'not']})
+        info = {}
+        _, sc, st = _standardize_block(df, 3, 'interpolate', 'hazen', 'propagate', 0.5, 1.1,
+                                       u_grid=np.array([0.25, 0.5, 0.75]), info=info)
+        assert st.tolist() == ['lt', 'lt', 'gt']
+        assert info['n_mixed_brackets'] == 1
+        # the EGRET merge uses the same precedence ('lt' first) and reports it too
+        df2 = pd.DataFrame({'value': [1.0, 2.0, 3.0, 4.0], 'censored': [False, True, True, False],
+                            'cen_type': ['not', 'gt', 'lt', 'not']})
+        info2 = {}
+        _, _, st2 = _standardize_block(df2, 3, 'egret', 'hazen', 'propagate', 0.5, 1.1, info=info2)
+        assert st2.tolist() == ['not', 'lt', 'not']
+        assert info2['n_mixed_brackets'] == 1
+
+    def test_mixed_bracket_warns_end_to_end(self):
+        t = pd.date_range('2000-01-01', '2011-12-31', freq='7D')
+        x = np.random.default_rng(4).lognormal(size=len(t))
+        lo, hi = x < 0.9, x > 1.1   # the median sits between a '<' and a '>' value
+        df = pd.DataFrame({'value': np.where(lo, 0.9, np.where(hi, 1.1, x)), 'censored': lo | hi,
+                           'cen_type': np.where(lo, 'lt', np.where(hi, 'gt', 'not'))})
+        df = df[lo | hi].reset_index(drop=True)
+        with pytest.warns(UserWarning, match="left-censored .* and a right-censored"):
+            res = quantile_trend_test(df, t[lo | hi], quantiles=[0.5], min_coverage=0.5)
+        assert any('not a valid bound' in n for n in res.analysis_notes)
+
+
+class TestValidationAndWarnings:
+
+    @pytest.fixture
+    def series(self):
+        t = pd.date_range('2000-01-01', '2011-12-31', freq='7D')
+        return np.random.default_rng(12).lognormal(size=len(t)), t
+
+    def test_input_validation(self, series):
+        x, t = series
+        with pytest.raises(ValueError, match="must not contain duplicate"):
+            quantile_trend_test(x, t, quantiles=[0.5, 0.1, 0.5])
+        with pytest.raises(ValueError, match="`min_coverage` must be a number between"):
+            quantile_trend_test(x, t, min_coverage='a')
+        with pytest.raises(ValueError, match="array-like sequences, not scalars"):
+            quantile_trend_test(1.0, 2.0)
+        for std in ('interpolate', 'egret'):   # also validated when 'egret' ignores it
+            with pytest.raises(ValueError, match="Invalid `quantile_method` 'bogus'"):
+                quantile_trend_test(x, t, quantile_method='bogus', standardization=std)
+
+    def test_warning_categories_are_preserved(self, series):
+        x, t = series
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            quantile_trend_test(x, t, quantiles=[0.5], sens_slope_method='nan')
+        cats = {m.category for m in w if 'deprecated' in str(m.message)}
+        assert cats and UserWarning not in cats   # was re-emitted as UserWarning
+
+    def test_warnings_survive_an_exception(self):
+        t = pd.date_range('2000-01-01', '2011-12-31', freq='7D')
+        x = np.random.default_rng(13).lognormal(size=len(t))
+        x[::40] = np.inf   # "Removed ... infinite" warning, then a failure
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            with pytest.raises(ValueError, match="requires all standardized block values to be > 0"):
+                quantile_trend_test(-x, t, transform='log')
+        assert any('infinite value' in str(m.message) for m in w)
+
+    def test_fast_engine_fallback_is_noted(self, series):
+        x, t = series
+        res = quantile_trend_test(x - 3.0, t, quantiles=[0.1, 0.9], transform='pct_of_median', engine='fast')
+        assert res.computation_mode == 'exact'
+        assert any("engine='fast' not applicable" in n and 'NaN' in n for n in res.analysis_notes)
+        ok = quantile_trend_test(x, t, quantiles=[0.1, 0.9], engine='fast')
+        assert ok.computation_mode == 'fast'
+        assert not any("engine='fast'" in n for n in ok.analysis_notes)
+
+    def test_log_slope_units_describe_slope_and_plot_labels(self, series):
+        x, t = series
+        res = quantile_trend_test(x, t, quantiles=5, transform='log', x_unit='mg/L')
+        assert (res.results['slope_units'] == 'ln(mg/L) per year').all()
+        fig, ax = plt.subplots()
+        try:
+            plot_quantile_trend(res, ax=ax, show_fdc=True)
+            assert ax.get_ylabel() == 'Trend (% per year)'
+            assert fig.axes[-1].get_ylabel() == 'Median Concentration / Flow (mg/L)'
+        finally:
+            plt.close(fig)
+
+    def test_caller_figure_not_closed_when_saving(self, series):
+        x, t = series
+        res = quantile_trend_test(x, t, quantiles=5)
+        fig, ax = plt.subplots()
+        try:
+            plot_quantile_trend(res, ax=ax, save_path=io.BytesIO())
+            assert plt.fignum_exists(fig.number)
+        finally:
+            plt.close(fig)
+
+    def test_minimum_attainable_p_values_quoted_in_docs(self):
+        # Docs: strictly monotone series give p = 0.089 (B=4), 0.027 (B=5), 0.0085 (B=6).
+        expected = {4: 0.0894, 5: 0.0275, 6: 0.0085}
+        for B, p_min in expected.items():
+            t = pd.date_range('2000-01-01', periods=B * 365, freq='D')
+            x = np.repeat(np.arange(B), 365) + np.random.default_rng(0).random(B * 365) * 0.1
+            res = quantile_trend_test(x, t, quantiles=[0.5], min_blocks=2, block_frequency=pd.Timedelta('365D'))
+            assert len(res.matrix) == B
+            assert res.results['p'].iloc[0] == pytest.approx(p_min, abs=2e-4)

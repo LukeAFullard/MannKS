@@ -299,7 +299,7 @@ class TestRealEgretFixtures:
         res = egret_parity.run_mannks(daily, sc['paStart'], sc['paLong'])
         assert res.computation_mode == 'exact'
         _assert_matches_egret(res, egret)
-        assert (res.results['slope_units'] == '% per year').all()
+        assert (res.results['slope_units'] == 'ln(units) per year').all()
 
     @pytest.mark.parametrize('scenario', _SCENARIOS)
     def test_fast_engine_reproduces_egret(self, scenario):

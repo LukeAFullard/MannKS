@@ -834,7 +834,7 @@ def plot_quantile_trend(
         - 'linear': Quantiles plotted linearly against non-exceedance probability [0, 1].
     color_by : {'p', 'classification'}, default 'p'
         Color coding for plotted points:
-        - 'p': Colored by significance: p < alpha (red/highlight),
+        - 'p': Colored by significance: p < alpha (orange highlight),
           alpha <= p < 2*alpha (charcoal/intermediate), and p >= 2*alpha (gray).
         - 'classification': Colored by MannKS trend classification category:
           Increasing (blue/navy), Decreasing (red/orange), and No Trend / Indeterminate (gray).
@@ -1090,6 +1090,8 @@ def plot_quantile_trend(
                             su = str(df['slope_units'].iloc[0]).strip()
                             if ' per ' in su and not su.startswith('%'):
                                 unit_str = su.split(' per ')[0].strip()
+                                if unit_str.startswith('ln(') and unit_str.endswith(')'):
+                                    unit_str = unit_str[3:-1]  # the FDC shows raw values
                         if unit_str:
                             ax_fdc.set_ylabel(f"Median Concentration / Flow ({unit_str})", color='navy')
                         else:
@@ -1126,7 +1128,9 @@ def plot_quantile_trend(
             return save_path
         return ax
     finally:
-        if created_fig or save_path is not None:
+        # Only close figures this function created; a caller-supplied Axes
+        # (and its figure) stays open even when `save_path` is given.
+        if created_fig:
             plt.close(fig)
 
 

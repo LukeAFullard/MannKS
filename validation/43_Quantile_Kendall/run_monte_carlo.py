@@ -209,6 +209,8 @@ def validate_sampling_drift_trap(n_reps: int = 300):
     eq_rejections_high = 0
     agg_rejections_low = 0
     agg_rejections_high = 0
+    hazen_rejections_low = 0
+    hazen_rejections_high = 0
 
     for _ in range(n_reps):
         t_list = []
@@ -223,8 +225,15 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         t_arr = pd.to_datetime(t_list)
         x_arr = np.array(x_list)
 
-        # 1. Raw Analysis (equalize='none', default quantiles='auto' spans min to max ranks: p=0.08 and p=0.92)
-        res_raw = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='none', min_size_per_block=10)
+        # All "order-statistic" analyses use quantile_method='linear', for which rank 1 / rank 12 are
+        # each year's minimum / maximum (plotting positions p=0.08 and p=0.92): the worst case.
+        # 0. Raw analysis with the package default (Hazen ranks)
+        df_hz = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='none', min_size_per_block=10).to_frame()
+        hazen_rejections_low += int(df_hz.iloc[0]['h'])
+        hazen_rejections_high += int(df_hz.iloc[-1]['h'])
+
+        # 1. Raw analysis of order statistics (equalize='none')
+        res_raw = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='none', min_size_per_block=10)
         df_raw = res_raw.to_frame()
         if res_raw.sampling_diagnostic['flag']:
             raw_flags += 1
@@ -234,7 +243,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
             raw_rejections_high += 1
 
         # 2. Equalized Analysis (equalize='thin')
-        res_eq = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='thin', min_size_per_block=10)
+        res_eq = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='thin', min_size_per_block=10)
         df_eq = res_eq.to_frame()
         if df_eq.iloc[0]['h']:
             eq_rejections_low += 1
@@ -242,7 +251,7 @@ def validate_sampling_drift_trap(n_reps: int = 300):
             eq_rejections_high += 1
 
         # 3. Equalized Analysis (equalize='aggregate': monthly sub-intervals on a common support)
-        res_agg = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', equalize='aggregate', min_size_per_block=10)
+        res_agg = quantile_trend_test(x_arr, t_arr, block_frequency='YE', quantiles='auto', quantile_method='linear', equalize='aggregate', min_size_per_block=10)
         df_agg = res_agg.to_frame()
         if df_agg.iloc[0]['h']:
             agg_rejections_low += 1
@@ -299,6 +308,8 @@ def validate_sampling_drift_trap(n_reps: int = 300):
         'rate_eq_low': rate_eq_low,
         'rate_eq_high': rate_eq_high,
         'rate_agg_low': rate_agg_low,
+        'rate_hazen_low': hazen_rejections_low / n_reps,
+        'rate_hazen_high': hazen_rejections_high / n_reps,
         'rate_agg_high': rate_agg_high,
         'n_reps': n_reps,
     }
@@ -494,7 +505,7 @@ The largest difference in any quantity in any scenario is `{worst:.1e}`: with th
 
 ### What is *not* the same as EGRET
 * **Default time axis.** Without `block_time='egret'` MannKS places each block at its calendar midpoint and scales by a 365.25-day year. $S$, $\mathrm{{Var}}(S)$, $\tau$ and $p$ are unchanged (they only use the order of the blocks); the slope differs by at most `{eg['centre_rel']:.4f}%` of its value in the `climate_year` scenario (magenta line in the right-hand panel below).
-* **Default standardization.** `standardization='interpolate'` (Hazen quantiles on a uniform grid) is a different estimator: mean slope difference `{eg['interp_slope_rel']:.3f}%` (`{eg['interp_slope_abs']:.4f}` %/yr) in the `climate_year` scenario.
+* **Default standardization.** `standardization='interpolate'` (interpolated Hazen quantiles: leap years are read at 365 Hazen positions instead of being rank-reduced) is a different estimator: mean slope difference `{eg['interp_slope_rel']:.3f}%` (`{eg['interp_slope_abs']:.4f}` %/yr) in the `climate_year` scenario.
 * **Serial-correlation-adjusted p-value.** EGRET's `trendSortQ` also returns `pValueAdj` (`zyp::zyp.zhang` trend-free pre-whitening) and `plotQuantileKendall` colours its points by `pValueAdj` (red $< 0.05$, black $\le 0.1$, grey otherwise). MannKS does not implement Zhang pre-whitening: `p` reproduces EGRET's unadjusted `pValue`, and `plot_quantile_trend` colours by `p` with bands at $\alpha$ and $2\alpha$. `pValueAdj` is stored in the fixtures for reference only. Use `autocorr_method` for MannKS's own serial-correlation corrections.
 * **Records with gaps.** EGRET's `makeSortQ` stops with an error when a year inside the record has missing days; MannKS drops that block (`require_complete=True`) and continues.
 
@@ -521,19 +532,21 @@ The largest difference in any quantity in any scenario is `{worst:.1e}`: with th
 ## 3. Sampling Frequency Drift
 
 ### The Drift Phenomenon
-When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes widen over time even when the data-generating process is stationary: high order statistics trend upward and low order statistics trend downward.
+When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes widen over time even when the data-generating process is stationary: the highest order statistics trend upward and the lowest trend downward.
 
 ### Monte Carlo Results ({n_rep_d} replications, stationary lognormal, 10 years monthly then 10 years weekly)
-Rates for the equalized analyses are two-sided rejection rates at $\alpha = 0.05$; the raw rows count only rejections in the artifact's direction.
+The order-statistic analyses use `quantile_method='linear'`, for which rank 1 and rank $M$ are each year's minimum and maximum: the worst case for this artifact. With the package default (`'hazen'`) the extreme ranks of a larger block are read at interior positions ($0.5/M$ and $1 - 0.5/M$), which removes most of the artifact even without equalization. Rates are two-sided rejection rates at $\alpha = 0.05$, except the raw order-statistic rows, which count only rejections in the artifact's direction.
 
 | Analysis | Rank | False Rejection Rate | Monte Carlo check vs. $\alpha = 0.05$ |
 | :--- | :--- | :--- | :--- |
-| **Raw (`equalize='none'`)** | lowest ($p = 0.08$), downward | **{drift['rate_raw_low']*100:.1f}%** | {_mc_status(drift['rate_raw_low'], 0.05, n_rep_d)} |
-| **Raw (`equalize='none'`)** | highest ($p = 0.92$), upward | **{drift['rate_raw_high']*100:.1f}%** | {_mc_status(drift['rate_raw_high'], 0.05, n_rep_d)} |
-| **`equalize='thin'`** | lowest | **{drift['rate_eq_low']*100:.1f}%** | {_mc_status(drift['rate_eq_low'], 0.05, n_rep_d)} |
-| **`equalize='thin'`** | highest | **{drift['rate_eq_high']*100:.1f}%** | {_mc_status(drift['rate_eq_high'], 0.05, n_rep_d)} |
-| **`equalize='aggregate'`** | lowest | **{drift['rate_agg_low']*100:.1f}%** | {_mc_status(drift['rate_agg_low'], 0.05, n_rep_d)} |
-| **`equalize='aggregate'`** | highest | **{drift['rate_agg_high']*100:.1f}%** | {_mc_status(drift['rate_agg_high'], 0.05, n_rep_d)} |
+| **Order statistics, raw (`equalize='none'`)** | lowest ($p = 0.08$), downward | **{drift['rate_raw_low']*100:.1f}%** | {_mc_status(drift['rate_raw_low'], 0.05, n_rep_d)} |
+| **Order statistics, raw (`equalize='none'`)** | highest ($p = 0.92$), upward | **{drift['rate_raw_high']*100:.1f}%** | {_mc_status(drift['rate_raw_high'], 0.05, n_rep_d)} |
+| **Default Hazen ranks, raw** | lowest | **{drift['rate_hazen_low']*100:.1f}%** | {_mc_status(drift['rate_hazen_low'], 0.05, n_rep_d)} |
+| **Default Hazen ranks, raw** | highest | **{drift['rate_hazen_high']*100:.1f}%** | {_mc_status(drift['rate_hazen_high'], 0.05, n_rep_d)} |
+| **Order statistics, `equalize='thin'`** | lowest | **{drift['rate_eq_low']*100:.1f}%** | {_mc_status(drift['rate_eq_low'], 0.05, n_rep_d)} |
+| **Order statistics, `equalize='thin'`** | highest | **{drift['rate_eq_high']*100:.1f}%** | {_mc_status(drift['rate_eq_high'], 0.05, n_rep_d)} |
+| **Order statistics, `equalize='aggregate'`** | lowest | **{drift['rate_agg_low']*100:.1f}%** | {_mc_status(drift['rate_agg_low'], 0.05, n_rep_d)} |
+| **Order statistics, `equalize='aggregate'`** | highest | **{drift['rate_agg_high']*100:.1f}%** | {_mc_status(drift['rate_agg_high'], 0.05, n_rep_d)} |
 
 The sampling diagnostic (`sampling_diagnostic['flag']`) was raised in **{drift['rate_raw_flag']*100:.1f}%** of the raw analyses.
 

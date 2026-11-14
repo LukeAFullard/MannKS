@@ -225,7 +225,8 @@ def test_caller_ax_figure_lifecycle():
     """
     Test figure lifecycle when caller provides an existing ax:
     1. If save_path is None: caller's figure MUST stay open.
-    2. If save_path is provided: figure is saved and closed.
+    2. If save_path is provided: figure is saved and the caller's figure STILL stays open
+       (only figures created by plot_quantile_trend are closed).
     """
     plt.close('all')
     res = create_dummy_result(M=5)
@@ -239,12 +240,19 @@ def test_caller_ax_figure_lifecycle():
     plt.close(fig_caller)
     assert len(plt.get_fignums()) == 0
 
-    # 2. External ax with save_path provided -> figure saved and closed
+    # 2. External ax with save_path provided -> figure saved, caller's figure left open
     fig_caller2, ax_caller2 = plt.subplots()
     assert len(plt.get_fignums()) == 1
     buf = io.BytesIO()
     returned_val = plot_quantile_trend(res, ax=ax_caller2, save_path=buf)
     assert returned_val is buf
+    assert buf.getbuffer().nbytes > 0
+    assert plt.fignum_exists(fig_caller2.number)
+    ax_caller2.set_title('still usable')
+    plt.close(fig_caller2)
+
+    # 3. No ax: the figure created internally is closed
+    plot_quantile_trend(res, save_path=io.BytesIO())
     assert len(plt.get_fignums()) == 0
 
 

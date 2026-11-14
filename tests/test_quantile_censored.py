@@ -274,7 +274,7 @@ class TestCensoredQuantileTrendIntegration:
             sens_slope_method='ats',
         )
         assert res_ats.computation_mode == 'exact'
-        assert res_ats.results['slope_units'].iloc[0] == '% per year'
+        assert res_ats.results['slope_units'].iloc[0] == 'ln(units) per year'
 
         # substitute with lwp must succeed
         res_sub = quantile_trend_test(

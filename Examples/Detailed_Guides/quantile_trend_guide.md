@@ -61,11 +61,13 @@ For each block $k = 1, \dots, B$:
 Because blocks may contain different numbers of observations $n_k$ (e.g., 365 vs 366 days, or 10 vs 14 irregular visits), the order statistics must be standardized to a common target dimension $M$:
 
 * **Quantile Interpolation (`standardization='interpolate'`):**
-  Evaluates quantiles via `numpy.quantile(..., method=quantile_method)` (default `'hazen'`, i.e., Hyndman & Fan Type 5 with virtual 0-based index $\mathrm{clip}(u n_k - 0.5, 0, n_k - 1)$) at uniform probabilities:
+  Evaluates quantiles via `numpy.quantile(..., method=quantile_method)` (default `'hazen'`, i.e., Hyndman & Fan Type 5 with virtual 0-based index $\mathrm{clip}(u n_k - 0.5, 0, n_k - 1)$) at the probabilities that belong to the rule, so that a block of exactly $M$ observations is returned as its own order statistics. For the default `'hazen'`:
 
   $$
-  u_j = \frac{j - 1}{M - 1}, \quad j = 1, \dots, M
+  u_j = \frac{j - 0.5}{M}, \quad j = 1, \dots, M
   $$
+
+  (`'linear'` uses $(j - 1)/(M - 1)$, `'weibull'` uses $j/(M + 1)$.)
 
 * **EGRET Parity (`standardization='egret'`):**
   Replicates EGRET's leap-year adjustment for blocks that are one observation longer than the shortest: an even-length block (a 366-day leap year) has its two middle ranks ($j=183, 184$) averaged (`leapEven`); an odd-length block (e.g. a 91-day Dec–Feb season in a leap year) has its middle rank dropped (`leapOdd`). Every block then has exactly the same number of ranks.
@@ -96,8 +98,8 @@ Testing $M$ individual quantiles simultaneously introduces a multiple testing ch
 
 When `field_significance=True`, MannKS computes an empirical permutation test of global field significance:
 1. Block indices are randomly permuted $P$ times (default 999), holding cross-quantile covariance fixed.
-2. In each permutation, the maximum test statistic across all quantiles is computed.
-3. The global field p-value ($p_{\text{field}}$) is calculated as the proportion of permuted maxima that exceed the observed maximum statistic.
+2. In each permutation the Mann-Kendall $Z$ of every quantile is recomputed, giving the number of quantiles with $|Z| > z_{1-\alpha/2}$ and the maximum $|Z|$.
+3. Two global p-values are reported in `result.field_significance`, each as $(1 + \text{exceedances}) / (P + 1)$: `p_count` (as many or more significant quantiles than observed) and `p_max_z` (a maximum $|Z|$ at least as large as observed). Choose one of them in advance; rejecting when either is small is two tests.
 
 ---
 
@@ -307,12 +309,14 @@ When monitoring programs expand from monthly to weekly sampling over time, the e
 * Expected sample maximum increases with sample size.
 * Expected sample minimum decreases with sample size.
 
+The artifact is strongest when ranks are pure order statistics (`quantile_method='linear'`, or explicit quantiles `0.0`/`1.0`). The default Hazen grid reads the extreme ranks of larger blocks at interior positions and is much less affected, but it is not immune.
+
 **Remedy:** Always inspect `result.sampling_diagnostic['flag']`. If flagged, re-run with `equalize='thin'`, which systematically sub-samples blocks in time to a uniform sample size, restoring true flat trends across stationary distributions. `equalize='aggregate'` is the alternative when the seasons should also be balanced within each block: it reduces every block to one value per sub-interval (e.g. per month), each computed from the same number of observations $k$ in every block. Never compare medians of different numbers of observations between blocks — a monthly median of four weekly samples is far less variable than a single monthly sample.
 
 ### 2. Partial Block Bias & Temporal Coverage
 Blocks near the start or end of a record often contain only partial years (e.g., monitoring began in September). Evaluating an incomplete year whose samples represent only summer or winter will severely bias the annual order statistics.
 
-**Remedy:** Set `min_coverage=0.70` (or `0.80`) to automatically reject blocks that do not span at least 70–80% of the block window.
+**Remedy:** Set `min_coverage=0.70` (or `0.80`) to automatically reject blocks that do not span at least 70–80% of the block window. Coverage is the span from the first to the last observation, so it catches late starts and early ends but **not gaps in the middle** of a block; use `min_size_per_block` or `require_complete` for those.
 
 ### 3. Censor Handling & Artificial Plateaus
 Naive substitution of non-detects (e.g., replacing `< 1.0` with `0.5`) before sorting creates flat artificial plateaus in the lower ranks across blocks.
@@ -338,7 +342,7 @@ See [Example 37](../37_Monthly_Censored_Quantile_Kendall/README.md) for a comple
 
 ## Limitations & Assumptions
 
-1. **Minimum Number of Blocks ($B$):** The Mann-Kendall test is conducted *across blocks*, not across raw observations. With fewer than $10$ valid blocks ($B < 10$), statistical power is low and normal-approximation p-values are coarse (e.g., with $B=5$, the minimum possible two-sided p-value is $0.083$, so $p < 0.05$ is unattainable).
+1. **Minimum Number of Blocks ($B$):** The Mann-Kendall test is conducted *across blocks*, not across raw observations. With fewer than $10$ valid blocks ($B < 10$), statistical power is low and normal-approximation p-values are coarse (the smallest attainable two-sided p-value, reached only by a strictly monotonic series, is $0.089$ with $B=4$, $0.027$ with $B=5$ and $0.0085$ with $B=6$, so with $B=4$ blocks $p < 0.05$ is unattainable).
 2. **Cross-Quantile Dependence & Multiple Testing:** Adjacent quantiles within the same block are strongly correlated. Individual quantile p-values are marginal (unadjusted); use `field_significance=True` when testing a global null hypothesis across the entire quantile spectrum.
 3. **Field Significance Assumptions:** `field_significance=True` permutes entire block rows of the standardized quantile matrix, which assumes blocks are exchangeable under $H_0$ (no strong inter-block autocorrelation) and evaluates numeric standardized values without censored-interval scoring.
 4. **Log Transformation Requires Positive Values:** `transform='log'` requires all standardized block values to be strictly $> 0$ (after adding `log_offset` if provided). Zero-flow or negative-value series must use `transform='none'` (or a positive `log_offset`).

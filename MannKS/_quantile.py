@@ -397,6 +397,38 @@ def _egret_decimal_year(timestamps) -> np.ndarray:
     return (idx.year + (idx.dayofyear - 0.5) / days_in_year).to_numpy(dtype=float)
 
 
+# Hyndman & Fan (alpha, beta) of the continuous numpy.quantile rules:
+# virtual 0-based index  v = n*u + alpha + u*(1 - alpha - beta) - 1
+_HF_ALPHA_BETA = {
+    'interpolated_inverted_cdf': (0.0, 1.0),
+    'hazen': (0.5, 0.5),
+    'weibull': (0.0, 0.0),
+    'linear': (1.0, 1.0),
+    'median_unbiased': (1.0 / 3.0, 1.0 / 3.0),
+    'normal_unbiased': (3.0 / 8.0, 3.0 / 8.0),
+}
+
+
+def _auto_u_grid(M: int, quantile_method: str = 'hazen') -> np.ndarray:
+    """
+    Probabilities of the ``M`` ranks for ``quantiles='auto'``.
+
+    The grid is the one that belongs to ``quantile_method``: the probabilities
+    at which a block of exactly ``M`` observations returns its own order
+    statistics, ``u_j = (j - alpha) / (M + 1 - alpha - beta)`` for the
+    Hyndman & Fan family (``(j - 0.5) / M`` for ``'hazen'``, ``(j - 1) / (M - 1)``
+    for ``'linear'``, ``j / (M + 1)`` for ``'weibull'``).  Blocks of the target
+    size therefore pass through unchanged, and larger blocks are read at the
+    same plotting positions.  Rules outside the family use the linear grid.
+    """
+    if M <= 1:
+        return np.array([0.5])
+    j = np.arange(1, M + 1, dtype=float)
+    a, b = _HF_ALPHA_BETA.get(quantile_method, (1.0, 1.0))
+    u = (j - a) / (M + 1.0 - a - b)
+    return np.clip(u, 0.0, 1.0)
+
+
 def _plotting_positions(M: int):
     ranks = np.arange(1, M + 1, dtype=float)
     p_grid = ranks / (M + 1.0)
@@ -412,6 +444,7 @@ def _standardize_block(
     lt_mult: float,
     gt_mult: float,
     u_grid: np.ndarray = None,
+    info: dict = None,
 ):
     vals = group_df['value'].to_numpy(dtype=float).copy()
     censored = (
@@ -458,7 +491,11 @@ def _standardize_block(
             else:
                 merged_val = 0.5 * (s_vals[mid - 1] + s_vals[mid])
                 merged_cens = bool(s_cens[mid - 1] or s_cens[mid])
-                merged_type = s_type[mid - 1] if s_type[mid - 1] != 'not' else s_type[mid]
+                pair_types = {s_type[mid - 1], s_type[mid]}
+                # same precedence as the interpolating path: 'lt' before 'gt'
+                merged_type = 'lt' if 'lt' in pair_types else ('gt' if 'gt' in pair_types else 'not')
+                if info is not None and {'lt', 'gt'} <= pair_types:
+                    info['n_mixed_brackets'] = info.get('n_mixed_brackets', 0) + 1
                 keep = np.ones(n_obs, dtype=bool)
                 keep[mid] = False
                 std_vals = s_vals[keep].copy()
@@ -474,7 +511,7 @@ def _standardize_block(
             )
     else:
         if u_grid is None:
-            u_grid = np.linspace(0.0, 1.0, M) if M > 1 else np.array([0.5])
+            u_grid = _auto_u_grid(M, quantile_method)
         std_vals = np.quantile(s_vals, u_grid, method=quantile_method)
         std_cens = np.zeros(M, dtype=bool)
         std_type = np.full(M, 'not', dtype=object)
@@ -483,29 +520,27 @@ def _standardize_block(
             lt_mask = s_cens & (s_type == 'lt')
             gt_mask = s_cens & (s_type == 'gt')
 
-            _hf_ab = {
-                'interpolated_inverted_cdf': (0.0, 1.0),
-                'hazen': (0.5, 0.5),
-                'weibull': (0.0, 0.0),
-                'linear': (1.0, 1.0),
-                'median_unbiased': (1.0 / 3.0, 1.0 / 3.0),
-                'normal_unbiased': (3.0 / 8.0, 3.0 / 8.0),
-            }
-            if quantile_method in _hf_ab:
-                a_hf, b_hf = _hf_ab[quantile_method]
-                v_pos = np.clip(
-                    n_obs * u_grid + a_hf + u_grid * (1.0 - a_hf - b_hf) - 1.0,
-                    0.0,
-                    float(n_obs - 1),
-                )
-                v_pos = np.where(np.abs(v_pos - np.round(v_pos)) < 1e-12, np.round(v_pos), v_pos)
-            else:
-                v_pos = np.clip(u_grid * (n_obs - 1), 0.0, float(n_obs - 1))
+            # Position of each quantile among the order statistics, obtained from
+            # numpy itself: the quantile of the index sequence 0..n-1 is the
+            # (possibly fractional) 0-based index numpy reads, for every
+            # `quantile_method` - continuous rules interpolate between
+            # floor(v) and ceil(v); discontinuous rules return an integer
+            # index, or a half-integer when they average two neighbours.
+            v_pos = np.asarray(
+                np.quantile(np.arange(n_obs, dtype=float), u_grid, method=quantile_method), dtype=float
+            )
+            v_pos = np.clip(v_pos, 0.0, float(n_obs - 1))
+            v_pos = np.where(np.abs(v_pos - np.round(v_pos)) < 1e-9, np.round(v_pos), v_pos)
 
             lo_idx = np.clip(np.floor(v_pos).astype(np.intp), 0, n_obs - 1)
             hi_idx = np.clip(np.ceil(v_pos).astype(np.intp), 0, n_obs - 1)
             neighbor_lt = lt_mask[lo_idx] | lt_mask[hi_idx]
             neighbor_gt = gt_mask[lo_idx] | gt_mask[hi_idx]
+
+            if info is not None:
+                n_mixed = int(np.sum(neighbor_lt & neighbor_gt))
+                if n_mixed:
+                    info['n_mixed_brackets'] = info.get('n_mixed_brackets', 0) + n_mixed
 
             for k in range(M):
                 if neighbor_lt[k]:

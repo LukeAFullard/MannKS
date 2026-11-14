@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0] — Generalized Quantile-Kendall release
+## 0.7.0 — Generalized Quantile-Kendall release
 
 Major feature release introducing frequency-agnostic, censor-aware, and drift-protected **Generalized Quantile-Kendall Trend Analysis** (`quantile_trend_test`), generalizing the USGS EGRET methodology (*Hirsch et al., 2015*) to arbitrary time series frequencies, multi-year blocks, and ambient monitoring networks.
 
@@ -33,6 +33,11 @@ Major feature release introducing frequency-agnostic, censor-aware, and drift-pr
 * Added USGS EGRET parity & Monte Carlo validation suite: [`validation/43_Quantile_Kendall/`](validation/43_Quantile_Kendall/README.md). Parity is measured against the **genuine EGRET R code** (EGRET's `makeSortQ`/`trendSortQ` run with the EGRET, rkt and zyp packages through `rpy2`): with `standardization='egret'`, `transform='log'`, `require_complete=True` and the new `block_time='egret'`, MannKS reproduces EGRET's rank matrix, $S$, $\mathrm{Var}(S)$, $\tau$, p-value and slopes to floating-point rounding for climate, water and calendar years, tied flows, and seasonal periods of analysis. EGRET's output is stored in `tests/data/egret_qk/` so the test suite asserts the same parity without R.
 * `block_time='egret'` uses EGRET's `midDecYear` (mean decimal year of the first and last observation of each block) as the block time, giving slopes per decimal year exactly as EGRET does; the default `'center'` uses the calendar midpoint of each block.
 * Timezone-aware timestamps are analysed in local wall-clock time: block boundaries, `months` and reported block times are local (tz-naive), so calendar and water years start at local midnight.
+* `quantiles='auto'` evaluates the ranks at the probabilities that belong to `quantile_method` ($(j - 0.5)/M$ for the default `'hazen'`), so a block of the target size is returned as its own order statistics and one censored observation flags one rank. A side effect is that the default analysis is far less sensitive to sampling-frequency drift than pure order statistics.
+* Censor propagation is exact for every `numpy.quantile` rule, including discontinuous ones; a quantile bracketed by both a `<` and a `>` observation is reported with a warning.
+* With `transform='log'`, `slope_units` now describes `slope` (`ln(<x_unit>) per <time unit>`); `slope_pct` remains % per time unit.
+* `plot_quantile_trend` no longer closes a caller-supplied figure when `save_path` is given.
+* Warnings keep their original category and are no longer lost when the call raises; `engine='fast'` fallbacks are recorded in `analysis_notes`; invalid `quantile_method`, duplicate `quantiles`, non-numeric `min_coverage` and scalar inputs raise clear `ValueError`s.
 * `block_origin` never drops observations: block edges always span the record, calendar-anchored frequencies snap to their anchors with a `UserWarning`, and an origin far outside the record only sets the phase of the blocks.
 * Exported `quantile_trend_test`, `QuantileTrendResult`, `summarize_quantile_regimes`, `plot_quantile_trend`, and `plot_quantile_kendall` in top-level `MannKS` namespace.
 

@@ -5,12 +5,13 @@ This example demonstrates frequency-agnostic Quantile-Kendall trend analysis:
 - Case 1: Weekly Nitrate Streamflow (20 years, agricultural winter flush trend in upper quantiles)
 - Case 2: Daily Streamflow with 5-Year Blocks (30 years, divergent hydrological regimes: flood vs drought)
 - Case 3: Sparse Irregular Censored Groundwater (25 years, 8-18 visits/year, detection limits)
-- Case 4: Sampling Frequency Drift Trap & Equalization (20 years, artifactual trend resolution via thinning)
+- Case 4: Sampling Frequency Drift Trap & Equalization (20 years; single realization plus false-positive rates over repeated realizations)
 
 Generates lecture-style README.md and all 5 visual diagnostic plots.
 """
 import os
 import sys
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -29,29 +30,27 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def df_to_markdown(df: pd.DataFrame) -> str:
     """Format DataFrame as markdown table without requiring optional tabulate package."""
-    try:
-        return df.to_markdown(index=False)
-    except Exception:
-        cols = [str(c) for c in df.columns]
-        rows = []
-        for _, row in df.iterrows():
-            formatted_vals = []
-            for val in row:
-                if isinstance(val, (float, np.floating)):
-                    if np.isnan(val):
-                        formatted_vals.append("nan")
-                    elif abs(val) < 1e-4 and val != 0:
-                        formatted_vals.append(f"{val:.3e}")
-                    else:
-                        formatted_vals.append(f"{val:.4f}")
+    # Own formatter (not DataFrame.to_markdown) so the README does not depend on `tabulate`.
+    cols = [str(c) for c in df.columns]
+    rows = []
+    for _, row in df.iterrows():
+        formatted_vals = []
+        for val in row:
+            if isinstance(val, (float, np.floating)):
+                if np.isnan(val):
+                    formatted_vals.append("nan")
+                elif abs(val) < 1e-4 and val != 0:
+                    formatted_vals.append(f"{val:.3e}")
                 else:
-                    formatted_vals.append(str(val))
-            rows.append(formatted_vals)
-        col_widths = [max(len(c), max((len(r[i]) for r in rows), default=0)) for i, c in enumerate(cols)]
-        header = "| " + " | ".join(c.ljust(w) for c, w in zip(cols, col_widths)) + " |"
-        sep = "| " + " | ".join("-" * w for w in col_widths) + " |"
-        body = "\n".join("| " + " | ".join(val.ljust(w) for val, w in zip(r, col_widths)) + " |" for r in rows)
-        return f"{header}\n{sep}\n{body}"
+                    formatted_vals.append(f"{val:.4f}")
+            else:
+                formatted_vals.append(str(val))
+        rows.append(formatted_vals)
+    col_widths = [max(len(c), max((len(r[i]) for r in rows), default=0)) for i, c in enumerate(cols)]
+    header = "| " + " | ".join(c.ljust(w) for c, w in zip(cols, col_widths)) + " |"
+    sep = "| " + " | ".join("-" * w for w in col_widths) + " |"
+    body = "\n".join("| " + " | ".join(val.ljust(w) for val, w in zip(r, col_widths)) + " |" for r in rows)
+    return f"{header}\n{sep}\n{body}"
 
 
 def run_case_1(output_dir: str):
@@ -216,75 +215,91 @@ def run_case_3(output_dir: str):
     return result, regimes
 
 
-def run_case_4(output_dir: str):
+def _case4_series(rng):
+    """Stationary lognormal series sampled monthly for 10 years, then weekly for 10 years."""
+    dates_m = pd.date_range("2005-01-01", "2014-12-31", freq="MS") + pd.Timedelta(days=14)
+    dates_w = pd.date_range("2015-01-01", "2024-12-31", freq="W")
+    dates_all = dates_m.append(dates_w)
+    values_all = rng.lognormal(mean=2.0, sigma=0.6, size=len(dates_all))
+    return values_all, dates_all
+
+
+# Analyses compared in Case 4.  quantile_method='linear' makes rank 1 and rank M
+# each year's minimum and maximum (pure order statistics), which is where the
+# sample-size artifact lives; the default 'hazen' grid reads interior positions.
+CASE4_ANALYSES = [
+    ("Order-statistic ranks, raw", dict(quantile_method='linear')),
+    ("Default Hazen ranks, raw", dict()),
+    ("Order-statistic ranks, `equalize='thin'`", dict(quantile_method='linear', equalize='thin')),
+    ("Order-statistic ranks, `equalize='aggregate'`", dict(quantile_method='linear', equalize='aggregate')),
+]
+
+
+def run_case_4(output_dir: str, n_reps: int = 200):
     """
     Case 4: Sampling Frequency Drift Trap & Equalization (20 years)
-    Demonstrates the pitfall of sampling frequency changes in quantile analysis:
     - True underlying data is completely stationary lognormal (zero trend).
     - Years 1-10 are sampled monthly (N=12/year); Years 11-20 are sampled weekly (N=52/year).
-    - Part A (Raw): Naive test shows false trends in tails and flags sampling diagnostic.
-    - Part B (Equalized): Setting equalize='thin' restores true zero slope across all quantiles.
+    - Part A (Raw): order-statistic ranks (annual minimum ... annual maximum), no equalization.
+    - Part B (Equalized): the same analysis with equalize='thin'.
+    - Because one realization proves nothing about a false-positive rate, the
+      comparison is repeated on `n_reps` independent realizations.
     """
     print("\n--- Running Case 4: Sampling Frequency Drift Trap & Equalization ---")
     rng = np.random.default_rng(42)
+    values_all, dates_all = _case4_series(rng)
 
-    # Years 1-10: Monthly (12/year)
-    dates_m = pd.date_range("2005-01-01", "2014-12-31", freq="MS") + pd.Timedelta(days=14)
-    # Years 11-20: Weekly (52/year)
-    dates_w = pd.date_range("2015-01-01", "2024-12-31", freq="W")
-    dates_all = dates_m.append(dates_w)
+    common = dict(block_frequency='YE', quantiles='auto', slope_scaling='year', x_unit='mg/L')
 
-    # Stationary lognormal data (NO true trend at any quantile)
-    values_all = rng.lognormal(mean=2.0, sigma=0.6, size=len(dates_all))
-
-    target_q = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
-
-    # Part A: Raw (unequal sample sizes)
-    res_raw = quantile_trend_test(
-        x=values_all,
-        t=dates_all,
-        block_frequency='YE',
-        quantiles=target_q,
-        slope_scaling='year',
-        x_unit='mg/L',
-    )
+    # Part A: Raw (unequal sample sizes), ranks = order statistics
+    res_raw = quantile_trend_test(x=values_all, t=dates_all, quantile_method='linear', **common)
 
     plot_path_raw = os.path.join(output_dir, "case4a_sampling_drift_raw_qk.png")
     plot_quantile_trend(
         res_raw,
         save_path=plot_path_raw,
         show_ci=True,
-        title="Case 4A: Sampling Frequency Drift Trap (Raw - False Artifactual Tail Trends)",
+        title="Case 4A: Stationary Data, Monthly -> Weekly Sampling (Raw Order Statistics)",
     )
     print(f"Saved: {plot_path_raw}")
 
     # Part B: Equalized with equalize='thin'
-    res_eq = quantile_trend_test(
-        x=values_all,
-        t=dates_all,
-        block_frequency='YE',
-        quantiles=target_q,
-        equalize='thin',
-        random_state=42,
-        slope_scaling='year',
-        x_unit='mg/L',
-    )
+    res_eq = quantile_trend_test(x=values_all, t=dates_all, quantile_method='linear',
+                                 equalize='thin', **common)
 
     plot_path_eq = os.path.join(output_dir, "case4b_sampling_drift_equalized_qk.png")
     plot_quantile_trend(
         res_eq,
         save_path=plot_path_eq,
         show_ci=True,
-        title="Case 4B: Equalized Blocks (Thinning Restores True Zero Slope Across Quantiles)",
+        title="Case 4B: Same Data, Blocks Equalized by Thinning",
     )
     print(f"Saved: {plot_path_eq}")
 
     print(f"Case 4A Sampling Diagnostic: {res_raw.sampling_diagnostic}")
     print(f"Case 4B Sampling Diagnostic: {res_eq.sampling_diagnostic}")
-    return res_raw, res_eq
+
+    # Repeat on independent stationary realizations: false-rejection rates of the
+    # lowest and highest rank (alpha = 0.05; nothing is trending).
+    mc_rng = np.random.default_rng(2024)
+    counts = {name: np.zeros(2) for name, _ in CASE4_ANALYSES}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for _ in range(n_reps):
+            x_rep, t_rep = _case4_series(mc_rng)
+            for name, kw in CASE4_ANALYSES:
+                df = quantile_trend_test(x_rep, t_rep, engine='fast', **common, **kw).results
+                counts[name] += [bool(df['h'].iloc[0]), bool(df['h'].iloc[-1])]
+    mc_table = pd.DataFrame([
+        {'analysis': name, 'lowest rank (annual min)': f"{100 * c[0] / n_reps:.1f}%",
+         'highest rank (annual max)': f"{100 * c[1] / n_reps:.1f}%"}
+        for name, c in counts.items()
+    ])
+    print(mc_table.to_string(index=False))
+    return res_raw, res_eq, mc_table, n_reps
 
 
-def generate_readme(res1, reg1, res2, reg2, res3, reg3, res4a, res4b, output_dir: str):
+def generate_readme(res1, reg1, res2, reg2, res3, reg3, res4a, res4b, mc4, n_reps4, output_dir: str):
     """Compiles a comprehensive, lecture-style README.md for Example 36."""
     print("\n--- Compiling README.md ---")
 
@@ -294,6 +309,9 @@ def generate_readme(res1, reg1, res2, reg2, res3, reg3, res4a, res4b, output_dir
     df3_all = res3.results[['rank', 'quantile', 'plotting_position', 'slope', 'prop_censored', 'p', 'classification']].copy()
     df4a_all = res4a.results[['rank', 'quantile', 'slope', 'p', 'classification']].copy()
     df4b_all = res4b.results[['rank', 'quantile', 'slope', 'p', 'classification']].copy()
+    n_sig_4a = int(res4a.results['h'].sum())
+    n_sig_4b = int(res4b.results['h'].sum())
+    n_ranks_4 = int(res4a.n_ranks)
 
     readme_text = f"""# Example 36: Generalized Quantile-Kendall Trend Analysis
 
@@ -489,46 +507,60 @@ A notorious trap in non-parametric quantile analysis occurs when monitoring freq
 
 Consequently, naive order-statistic trend tests report **spurious upward trends in high quantiles** and **spurious downward trends in low quantiles**, generating false alarms of climate or environmental shifts.
 
-MannKS automatically guards against this trap:
+How strongly this bites depends on which positions the ranks read:
+- With pure **order statistics** (`quantile_method='linear'`: rank 1 is each year's minimum, rank $M$ its maximum) the artifact is severe.
+- With the default **Hazen** grid (`quantile_method='hazen'`), rank 1 of a 52-sample year is read at probability $0.5/M$ rather than at the minimum, so the extreme ranks are far less sensitive to sample size, though not immune.
+
+MannKS guards against this trap:
 1. **Sampling Diagnostic:** Computes Kendall's $\\tau$ and the max/min sample size ratio between blocks. If $p < 0.10$ or $N_{{\\max}} / N_{{\\min}} > 1.5$, a warning is raised and `result.sampling_diagnostic['flag'] == True`.
-2. **Equalization (`equalize='thin'`):** Systematically sub-samples blocks to a common sample size, eliminating the sample-size expansion artifact.
+2. **Equalization (`equalize='thin'` or `'aggregate'`):** Brings every block to a common sample size (and, for `'aggregate'`, a common number of observations per month), removing the sample-size artifact.
 
 ### Python Comparison
 ```python
-# Part A: Naive Raw Analysis (Suffers from Drift Artifact)
+# Part A: Raw order statistics (annual minimum ... annual maximum), no equalization
 res_raw = quantile_trend_test(
     x=stationary_lognormal_values,
     t=dates,
     block_frequency='YE',
-    quantiles=[0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95],
+    quantiles='auto',
+    quantile_method='linear',
     slope_scaling='year',
 )
 
-# Part B: Equalized Analysis (Thinning Eliminates Drift Artifact)
+# Part B: the same analysis with every year thinned to 12 samples
 res_eq = quantile_trend_test(
     x=stationary_lognormal_values,
     t=dates,
     block_frequency='YE',
-    quantiles=[0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95],
+    quantiles='auto',
+    quantile_method='linear',
     equalize='thin',
-    random_state=42,
     slope_scaling='year',
 )
 ```
 
 ### Visual Diagnostics
-#### Case 4A: Raw Un-equalized Series (False Artifactual Trends)
+#### Case 4A: Raw Un-equalized Series
 ![Case 4A: Sampling Frequency Drift Trap](case4a_sampling_drift_raw_qk.png)
 
-#### Case 4B: Equalized Series via Thinning (Drift Artifact Removed)
+#### Case 4B: Equalized Series via Thinning
 ![Case 4B: Equalized Blocks](case4b_sampling_drift_equalized_qk.png)
 
-### Numerical Comparison
-#### Raw Results (Case 4A - Severe False Positive in Tails)
+### Numerical Comparison (one realization)
+#### Raw Results (Case 4A)
 {df_to_markdown(df4a_all)}
 
-#### Equalized Results (Case 4B - Drift Artifact Removed)
+#### Equalized Results (Case 4B)
 {df_to_markdown(df4b_all)}
+
+In this realization {n_sig_4a} of {n_ranks_4} ranks are significant at $\\alpha = 0.05$ in the raw analysis and {n_sig_4b} after thinning. The data contain no trend at all, so every one of them is a false positive. A single realization cannot show whether a method is calibrated: any individual rank is significant by chance in 5% of stationary series, with or without equalization, and thinning does not change what the retained samples happen to look like.
+
+### False-Positive Rates over {n_reps4} Stationary Realizations
+The meaningful comparison is the rate at which each analysis declares a trend ($\\alpha = 0.05$) at the lowest and highest rank when the same sampling design is repeated on {n_reps4} independent stationary series:
+
+{df_to_markdown(mc4)}
+
+Raw order statistics are declared trending roughly half the time. The default Hazen ranks are much closer to the nominal 5%, and both equalization modes bring the order-statistic analysis back to it (see the [validation report](../../validation/43_Quantile_Kendall/README.md) for a larger study).
 
 #### Diagnostic Output
 - **Raw Diagnostic:** `flag = {res4a.sampling_diagnostic['flag']}`, ratio $N_{{\\max}}/N_{{\\min}} = {res4a.sampling_diagnostic['ratio_max_min']:.2f}$, $p = {res4a.sampling_diagnostic['p_n_vs_time']:.4e}$
@@ -544,7 +576,7 @@ res_eq = quantile_trend_test(
 | **Flow Duration Curve** | `show_fdc=True` | Overlays median flow/concentration across blocks on a secondary right y-axis. |
 | **Log Slopes (%/year)** | `transform='log'` | Exponentiates Sen's slope as percentage change per time unit ($100 \\times (e^b - 1)$). |
 | **Coverage Filter** | `min_coverage=0.70` | Discards incomplete blocks where sampling span is less than 70% of block duration. |
-| **Sampling Drift Guard** | `equalize='thin'` | Resamples blocks to equal size to eliminate tail order-statistic expansion artifacts. |
+| **Sampling Drift Guard** | `equalize='thin'` / `'aggregate'` | Brings blocks to a common sample size to remove tail order-statistic expansion artifacts. |
 | **Regime Aggregator** | `summarize_quantile_regimes` | Summarizes low, mid, and high quantile trends into concise decision tables. |
 """
 
@@ -558,8 +590,8 @@ def main():
     res1, reg1 = run_case_1(OUT_DIR)
     res2, reg2 = run_case_2(OUT_DIR)
     res3, reg3 = run_case_3(OUT_DIR)
-    res4a, res4b = run_case_4(OUT_DIR)
-    generate_readme(res1, reg1, res2, reg2, res3, reg3, res4a, res4b, OUT_DIR)
+    res4a, res4b, mc4, n_reps4 = run_case_4(OUT_DIR)
+    generate_readme(res1, reg1, res2, reg2, res3, reg3, res4a, res4b, mc4, n_reps4, OUT_DIR)
     print("\nAll Example 36 cases executed successfully.")
 
 

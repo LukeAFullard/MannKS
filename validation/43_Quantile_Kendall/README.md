@@ -53,7 +53,7 @@ The largest difference in any quantity in any scenario is `2.2e-14`: with the se
 
 ### What is *not* the same as EGRET
 * **Default time axis.** Without `block_time='egret'` MannKS places each block at its calendar midpoint and scales by a 365.25-day year. $S$, $\mathrm{Var}(S)$, $\tau$ and $p$ are unchanged (they only use the order of the blocks); the slope differs by at most `0.0462%` of its value in the `climate_year` scenario (magenta line in the right-hand panel below).
-* **Default standardization.** `standardization='interpolate'` (Hazen quantiles on a uniform grid) is a different estimator: mean slope difference `1.856%` (`0.0310` %/yr) in the `climate_year` scenario.
+* **Default standardization.** `standardization='interpolate'` (interpolated Hazen quantiles: leap years are read at 365 Hazen positions instead of being rank-reduced) is a different estimator: mean slope difference `0.666%` (`0.0110` %/yr) in the `climate_year` scenario.
 * **Serial-correlation-adjusted p-value.** EGRET's `trendSortQ` also returns `pValueAdj` (`zyp::zyp.zhang` trend-free pre-whitening) and `plotQuantileKendall` colours its points by `pValueAdj` (red $< 0.05$, black $\le 0.1$, grey otherwise). MannKS does not implement Zhang pre-whitening: `p` reproduces EGRET's unadjusted `pValue`, and `plot_quantile_trend` colours by `p` with bands at $\alpha$ and $2\alpha$. `pValueAdj` is stored in the fixtures for reference only. Use `autocorr_method` for MannKS's own serial-correlation corrections.
 * **Records with gaps.** EGRET's `makeSortQ` stops with an error when a year inside the record has missing days; MannKS drops that block (`require_complete=True`) and continues.
 
@@ -86,19 +86,21 @@ The largest difference in any quantity in any scenario is `2.2e-14`: with the se
 ## 3. Sampling Frequency Drift
 
 ### The Drift Phenomenon
-When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes widen over time even when the data-generating process is stationary: high order statistics trend upward and low order statistics trend downward.
+When monitoring frequency shifts from monthly ($N=12$) to weekly ($N=52$) mid-record, sample extremes widen over time even when the data-generating process is stationary: the highest order statistics trend upward and the lowest trend downward.
 
 ### Monte Carlo Results (250 replications, stationary lognormal, 10 years monthly then 10 years weekly)
-Rates for the equalized analyses are two-sided rejection rates at $\alpha = 0.05$; the raw rows count only rejections in the artifact's direction.
+The order-statistic analyses use `quantile_method='linear'`, for which rank 1 and rank $M$ are each year's minimum and maximum: the worst case for this artifact. With the package default (`'hazen'`) the extreme ranks of a larger block are read at interior positions ($0.5/M$ and $1 - 0.5/M$), which removes most of the artifact even without equalization. Rates are two-sided rejection rates at $\alpha = 0.05$, except the raw order-statistic rows, which count only rejections in the artifact's direction.
 
 | Analysis | Rank | False Rejection Rate | Monte Carlo check vs. $\alpha = 0.05$ |
 | :--- | :--- | :--- | :--- |
-| **Raw (`equalize='none'`)** | lowest ($p = 0.08$), downward | **50.4%** | **Outside** 95% MC band [0.023, 0.077] |
-| **Raw (`equalize='none'`)** | highest ($p = 0.92$), upward | **44.4%** | **Outside** 95% MC band [0.023, 0.077] |
-| **`equalize='thin'`** | lowest | **5.6%** | Within 95% MC band [0.023, 0.077] |
-| **`equalize='thin'`** | highest | **5.2%** | Within 95% MC band [0.023, 0.077] |
-| **`equalize='aggregate'`** | lowest | **3.6%** | Within 95% MC band [0.023, 0.077] |
-| **`equalize='aggregate'`** | highest | **2.8%** | Within 95% MC band [0.023, 0.077] |
+| **Order statistics, raw (`equalize='none'`)** | lowest ($p = 0.08$), downward | **50.4%** | **Outside** 95% MC band [0.023, 0.077] |
+| **Order statistics, raw (`equalize='none'`)** | highest ($p = 0.92$), upward | **44.4%** | **Outside** 95% MC band [0.023, 0.077] |
+| **Default Hazen ranks, raw** | lowest | **8.8%** | **Outside** 95% MC band [0.023, 0.077] |
+| **Default Hazen ranks, raw** | highest | **7.2%** | Within 95% MC band [0.023, 0.077] |
+| **Order statistics, `equalize='thin'`** | lowest | **5.6%** | Within 95% MC band [0.023, 0.077] |
+| **Order statistics, `equalize='thin'`** | highest | **5.2%** | Within 95% MC band [0.023, 0.077] |
+| **Order statistics, `equalize='aggregate'`** | lowest | **3.6%** | Within 95% MC band [0.023, 0.077] |
+| **Order statistics, `equalize='aggregate'`** | highest | **2.8%** | Within 95% MC band [0.023, 0.077] |
 
 The sampling diagnostic (`sampling_diagnostic['flag']`) was raised in **100.0%** of the raw analyses.
 
