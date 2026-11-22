@@ -37,7 +37,12 @@ import MannKS as mk
 from MannKS import segmented_trend_test
 from common import OUT, rel_diff
 
-N_NULL_REPS = 30
+N_NULL_REPS = 50
+
+
+def _fmt_pct_se(p, n):
+    se = np.sqrt(max(p * (1.0 - p), 0.0) / max(n, 1))
+    return f"{100.0 * p:.1f}% ± {100.0 * se:.1f}%"
 
 
 def _run_r_segmented(cmd_args):
@@ -450,11 +455,42 @@ def run_lwp_per_segment_parity():
         lwp_fx = json.load(fh)
 
     fields = ["s", "var_s", "z", "p", "Tau", "C", "Cd", "slope", "lower_ci", "upper_ci"]
-    max_rel_errs = {f: 0.0 for f in fields}
+    r_wrapper_map = {
+        "s": "S", "var_s": "VarS", "z": "Z", "p": "p", "Tau": "tau",
+        "C": "C", "Cd": "Cd", "slope": "slope", "lower_ci": "lower_ci", "upper_ci": "upper_ci",
+    }
+    max_rel_errs_r_wrapper = {f: 0.0 for f in fields}
+    max_rel_errs_trend_test = {f: 0.0 for f in fields}
+    n_wrapper_checked = 0
     n_kernel_checked = 0
+
+    single_obs_wrapper_cases = {
+        "ties_annual", "lt_single_DL", "lt_multi_DL", "gt_multi_AL",
+        "mixed_cens", "unequal_annual", "neg_and_zero",
+    }
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        # 2A. Direct 10-metric comparison against R LWP-TRENDS v2502 wrapper outputs
+        for wc in lwp_fx["wrapper"]:
+            if wc["seasonal"] or wc["case"] not in single_obs_wrapper_cases:
+                continue
+            vals = [np.nan if v == "NA" else v for v in wc["values"]]
+            x_df = mk.prepare_censored_data(vals)
+            t = pd.to_datetime(wc["dates"]).to_numpy()
+            common = dict(
+                alpha=0.10, mk_test_method="lwp", ci_method="lwp", sens_slope_method="lwp",
+                tau_method="a", tie_break_method="lwp", slope_scaling="year",
+            )
+            st = segmented_trend_test(x_df, t, n_breakpoints=0, **common)
+            seg = st.segments.iloc[0]
+            for f, rkey in r_wrapper_map.items():
+                max_rel_errs_r_wrapper[f] = max(
+                    max_rel_errs_r_wrapper[f], float(rel_diff(seg[f], wc["R"][rkey]))
+                )
+            n_wrapper_checked += 1
+
+        # 2B. 24 kernel fixtures (S, VarS, sen vs R kernel; all 10 metrics vs MannKS trend_test)
         for kc in lwp_fx["kernel"]:
             vals = kc["values"]
             cen = kc["cen_type"]
@@ -474,12 +510,12 @@ def run_lwp_per_segment_parity():
             assert rel_diff(seg["slope"], kc["R"]["sen"]) < 1e-9
 
             for f in fields:
-                max_rel_errs[f] = max(max_rel_errs[f], float(rel_diff(seg[f], getattr(tt, f))))
+                max_rel_errs_trend_test[f] = max(
+                    max_rel_errs_trend_test[f], float(rel_diff(seg[f], getattr(tt, f)))
+                )
             n_kernel_checked += 1
 
-        # Multi-segment (k=1): build an unambiguous 2-segment censored series
-        # combining LWP kernel0 (downward) and kernel1 (upward) so both segments
-        # have censoring and >= 15 points for exact per-segment LWP parity.
+        # 2C. Multi-segment (k=1) censored split exact parity with MannKS trend_test (LWP mode)
         k0, k1 = lwp_fx["kernel"][0], lwp_fx["kernel"][1]
         n0, n1 = len(k0["values"]), len(k1["values"])
         t0 = np.arange(n0, dtype=float)
@@ -500,7 +536,7 @@ def run_lwp_per_segment_parity():
         assert st_cat.n_breakpoints == 1, f"Expected 1 breakpoint, got {st_cat.n_breakpoints}"
         bp_est = st_cat.breakpoints[0]
         seg_match_ok = True
-        for seg_idx, mask in enumerate((t_cat <= bp_est, t_cat > bp_est)):
+        for seg_idx, mask in enumerate((t_cat < bp_est, t_cat >= bp_est)):
             tt_sub = mk.trend_test(x_cat.iloc[mask].reset_index(drop=True), t_cat[mask], **common_num)
             seg_row = st_cat.segments.iloc[seg_idx]
             for f in fields:
@@ -508,8 +544,10 @@ def run_lwp_per_segment_parity():
                     seg_match_ok = False
 
     out_obj = {
+        "n_wrapper_cases": n_wrapper_checked,
         "n_kernel_cases": n_kernel_checked,
-        "max_rel_errs": max_rel_errs,
+        "max_rel_errs_r_wrapper": max_rel_errs_r_wrapper,
+        "max_rel_errs_trend_test": max_rel_errs_trend_test,
         "multi_segment_exact_parity": seg_match_ok,
     }
     _save_cache("lwp", out_obj)
@@ -561,9 +599,9 @@ def run_post_fix_calibration():
         cal["edge_fpr"] = edge_fp
         print("[calibration] 3B edge FPR done.", flush=True)
 
-        # 3C. Robustness: Gaussian vs Student-t3 vs 5% Outliers (k=1, 25 reps each)
+        # 3C. Robustness: Gaussian vs Student-t3 vs 5% Outliers (k=1, 40 reps each)
         rob_summary = {}
-        n_rob_reps = 25
+        n_rob_reps = 40
         for noise_label, noise_kind in (("Gaussian", "normal"), ("Student-t3", "t3"), ("5% Outliers", "outliers")):
             k_ok = 0
             bp_errs, sen_slope_errs, ols_slope_errs = [], [], []
@@ -593,10 +631,15 @@ def run_post_fix_calibration():
             print(f"[calibration] 3C {noise_label} done.", flush=True)
         cal["robustness"] = rob_summary
 
-        # 3D. Confidence interval coverage (40 reps, true k=1, alpha=0.05 -> 95% nominal)
-        ols_bp_cov = bag_bp_cov = postsel_slope_cov = oracle_slope_cov = 0
-        n_ci_reps = 40
+        # 3D. Confidence interval coverage (60 reps, true k=1, alpha=0.05 -> 95% nominal)
+        #     Explicitly separates:
+        #       - fixed k=1 (estimated bp)
+        #       - true post-selection (auto-selected k + estimated bp, evaluated when k=1 selected)
+        #       - oracle (known true bp)
+        ols_bp_cov = bag_bp_cov = fixedk_slope_cov = postsel_slope_cov = oracle_slope_cov = 0
+        n_ci_reps = 60
         n_slope_checks = 0
+        n_postsel_checks = 0
         for rep in range(n_ci_reps):
             t_a = np.arange(80, dtype=float)
             bp_true = 40.0
@@ -620,8 +663,17 @@ def run_post_fix_calibration():
             for idx_s, s_true in enumerate((s1, s2)):
                 row_s = res_ols.segments.iloc[idx_s]
                 if row_s["lower_ci"] <= s_true <= row_s["upper_ci"]:
-                    postsel_slope_cov += 1
+                    fixedk_slope_cov += 1
                 n_slope_checks += 1
+
+            # True post-selection (auto-selected k via max_breakpoints=2)
+            res_auto = segmented_trend_test(y_a, t_a, max_breakpoints=2, alpha=0.05, random_state=200 + rep)
+            if res_auto.n_breakpoints == 1:
+                for idx_s, s_true in enumerate((s1, s2)):
+                    row_s = res_auto.segments.iloc[idx_s]
+                    if row_s["lower_ci"] <= s_true <= row_s["upper_ci"]:
+                        postsel_slope_cov += 1
+                    n_postsel_checks += 1
 
             for mask, s_true in ((t_a <= bp_true, s1), (t_a > bp_true, s2)):
                 tt_o = mk.trend_test(y_a[mask], t_a[mask], alpha=0.05)
@@ -630,10 +682,13 @@ def run_post_fix_calibration():
 
         cal["ci_coverage"] = {
             "n_reps": n_ci_reps,
+            "n_slope_checks": n_slope_checks,
+            "n_postsel_checks": n_postsel_checks,
             "nominal": 0.95,
             "ols_bp_ci_coverage": ols_bp_cov / n_ci_reps,
             "block_bagging_bp_ci_coverage": bag_bp_cov / n_ci_reps,
-            "postsel_slope_ci_coverage": postsel_slope_cov / n_slope_checks,
+            "fixedk_slope_ci_coverage": fixedk_slope_cov / n_slope_checks,
+            "postsel_slope_ci_coverage": (postsel_slope_cov / n_postsel_checks) if n_postsel_checks > 0 else None,
             "oracle_slope_ci_coverage": oracle_slope_cov / n_slope_checks,
         }
         print("[calibration] 3D CI coverage done.", flush=True)
@@ -668,6 +723,9 @@ def format_report(pub_syn, null_gauss, null_ar1, lwp_res, cal_res):
             f"| `{row['dataset']}` | {row['mode']} | {row['r_k']} | {row['mk_k']} | {ess_k} | "
             f"{r_bp_s} | {mk_bp_s} | {diff_s} |"
         )
+    lines.append(
+        "\n> **Note on `globTempAnom` and `plant_RKV`**: Under unadjusted BIC (`autocorr_penalty='none'`, matching R `selgmented(type='bic')`), MannKS matches CRAN `segmented` `k=3` on `globTempAnom` (`RSS = 1.491`, identical to R) and achieves slightly lower RSS than R on `plant_RKV` (`0.01953` vs `0.01993`). Under MannKS's default `autocorr_penalty='auto'`, `globTempAnom`'s real positive lag-1 autocorrelation (`rho_d1 ≈ 0.615`) activates the deterministic ESS penalty and conservatively selects `k=2` consistently across all random seeds.\n"
+    )
 
     lines.append("\n## 2. Planted-Truth Synthetic Benchmarks (30 Gaussian Series, n=100)\n")
     sf = pd.DataFrame(pub_syn["syn_fixed"])
@@ -699,29 +757,37 @@ def format_report(pub_syn, null_gauss, null_ar1, lwp_res, cal_res):
         f"**{ss['agree_bic'].mean():.1%}** |"
     )
 
-    lines.append(f"\n## 3. Null False Positive Rate (FPR): Gaussian vs. AR(1) φ=0.6 ({N_NULL_REPS} Series Each, Kmax=2)\n")
+    n_null = len(null_gauss)
+    lines.append(f"\n## 3. Null False Positive Rate (FPR ± MC SE): Gaussian vs. AR(1) φ=0.6 ({n_null} Series Each, Kmax=2)\n")
     nf = pd.DataFrame(null_gauss + null_ar1)
-    lines.append("| Noise Process | R `selgmented(bic)` | R `selgmented(score)` | R `davies.test` (p<0.05) | MannKS `bic` | MannKS `mbic` | MannKS `bic + ESS` | MannKS `mbic + ESS` |")
+    lines.append("| Noise Process | R `selgmented(bic)` | R `selgmented(score)` | R `davies.test` (p<0.05) | MannKS `bic` | MannKS `mbic` | MannKS `bic + ESS` (default) | MannKS `mbic + ESS` |")
     lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
     for key, label in (("null_gauss", "Gaussian i.i.d."), ("null_ar1", "AR(1) φ=0.6")):
         sub = nf[nf["noise"] == key]
+        n_s = len(sub)
         lines.append(
-            f"| {label} | {sub['r_bic_fp'].mean():.1%} | {sub['r_score_fp'].mean():.1%} | "
-            f"{sub['r_davies_fp'].mean():.1%} | {sub['mk_bic_fp'].mean():.1%} | "
-            f"{sub['mk_mbic_fp'].mean():.1%} | {sub['mk_ess_bic_fp'].mean():.1%} | "
-            f"{sub['mk_ess_mbic_fp'].mean():.1%} |"
+            f"| {label} | {_fmt_pct_se(sub['r_bic_fp'].mean(), n_s)} | {_fmt_pct_se(sub['r_score_fp'].mean(), n_s)} | "
+            f"{_fmt_pct_se(sub['r_davies_fp'].mean(), n_s)} | {_fmt_pct_se(sub['mk_bic_fp'].mean(), n_s)} | "
+            f"{_fmt_pct_se(sub['mk_mbic_fp'].mean(), n_s)} | {_fmt_pct_se(sub['mk_ess_bic_fp'].mean(), n_s)} | "
+            f"{_fmt_pct_se(sub['mk_ess_mbic_fp'].mean(), n_s)} |"
         )
     lines.append(
-        "\n> **Key takeaway**: Both R `selgmented(bic)` and standard Python BIC suffer severe false-breakpoint inflation under AR(1) autocorrelation. MannKS's effective-sample-size penalty (`autocorr_penalty='auto'`) and modified BIC (`criterion='mbic'`) substantially suppress spurious breakpoints under serial correlation.\n"
+        "\n> **Key takeaway**: Both R `selgmented(bic)` and unadjusted Python BIC suffer severe false-breakpoint inflation under AR(1) autocorrelation. MannKS's deterministic ESS heuristic (`autocorr_penalty='auto'`, default) and modified BIC (`criterion='mbic'`) substantially suppress spurious breakpoints under serial correlation, though some residual FPR can remain under very strong AR(1) on short series.\n"
     )
 
-    lines.append("## 4. Per-Segment Exact Parity vs. R `LWP-TRENDS v2502`\n")
-    lines.append(f"- Verified `{lwp_res['n_kernel_cases']}` LWP-TRENDS kernel fixtures (`n_breakpoints=0`, LWP mode) and multi-segment (`k=1`) concatenation.\n")
-    lines.append(f"- Multi-segment exact parity with `trend_test(..., mk_test_method='lwp', ci_method='lwp', sens_slope_method='lwp')`: **{'PASS' if lwp_res['multi_segment_exact_parity'] else 'FAIL'}**\n")
-    lines.append("| Metric | Max Relative Error vs. LWP-TRENDS |")
-    lines.append("| :--- | :---: |")
-    for k_m, v_m in lwp_res["max_rel_errs"].items():
-        lines.append(f"| `{k_m}` | `{v_m:.3e}` |")
+    lines.append("## 4. Per-Segment Exact Parity vs. R `LWP-TRENDS v2502` & `trend_test`\n")
+    lines.append(
+        f"- **Direct R `LWP-TRENDS v2502` wrapper parity**: Verified all 10 metrics directly against `{lwp_res['n_wrapper_cases']}` non-seasonal R `LWP-TRENDS v2502` wrapper fixtures (`n_breakpoints=0`, LWP mode).\n"
+    )
+    lines.append(
+        f"- **Kernel & multi-segment parity**: Verified `S`, `VarS`, and `sen` directly against `{lwp_res['n_kernel_cases']}` R `GetKendal`/`GetInterObservationSlopes` kernel fixtures (`< 1e-9` rel error), and verified all 10 metrics against MannKS `trend_test` (LWP mode) across all `{lwp_res['n_kernel_cases']}` kernel fixtures and a multi-segment (`k=1`) censored split: **{'PASS' if lwp_res['multi_segment_exact_parity'] else 'FAIL'}**.\n"
+    )
+    lines.append("| Metric | Max Rel. Error vs. R `LWP-TRENDS v2502` (7 Wrapper Cases) | Max Rel. Error vs. MannKS `trend_test` (24 Kernel Cases) |")
+    lines.append("| :--- | :---: | :---: |")
+    for k_m in lwp_res["max_rel_errs_r_wrapper"]:
+        v_r = lwp_res["max_rel_errs_r_wrapper"][k_m]
+        v_tt = lwp_res["max_rel_errs_trend_test"][k_m]
+        lines.append(f"| `{k_m}` | `{v_r:.3e}` | `{v_tt:.3e}` |")
 
     lines.append("\n## 5. Post-Fix Known-Truth Monte Carlo Calibration\n")
     si = cal_res["scale_invariance"]
@@ -735,25 +801,28 @@ def format_report(pub_syn, null_gauss, null_ar1, lwp_res, cal_res):
         f"noiseless linear = `{ef['linear_noiseless']}/10`, all-censored = `{ef['all_censored']}/10`.\n"
     )
 
-    lines.append("\n### 5a. Robustness Across Error Distributions (True `k=1`, 25 Reps Each)\n")
-    lines.append("| Error Distribution | `k=1` Accuracy | Breakpoint RMSE | MannKS Sen Slope MAE | OLS Slope MAE |")
+    n_rob = next(iter(cal_res["robustness"].values()))["n_reps"]
+    lines.append(f"\n### 5a. Robustness Across Error Distributions (True `k=1`, {n_rob} Reps Each)\n")
+    lines.append("| Error Distribution | `k=1` Accuracy (± MC SE) | Breakpoint RMSE | MannKS Sen Slope MAE | OLS Slope MAE |")
     lines.append("| :--- | :---: | :---: | :---: | :---: |")
     for label, d_r in cal_res["robustness"].items():
         lines.append(
-            f"| {label} | {d_r['k_acc']:.1%} | {d_r['bp_rmse']:.3f} | "
+            f"| {label} | {_fmt_pct_se(d_r['k_acc'], d_r['n_reps'])} | {d_r['bp_rmse']:.3f} | "
             f"{d_r['sen_slope_mae']:.4f} | {d_r['ols_slope_mae']:.4f} |"
         )
 
     ci = cal_res["ci_coverage"]
     lines.append(f"\n### 5b. 95% Confidence Interval Coverage Calibration ({ci['n_reps']} Reps, True `k=1`)\n")
-    lines.append("| Interval Type | Empirical Coverage | Nominal |")
+    lines.append("| Interval Type | Empirical Coverage (± MC SE) | Nominal |")
     lines.append("| :--- | :---: | :---: |")
-    lines.append(f"| Breakpoint CI — OLS Delta-Method | {ci['ols_bp_ci_coverage']:.1%} | {ci['nominal']:.0%} |")
-    lines.append(f"| Breakpoint CI — Block-Bagging Percentile (`n_bootstrap=40`) | {ci['block_bagging_bp_ci_coverage']:.1%} | {ci['nominal']:.0%} |")
-    lines.append(f"| Per-Segment Sen Slope CI — Post-Selection (estimated bp) | {ci['postsel_slope_ci_coverage']:.1%} | {ci['nominal']:.0%} |")
-    lines.append(f"| Per-Segment Sen Slope CI — Oracle (known true bp) | {ci['oracle_slope_ci_coverage']:.1%} | {ci['nominal']:.0%} |")
+    lines.append(f"| Breakpoint CI — OLS Delta-Method (fixed `k=1`) | {_fmt_pct_se(ci['ols_bp_ci_coverage'], ci['n_reps'])} | {ci['nominal']:.0%} |")
+    lines.append(f"| Breakpoint CI — Block-Bagging Percentile (fixed `k=1`, `n_bootstrap=40`) | {_fmt_pct_se(ci['block_bagging_bp_ci_coverage'], ci['n_reps'])} | {ci['nominal']:.0%} |")
+    lines.append(f"| Per-Segment Sen Slope CI — Conditional on fixed `k=1` (estimated bp) | {_fmt_pct_se(ci['fixedk_slope_ci_coverage'], ci['n_slope_checks'])} | {ci['nominal']:.0%} |")
+    if ci.get("postsel_slope_ci_coverage") is not None:
+        lines.append(f"| Per-Segment Sen Slope CI — Post-Selection (auto-selected `k=1` + estimated bp) | {_fmt_pct_se(ci['postsel_slope_ci_coverage'], ci['n_postsel_checks'])} | {ci['nominal']:.0%} |")
+    lines.append(f"| Per-Segment Sen Slope CI — Oracle (known true bp) | {_fmt_pct_se(ci['oracle_slope_ci_coverage'], ci['n_slope_checks'])} | {ci['nominal']:.0%} |")
     lines.append(
-        "\n> **Note**: Per-segment Sen slope CIs are conditional on the estimated breakpoints; `segmented_trend_test` emits an explicit post-selection inference warning whenever `n_breakpoints > 0`.\n"
+        "\n> **Note**: Per-segment Sen slope CIs are conditional on the estimated breakpoints; `segmented_trend_test` emits an explicit post-selection inference warning whenever `n_breakpoints > 0`. Coverage under lower SNR or serial correlation will be below nominal.\n"
     )
     return "\n".join(lines) + "\n"
 

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 import piecewise_regression
+from scipy.optimize import minimize
 from scipy.stats import gaussian_kde, t as t_dist
 import warnings
 
@@ -59,6 +60,9 @@ def _isolated_legacy_numpy_seed(seed):
     """
     Temporarily seed legacy global np.random without polluting caller RNG state.
     Needed because piecewise_regression.Fit relies on legacy np.random calls.
+
+    Note: Because this saves and restores process-global ``np.random`` state,
+    concurrent calls across threads in the same Python process are not thread-safe.
     """
     state = np.random.get_state()
     try:
@@ -74,12 +78,19 @@ def _isolated_legacy_numpy_seed(seed):
 
 def _compute_information_criteria(rss_scaled, x_std, n_samples, n_breakpoints, n_eff=None):
     """
-    Compute original-scale BIC, mBIC (Zhang & Siegmund 2007), and AIC from
-    standardized RSS with a symmetric scale-free relative floor (_REL_RSS_FLOOR).
+    Compute original-scale BIC, modified BIC (``mbic``), and AIC from
+    standardized RSS with a symmetric scale-free relative floor (``_REL_RSS_FLOOR``).
 
-    When n_eff is provided (ESS-adjusted scoring under autocorrelation), the
-    log-likelihood term is weighted by n_eff while parameter penalties use
-    n_samples.
+    ``mbic`` uses a stronger complexity penalty of ``(2 + 3 * k) * log(n)``
+    (3 * log(n) per breakpoint, inspired by Zhang & Siegmund 2007, omitting the
+    segment-length term ``sum(log(n_i / n))``).
+
+    When ``n_eff`` is provided (ESS-adjusted scoring under autocorrelation),
+    the log-likelihood term is weighted by ``n_eff`` while parameter penalties
+    use ``log(n)``. This is a practical effective-sample-size heuristic rather
+    than a formal autoregressive likelihood criterion; under strong positive
+    AR(1) autocorrelation on short series some residual false-breakpoint rate
+    can remain.
     """
     k_int = int(n_breakpoints)
     k_params = 2 + 2 * k_int
@@ -91,6 +102,321 @@ def _compute_information_criteria(rss_scaled, x_std, n_samples, n_breakpoints, n
     mbic = log_term + mbic_params * np.log(n_samples)
     aic = log_term + 2.0 * k_params
     return float(bic), float(mbic), float(aic)
+
+
+def _check_min_segment_size(t_sorted, bps, min_segment_size):
+    """
+    Verify that every segment defined by ``[b_i, b_{i+1})`` (last segment closed)
+    has at least ``min_segment_size`` observations.
+
+    Returns ``(is_valid, min_count)``.
+    """
+    if min_segment_size is None or len(bps) == 0:
+        return True, len(t_sorted)
+    bps_sorted = np.sort(np.asarray(bps, dtype=float))
+    bounds = np.concatenate(([float(t_sorted[0])], bps_sorted, [float(t_sorted[-1])]))
+    n_segs = len(bounds) - 1
+    min_cnt = len(t_sorted)
+    for j in range(n_segs):
+        if j == n_segs - 1:
+            cnt = int(np.sum((t_sorted >= bounds[j]) & (t_sorted <= bounds[j + 1])))
+        else:
+            cnt = int(np.sum((t_sorted >= bounds[j]) & (t_sorted < bounds[j + 1])))
+        if cnt < min_cnt:
+            min_cnt = cnt
+    return (min_cnt >= int(min_segment_size)), min_cnt
+
+
+def _compute_fit_distance_kwargs(t_sorted, k_int, min_segment_size):
+    """
+    Derive ``min_distance_to_edge`` and ``min_distance_between_breakpoints``
+    for ``piecewise_regression.Fit`` from ``min_segment_size``.
+
+    Returns ``(fit_kwargs, tightened)`` where ``tightened`` is True only when
+    at least one constraint strictly exceeds piecewise_regression's defaults
+    (0.02 for edge, 0.01 between breakpoints).
+    """
+    fit_kwargs = {}
+    tightened = False
+    n_samples = len(t_sorted)
+    if min_segment_size is None or int(min_segment_size) < 2:
+        return fit_kwargs, tightened
+    t_span_val = float(t_sorted[-1] - t_sorted[0])
+    ms = int(min_segment_size)
+    if t_span_val <= 0.0 or n_samples < (k_int + 1) * ms:
+        return fit_kwargs, tightened
+
+    left_frac = float(t_sorted[ms - 1] - t_sorted[0]) / t_span_val
+    right_frac = float(t_sorted[-1] - t_sorted[-ms]) / t_span_val
+    edge_frac = min(left_frac, right_frac)
+    max_edge = 0.4 / max(1, k_int)
+    if 0.0 < edge_frac < max_edge:
+        val = max(0.02, edge_frac)
+        fit_kwargs['min_distance_to_edge'] = val
+        if val > 0.02:
+            tightened = True
+    if k_int >= 2 and ms >= 2:
+        # Exact span of ms consecutive observations: t[i + ms - 1] - t[i]
+        between_frac = float(np.min(t_sorted[ms - 1:] - t_sorted[:-(ms - 1)])) / t_span_val
+        if 0.0 < between_frac < max_edge:
+            val = max(0.01, between_frac)
+            fit_kwargs['min_distance_between_breakpoints'] = val
+            if val > 0.01:
+                tightened = True
+    return fit_kwargs, tightened
+
+
+def _estimate_ar1_rho_deterministic(t_centered, x_scaled, max_k=3):
+    """
+    Estimate lag-1 AR(1) autocorrelation deterministically (zero RNG, independent
+    of ``random_state`` and Phase-1 optimizer convergence) and invariantly to
+    piecewise-linear hinges.
+
+    1. Fits a deterministic greedy piecewise-linear basis on an interior quantile
+       grid (up to ``min(max_k, 3, n // 10)`` knots) followed by one coordinate-
+       descent pass to remove linear/hinged trend structure without overfitting
+       AR(1) wander.
+    2. Computes lag-1 autocorrelation of MAD-winsorized first differences of
+       residuals ``de = diff(resid)`` and inverts the exact AR(1) identity
+       ``r_1(Delta e) = (rho - 1) / 2`` -> ``rho_hat = 1 + 2 * r_1(Delta e)``.
+    """
+    n = len(x_scaled)
+    if n < 10:
+        return 0.0
+    n_grid = min(25, max(5, n - 6))
+    grid = np.unique(np.quantile(t_centered, np.linspace(0.1, 0.9, n_grid)))
+    k_lim = min(int(max_k), 3, max(0, n // 10))
+    selected = []
+
+    X = np.column_stack([np.ones(n), t_centered])
+    coef, _, _, _ = np.linalg.lstsq(X, x_scaled, rcond=None)
+    resid = x_scaled - X @ coef
+    best_rss = float(np.dot(resid, resid))
+
+    for _ in range(k_lim):
+        best_kn = None
+        best_r = resid
+        for kn in grid:
+            if any(abs(kn - s) < 1e-9 for s in selected):
+                continue
+            X_try = np.column_stack([X, np.maximum(0.0, t_centered - kn)])
+            c, _, _, _ = np.linalg.lstsq(X_try, x_scaled, rcond=None)
+            r = x_scaled - X_try @ c
+            rss = float(np.dot(r, r))
+            if rss < best_rss:
+                best_rss = rss
+                best_kn = kn
+                best_r = r
+        if best_kn is None:
+            break
+        selected.append(best_kn)
+        X = np.column_stack([X, np.maximum(0.0, t_centered - best_kn)])
+        resid = best_r
+
+    # One deterministic coordinate-descent refinement pass (handles symmetric W-shapes)
+    if len(selected) >= 2:
+        for j in range(len(selected)):
+            other = [selected[m] for m in range(len(selected)) if m != j]
+            X_base = np.column_stack(
+                [np.ones(n), t_centered] + [np.maximum(0.0, t_centered - kn) for kn in other]
+            )
+            best_kn = selected[j]
+            for kn in grid:
+                if any(abs(kn - s) < 1e-9 for s in other):
+                    continue
+                X_try = np.column_stack([X_base, np.maximum(0.0, t_centered - kn)])
+                c, _, _, _ = np.linalg.lstsq(X_try, x_scaled, rcond=None)
+                r = x_scaled - X_try @ c
+                rss = float(np.dot(r, r))
+                if rss < best_rss:
+                    best_rss = rss
+                    best_kn = kn
+                    resid = r
+            selected[j] = best_kn
+
+    if best_rss <= n * _REL_RSS_FLOOR:
+        return 0.0
+
+    de = np.diff(resid)
+    if len(de) < 3:
+        return 0.0
+    med = float(np.median(de))
+    mad = float(np.median(np.abs(de - med)))
+    if mad > 0.0:
+        sc = 1.4826 * mad
+        de = np.clip(de, med - 3.5 * sc, med + 3.5 * sc)
+    dec = de - float(np.mean(de))
+    denom = float(np.dot(dec, dec))
+    if denom <= 0.0:
+        return 0.0
+    r1_de = float(np.dot(dec[:-1], dec[1:]) / denom)
+    return float(np.clip(1.0 + 2.0 * r1_de, -0.95, 0.95))
+
+
+def _compute_muggeo_se(t_centered, x_scaled, bps_c):
+    """
+    Compute Muggeo (2003) linearized Delta-method standard errors for
+    breakpoints ``bps_c`` on the standardized scale.
+    """
+    n = len(t_centered)
+    k = len(bps_c)
+    df = n - (2 + 2 * k)
+    if df <= 0 or k == 0:
+        return [np.nan] * k
+    X = np.column_stack(
+        [np.ones(n), t_centered] + [np.maximum(0.0, t_centered - b) for b in bps_c]
+    )
+    coef, _, _, _ = np.linalg.lstsq(X, x_scaled, rcond=None)
+    resid = x_scaled - X @ coef
+    rss = float(np.dot(resid, resid))
+    sigma2 = rss / df
+    betas = coef[2:]
+    Z_psi = [(-betas[j]) * (t_centered > bps_c[j]).astype(float) for j in range(k)]
+    Z = np.column_stack([X] + Z_psi)
+    try:
+        cov = sigma2 * np.linalg.pinv(Z.T @ Z)
+        return [
+            float(np.sqrt(max(float(cov[2 + k + j, 2 + k + j]), 0.0)))
+            for j in range(k)
+        ]
+    except Exception:
+        return [np.nan] * k
+
+
+def _eval_profile_ols(bps_c, t_centered, x_scaled):
+    """Evaluate exact profile-OLS fit for given sorted standardized breakpoints."""
+    n = len(t_centered)
+    X = np.column_stack(
+        [np.ones(n), t_centered] + [np.maximum(0.0, t_centered - b) for b in bps_c]
+    )
+    coef, _, _, _ = np.linalg.lstsq(X, x_scaled, rcond=None)
+    y_pred = X @ coef
+    resid = x_scaled - y_pred
+    rss = float(np.dot(resid, resid))
+    return rss, y_pred, resid
+
+
+def _solve_profile_ols_k(
+    t_centered,
+    x_scaled,
+    t_orig,
+    t_mean,
+    t_std,
+    k_int,
+    min_segment_size,
+    prev_bps_c=None,
+    extra_starts=None,
+):
+    """
+    Deterministic multi-start profile-OLS solver for ``k_int`` breakpoints with
+    native ``min_segment_size`` enforcement.
+
+    Combines uniform & shifted quantile grids, sequential warm-starts from
+    ``prev_bps_c`` (the ``k-1`` solution), and optional ``extra_starts`` (e.g.,
+    from ``piecewise_regression.Fit``), polishing the minimum-RSS valid
+    solution with Nelder-Mead + Powell.
+
+    Returns ``(best_rss_scaled, best_bps_c)`` or ``(np.inf, None)`` if no valid
+    solution exists.
+    """
+    n = len(t_centered)
+    tc_min, tc_max = float(t_centered[0]), float(t_centered[-1])
+    if tc_max <= tc_min or n <= 2 + 2 * k_int:
+        return np.inf, None
+    if min_segment_size is not None and n < (k_int + 1) * int(min_segment_size):
+        return np.inf, None
+
+    def obj(bps):
+        bps_s = np.sort(np.asarray(bps, dtype=float))
+        if not np.all(np.isfinite(bps_s)):
+            return 1e30
+        if bps_s[0] <= tc_min or bps_s[-1] >= tc_max:
+            return 1e30
+        if k_int > 1 and np.any(np.diff(bps_s) <= 1e-9):
+            return 1e30
+        if min_segment_size is not None:
+            bps_orig = bps_s * t_std + t_mean
+            ok, _ = _check_min_segment_size(t_orig, bps_orig, min_segment_size)
+            if not ok:
+                return 1e30
+        X = np.column_stack(
+            [np.ones(n), t_centered] + [np.maximum(0.0, t_centered - b) for b in bps_s]
+        )
+        coef, _, _, _ = np.linalg.lstsq(X, x_scaled, rcond=None)
+        resid = x_scaled - X @ coef
+        return float(np.dot(resid, resid))
+
+    starts = []
+    # 1. Deterministic uniform quantile grid
+    starts.append(np.quantile(t_centered, np.linspace(0.0, 1.0, k_int + 2)[1:-1]))
+    # 2. Shifted quantile grid
+    if k_int <= 3:
+        starts.append(np.quantile(t_centered, np.linspace(0.15, 0.85, k_int)))
+    # 3. Exact observation-rank split grid (crucial when n is close to (k+1)*min_segment_size, e.g. n=10, k=1)
+    if min_segment_size is not None and n >= (k_int + 1) * int(min_segment_size):
+        ms = int(min_segment_size)
+        rank_bps = []
+        for j in range(1, k_int + 1):
+            idx_lo = min(n - 2, max(0, int(round(j * n / (k_int + 1))) - 1))
+            idx_hi = min(n - 1, idx_lo + 1)
+            rank_bps.append(0.5 * (float(t_centered[idx_lo]) + float(t_centered[idx_hi])))
+        starts.append(np.asarray(rank_bps, dtype=float))
+    # 4. Sequential warm-starts from k-1 solution
+    if prev_bps_c is not None and len(prev_bps_c) == k_int - 1:
+        bnds = [tc_min] + list(prev_bps_c) + [tc_max]
+        for seg_i in range(len(bnds) - 1):
+            for frac in (0.33, 0.5, 0.67):
+                cand = bnds[seg_i] + frac * (bnds[seg_i + 1] - bnds[seg_i])
+                starts.append(np.sort(list(prev_bps_c) + [cand]))
+    # 5. Extra starts (e.g., from piecewise_regression.Fit)
+    if extra_starts:
+        for es in extra_starts:
+            arr = np.sort(np.asarray(es, dtype=float))
+            if len(arr) == k_int and np.all(np.isfinite(arr)):
+                starts.append(arr)
+
+    best_rss = np.inf
+    best_bps = None
+    for sv in starts:
+        sv_s = np.sort(np.asarray(sv, dtype=float))
+        # Direct evaluation first (in case sv is already optimal)
+        val0 = obj(sv_s)
+        if val0 < best_rss and val0 < 1e29:
+            best_rss = val0
+            best_bps = sv_s.copy()
+        try:
+            res = minimize(
+                obj,
+                sv_s,
+                method='Nelder-Mead',
+                options={'xatol': 1e-6, 'fatol': 1e-10, 'maxiter': 500},
+            )
+            if np.isfinite(res.fun) and res.fun < best_rss and res.fun < 1e29:
+                cand_bps = np.sort(np.asarray(res.x, dtype=float))
+                if obj(cand_bps) < 1e29:
+                    best_rss = float(res.fun)
+                    best_bps = cand_bps
+        except Exception:
+            continue
+
+    # One Powell polish from the best Nelder-Mead solution
+    if best_bps is not None:
+        try:
+            res2 = minimize(
+                obj,
+                best_bps,
+                method='Powell',
+                options={'xtol': 1e-11, 'ftol': 1e-14, 'maxiter': 500},
+            )
+            if np.isfinite(res2.fun) and res2.fun < best_rss and res2.fun < 1e29:
+                cand_bps = np.sort(np.asarray(res2.x, dtype=float))
+                if obj(cand_bps) < 1e29:
+                    best_rss = float(res2.fun)
+                    best_bps = cand_bps
+        except Exception:
+            pass
+
+    return best_rss, best_bps
 
 
 def _safe_davies_test(t, x_scaled, k=10):
@@ -123,6 +449,7 @@ def _bootstrap_breakpoints(
     block_size='auto',
     inner_n_boot=10,
     y_hat=None,
+    min_segment_size=None,
 ):
     """
     Bootstrap the breakpoint detection to find robust breakpoint locations.
@@ -138,6 +465,8 @@ def _bootstrap_breakpoints(
         block_size: Block length for 'block'/'residual' ('auto' or int >= 1).
         inner_n_boot: Number of internal Muggeo restarts per outer bootstrap replicate.
         y_hat: Optional Phase-1 fitted values for residual ACF / residual bootstrap.
+        min_segment_size: Optional minimum number of observations required per segment
+            on the original time vector ``t`` (``>= 2`` or ``None``).
 
     Returns:
         all_breakpoints: List of lists. Each inner list contains sorted finite
@@ -242,6 +571,8 @@ def _bootstrap_breakpoints(
             all_breakpoints.append([])
             continue
 
+        boot_fit_kwargs, _ = _compute_fit_distance_kwargs(t_boot, k_int, min_segment_size)
+
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
@@ -258,6 +589,7 @@ def _bootstrap_breakpoints(
                         n_breakpoints=k_int,
                         n_boot=inner_boot_int,
                         verbose=False,
+                        **boot_fit_kwargs,
                     )
 
             res = pw_fit.get_results()
@@ -280,7 +612,12 @@ def _bootstrap_breakpoints(
 
             if len(current_iter_bps) == k_int:
                 current_iter_bps.sort()
-                all_breakpoints.append(current_iter_bps)
+                # Enforce min_segment_size on the original time grid (H2)
+                seg_ok, _ = _check_min_segment_size(t, current_iter_bps, min_segment_size)
+                if seg_ok:
+                    all_breakpoints.append(current_iter_bps)
+                else:
+                    all_breakpoints.append([])
             else:
                 all_breakpoints.append([])
 
@@ -301,6 +638,7 @@ def find_bagged_breakpoints(
     block_size='auto',
     inner_n_boot=10,
     y_hat=None,
+    min_segment_size=None,
 ):
     """
     Find robust breakpoints using Bagging and KDE per breakpoint index.
@@ -322,6 +660,8 @@ def find_bagged_breakpoints(
         block_size: Block length ('auto' or int >= 1).
         inner_n_boot: Internal Muggeo restarts per bootstrap replicate.
         y_hat: Optional Phase-1 fitted values.
+        min_segment_size: Optional minimum number of observations per segment
+            enforced on each bootstrap replicate.
 
     Returns:
         robust_breakpoints: Array of monotonically ordered robust breakpoint locations.
@@ -346,6 +686,7 @@ def find_bagged_breakpoints(
         block_size=block_size,
         inner_n_boot=inner_n_boot,
         y_hat=y_hat,
+        min_segment_size=min_segment_size,
     )
 
     robust_bps = []
@@ -415,13 +756,19 @@ class HybridSegmentedTrend:
     """
     Hybrid Segmented Regression.
 
-    Phase 1 (Structure Discovery): Uses OLS (piecewise-regression) to find
-    the number and location of breakpoints. Optionally uses bagging for
-    robust breakpoint locations (conditional on the Phase-1 selected number
-    of breakpoints; ``bic_`` and ``aic_`` remain Phase-1 OLS values).
+    Phase 1 (Structure Discovery): Uses standardized multi-start profile OLS
+    (combining ``piecewise-regression`` with deterministic quantile and
+    sequential ``k-1`` warm-starts) to find the number and location of
+    breakpoints. Optionally uses bagging for robust breakpoint locations
+    (conditional on the Phase-1 selected number of breakpoints; ``bic_`` and
+    ``aic_`` remain Phase-1 OLS values).
 
     Phase 2 (Robust Estimation): Uses Mann-Kendall / Sen's Slope on the
     identified segments to estimate robust slopes and confidence intervals.
+
+    Note: Because ``piecewise-regression`` relies on legacy global ``np.random``
+    calls internally, concurrent calls to ``fit`` from multiple threads in the
+    same Python process are not thread-safe.
     """
 
     def __init__(
@@ -442,7 +789,7 @@ class HybridSegmentedTrend:
         ci_method='direct',
         mk_test_method='robust',
         tau_method='b',
-        tie_break_method='lwp',
+        tie_break_method='robust',
         continuous_confidence=True,
         category_map=None,
     ):
@@ -454,14 +801,15 @@ class HybridSegmentedTrend:
                 (conditional on the Phase-1 selected ``n_breakpoints``).
             n_bootstrap (int): Number of bootstrap samples if bagging is used (must be >= 2).
             criterion (str): Model selection criterion ('bic', 'mbic', or 'aic'). Default 'bic'.
+                ``'mbic'`` uses a stronger ``3 * log(n)`` complexity penalty per breakpoint.
             random_state (int, optional): Seed for random number generator.
             bootstrap_method (str): Resampling scheme for bagging ('block', 'pairs', or 'residual').
             block_size (str or int): Block size for block/residual bagging ('auto' or int >= 1).
             inner_n_boot (int): Internal Muggeo restarts per outer bootstrap replicate. Default 10.
-            autocorr_penalty (str or bool): ESS adjustment for autocorrelation in Phase-1 selection
-                ('auto', 'none', True, or False). Default 'auto'.
-            use_davies_test (bool): Opt-in Davies test gate for 0 vs >=1 breakpoints during
-                automatic model selection. Default False.
+            autocorr_penalty (str or bool): ESS adjustment heuristic for autocorrelation in Phase-1
+                selection ('auto', 'none', True, or False). Default 'auto'.
+            use_davies_test (bool): Opt-in Davies test gate (tested at ``alpha``) for 0 vs >=1
+                breakpoints during automatic model selection. Default False.
             autocorr_method (str): Optional Phase-2 per-segment autocorrelation adjustment for
                 slope confidence intervals ('none', 'auto', 'yue_wang', or 'block_bootstrap').
                 Default 'none'.
@@ -473,7 +821,7 @@ class HybridSegmentedTrend:
                 Default 'robust'.
             tau_method (str): Kendall's tau method ('a' or 'b'). Default 'b'.
             tie_break_method (str): Tie-breaking method for censored MK ('robust' or 'lwp').
-                Default 'lwp'.
+                Default 'robust' (matching ``trend_test``).
             continuous_confidence (bool): Use continuous confidence direction in MK trend
                 classification. Default True.
             category_map (dict, optional): Optional confidence category map passed to
@@ -684,7 +1032,7 @@ class HybridSegmentedTrend:
             for k in n_range:
                 selection_records.append({
                     'n_breakpoints': int(k), 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'score': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 })
         elif float(np.ptp(x_ols)) == 0.0 or x_std == 0.0:
             if self.n_breakpoints is None or int(self.n_breakpoints) == 0:
@@ -696,7 +1044,7 @@ class HybridSegmentedTrend:
                     )
                 selection_records.append({
                     'n_breakpoints': 0, 'bic': -np.inf, 'aic': -np.inf,
-                    'mbic': -np.inf, 'rss': 0.0, 'sar': 0.0, 'converged': True,
+                    'mbic': -np.inf, 'score': -np.inf, 'rss': 0.0, 'sar': 0.0, 'converged': True,
                 })
                 best_n = 0
                 best_bic = -np.inf
@@ -717,7 +1065,6 @@ class HybridSegmentedTrend:
         else:
             x_scaled = (x_ols - x_mean) / x_std
             t_centered = (t - t_mean) / t_std
-            t_span_val = float(t[-1] - t[0])
 
             candidates = []
             k_seeds = (
@@ -725,6 +1072,24 @@ class HybridSegmentedTrend:
                 if phase1_seq is not None
                 else [None] * len(n_range)
             )
+            prev_bps_c = None
+            prev_rss_scaled = np.inf
+            failed_k_warnings = []
+
+            # For fixed n_breakpoints >= 2, build deterministic sequential warm-start chain 1..k-1
+            if self.n_breakpoints is not None and int(self.n_breakpoints) >= 2:
+                k_target = int(self.n_breakpoints)
+                if (
+                    n_samples > 2 + 2 * k_target
+                    and (self.min_segment_size is None or n_samples >= (k_target + 1) * self.min_segment_size)
+                ):
+                    warm_bps = None
+                    for k_warm in range(1, k_target):
+                        _, warm_bps = _solve_profile_ols_k(
+                            t_centered, x_scaled, t, t_mean, t_std,
+                            k_warm, self.min_segment_size, prev_bps_c=warm_bps,
+                        )
+                    prev_bps_c = warm_bps
 
             for idx_k, k in enumerate(n_range):
                 k_int = int(k)
@@ -758,6 +1123,8 @@ class HybridSegmentedTrend:
                             'resid_scaled': resid_scaled,
                             'record': record,
                         })
+                        prev_rss_scaled = rss_scaled
+                        prev_bps_c = []
                         selection_records.append(record)
                         # Short-circuit exact noiseless linear series during auto-select only
                         if self.n_breakpoints is None and rss_scaled <= n_samples * _REL_RSS_FLOOR:
@@ -788,142 +1155,147 @@ class HybridSegmentedTrend:
                         selection_records.append(record)
                         continue
 
-                    fit_kwargs = {}
-                    if (
-                        self.min_segment_size is not None
-                        and self.min_segment_size >= 2
-                        and t_span_val > 0
-                        and n_samples >= (k_int + 1) * self.min_segment_size
-                    ):
-                        ms = int(self.min_segment_size)
-                        left_frac = float(t[ms - 1] - t[0]) / t_span_val
-                        right_frac = float(t[-1] - t[-ms]) / t_span_val
-                        edge_frac = min(left_frac, right_frac)
-                        max_edge = 0.4 / max(1, k_int)
-                        if 0.0 < edge_frac < max_edge:
-                            fit_kwargs['min_distance_to_edge'] = max(0.02, edge_frac)
-                        if k_int >= 2:
-                            between_frac = float(np.min(t[ms:] - t[:-ms])) / t_span_val
-                            if 0.0 < between_frac < max_edge:
-                                fit_kwargs['min_distance_between_breakpoints'] = max(0.01, between_frac)
+                    fit_kwargs, tightened = _compute_fit_distance_kwargs(
+                        t, k_int, self.min_segment_size
+                    )
 
-                    with _isolated_legacy_numpy_seed(k_seeds[idx_k]):
-                        pw_fit = piecewise_regression.Fit(
-                            t_centered, x_scaled, n_breakpoints=k_int, verbose=False,
-                            **fit_kwargs,
+                    # 1. Stochastic Muggeo exploration via piecewise_regression.Fit
+                    extra_starts = []
+                    pw_best_rss = np.inf
+                    pw_best_bps_c = None
+                    try:
+                        with _isolated_legacy_numpy_seed(k_seeds[idx_k]):
+                            pw_fit = piecewise_regression.Fit(
+                                t_centered, x_scaled, n_breakpoints=k_int,
+                                n_boot=25, verbose=False, **fit_kwargs,
+                            )
+                        res = pw_fit.get_results()
+                        bm = getattr(pw_fit, 'best_muggeo', None)
+                        bf = getattr(bm, 'best_fit', None) if bm is not None else None
+                        if bool(res.get('converged', False)) and bf is not None:
+                            estimates = getattr(bf, 'estimates', None) or res.get('estimates') or {}
+                            pw_bps_c = sorted(
+                                float(val['estimate'])
+                                for key, val in estimates.items()
+                                if key.startswith('breakpoint')
+                                and val.get('estimate') is not None
+                                and np.isfinite(val['estimate'])
+                            )
+                            if len(pw_bps_c) == k_int:
+                                pw_bps_orig = [b * t_std + t_mean for b in pw_bps_c]
+                                seg_ok_pw, _ = _check_min_segment_size(
+                                    t, pw_bps_orig, self.min_segment_size
+                                )
+                                if seg_ok_pw:
+                                    extra_starts.append(pw_bps_c)
+                                    rss_pw_eval, _, _ = _eval_profile_ols(
+                                        pw_bps_c, t_centered, x_scaled
+                                    )
+                                    pw_best_rss = rss_pw_eval
+                                    pw_best_bps_c = np.asarray(pw_bps_c, dtype=float)
+                    except Exception:
+                        pass
+
+                    # 2. Deterministic multi-start + sequential warm-start profile-OLS solver
+                    #    with native min_segment_size enforcement (H1, L1)
+                    prof_rss, prof_bps_c = _solve_profile_ols_k(
+                        t_centered,
+                        x_scaled,
+                        t,
+                        t_mean,
+                        t_std,
+                        k_int,
+                        self.min_segment_size,
+                        prev_bps_c=prev_bps_c,
+                        extra_starts=extra_starts,
+                    )
+
+                    # Pick whichever valid solution has strictly lower RSS
+                    if prof_bps_c is not None and prof_rss <= pw_best_rss:
+                        best_bps_c = prof_bps_c
+                        rss_scaled = float(prof_rss)
+                    elif pw_best_bps_c is not None:
+                        best_bps_c = pw_best_bps_c
+                        rss_scaled = float(pw_best_rss)
+                    else:
+                        best_bps_c = None
+                        rss_scaled = np.inf
+
+                    # Monotonicity guard: if RSS(k) > RSS(k-1), try inserting a knot at the
+                    # midpoint of the highest-RSS segment of k-1
+                    if (
+                        best_bps_c is not None
+                        and prev_bps_c is not None
+                        and len(prev_bps_c) == k_int - 1
+                        and rss_scaled > prev_rss_scaled + 1e-12
+                    ):
+                        _, _, prev_resid = (
+                            _eval_profile_ols(prev_bps_c, t_centered, x_scaled)
+                            if len(prev_bps_c) > 0
+                            else (prev_rss_scaled, None, x_scaled - np.polyval(np.polyfit(t_centered, x_scaled, 1), t_centered))
                         )
+                        bnds_c = [float(t_centered[0])] + list(prev_bps_c) + [float(t_centered[-1])]
+                        seg_rss_vals = []
+                        for sj in range(len(bnds_c) - 1):
+                            if sj == len(bnds_c) - 2:
+                                sm = (t_centered >= bnds_c[sj]) & (t_centered <= bnds_c[sj + 1])
+                            else:
+                                sm = (t_centered >= bnds_c[sj]) & (t_centered < bnds_c[sj + 1])
+                            seg_rss_vals.append(float(np.sum(prev_resid[sm] ** 2)) if np.any(sm) else -1.0)
+                        worst_seg = int(np.argmax(seg_rss_vals))
+                        extra_mid = [
+                            np.sort(list(prev_bps_c) + [bnds_c[worst_seg] + frac * (bnds_c[worst_seg + 1] - bnds_c[worst_seg])])
+                            for frac in (0.25, 0.5, 0.75)
+                        ]
+                        retry_rss, retry_bps_c = _solve_profile_ols_k(
+                            t_centered, x_scaled, t, t_mean, t_std,
+                            k_int, self.min_segment_size, extra_starts=extra_mid,
+                        )
+                        if retry_bps_c is not None and retry_rss < rss_scaled:
+                            best_bps_c = retry_bps_c
+                            rss_scaled = float(retry_rss)
 
-                    res = pw_fit.get_results()
-                    bm = getattr(pw_fit, 'best_muggeo', None)
-                    bf = getattr(bm, 'best_fit', None) if bm is not None else None
-                    converged = bool(res.get('converged', False)) and bf is not None
-                    rss_scaled = getattr(bf, 'residual_sum_squares', None) if converged else None
-
-                    if (
-                        not converged
-                        or rss_scaled is None
-                        or not np.isfinite(rss_scaled)
-                        or rss_scaled < 0
-                    ):
+                    if best_bps_c is None or not np.isfinite(rss_scaled) or rss_scaled < 0:
                         constraint_note = (
                             f" (with min_segment_size={self.min_segment_size})"
-                            if fit_kwargs
+                            if tightened
                             else ""
                         )
-                        warnings.warn(
+                        failed_k_warnings.append(
                             f"Breakpoint fit for n_breakpoints={k_int} did not converge"
-                            f"{constraint_note}.",
-                            UserWarning,
+                            f"{constraint_note}."
                         )
                         selection_records.append(record)
                         continue
 
-                    estimates = getattr(bf, 'estimates', None) or res.get('estimates')
-                    bps_data = []
-                    if estimates:
-                        for key, val in estimates.items():
-                            if key.startswith('breakpoint'):
-                                est_c = val.get('estimate', np.nan)
-                                est = (
-                                    float(est_c) * t_std + t_mean
-                                    if est_c is not None and np.isfinite(est_c)
-                                    else np.nan
-                                )
-                                se_c = val.get('se')
-                                se = (
-                                    float(se_c) * t_std
-                                    if se_c is not None and np.isfinite(se_c)
-                                    else None
-                                )
-                                if np.isfinite(est) and se is not None and np.isfinite(se):
-                                    df = n_samples - (2 + 2 * k_int)
-                                    if df > 0:
-                                        t_crit = t_dist.ppf(1 - alpha / 2, df)
-                                        ci = (float(est - t_crit * se), float(est + t_crit * se))
-                                    else:
-                                        ci = (np.nan, np.nan)
-                                else:
-                                    ci_raw = val.get('confidence_interval', (np.nan, np.nan))
-                                    if (
-                                        isinstance(ci_raw, (list, tuple, np.ndarray))
-                                        and len(ci_raw) == 2
-                                    ):
-                                        ci = (
-                                            float(ci_raw[0]) * t_std + t_mean
-                                            if ci_raw[0] is not None and np.isfinite(ci_raw[0])
-                                            else np.nan,
-                                            float(ci_raw[1]) * t_std + t_mean
-                                            if ci_raw[1] is not None and np.isfinite(ci_raw[1])
-                                            else np.nan,
-                                        )
-                                    else:
-                                        ci = (np.nan, np.nan)
-                                bps_data.append((est, ci))
+                    best_bps_c = np.sort(np.asarray(best_bps_c, dtype=float))
+                    cand_bps = [float(b * t_std + t_mean) for b in best_bps_c]
 
-                    if len(bps_data) != k_int or not all(np.isfinite(b[0]) for b in bps_data):
-                        warnings.warn(
-                            f"Breakpoint fit for n_breakpoints={k_int} returned invalid "
-                            f"breakpoint estimates.",
-                            UserWarning,
+                    # Final min_segment_size verification on original time vector
+                    seg_ok, min_seg_n = _check_min_segment_size(t, cand_bps, self.min_segment_size)
+                    if not seg_ok:
+                        failed_k_warnings.append(
+                            f"Breakpoint fit for n_breakpoints={k_int} produced a segment "
+                            f"with {min_seg_n} observation(s) (< min_segment_size="
+                            f"{self.min_segment_size}); rejecting candidate."
                         )
                         selection_records.append(record)
                         continue
 
-                    bps_data.sort(key=lambda item: item[0])
-                    cand_bps = [b[0] for b in bps_data]
-                    cand_bp_cis = [b[1] for b in bps_data]
-
-                    # Enforce min_segment_size on candidate breakpoint split (F-09)
-                    if self.min_segment_size is not None:
-                        cand_bounds = np.concatenate(([t[0]], cand_bps, [t[-1]]))
-                        n_cand_segs = len(cand_bounds) - 1
-                        min_seg_n = min(
-                            int(np.sum(
-                                (t >= cand_bounds[j]) & (
-                                    (t <= cand_bounds[j + 1])
-                                    if j == n_cand_segs - 1
-                                    else (t < cand_bounds[j + 1])
-                                )
-                            ))
-                            for j in range(n_cand_segs)
-                        )
-                        if min_seg_n < self.min_segment_size:
-                            warnings.warn(
-                                f"Breakpoint fit for n_breakpoints={k_int} produced a segment "
-                                f"with {min_seg_n} observation(s) (< min_segment_size="
-                                f"{self.min_segment_size}); rejecting candidate.",
-                                UserWarning,
-                            )
-                            selection_records.append(record)
-                            continue
-
-                    try:
-                        y_pred_scaled = np.asarray(bf.get_predicted_yy(), dtype=float)
-                        if len(y_pred_scaled) != n_samples:
-                            y_pred_scaled = None
-                    except Exception:
-                        y_pred_scaled = None
-                    resid_scaled = (x_scaled - y_pred_scaled) if y_pred_scaled is not None else None
+                    # Exact profile-OLS predictions & Muggeo (2003) Delta-method CIs
+                    rss_scaled, y_pred_scaled, resid_scaled = _eval_profile_ols(
+                        best_bps_c, t_centered, x_scaled
+                    )
+                    se_c_list = _compute_muggeo_se(t_centered, x_scaled, best_bps_c)
+                    df = n_samples - (2 + 2 * k_int)
+                    t_crit = float(t_dist.ppf(1 - alpha / 2, df)) if df > 0 else np.nan
+                    cand_bp_cis = []
+                    for est_val, se_c in zip(cand_bps, se_c_list):
+                        se_val = float(se_c) * t_std if np.isfinite(se_c) else np.nan
+                        if np.isfinite(est_val) and np.isfinite(se_val) and np.isfinite(t_crit):
+                            cand_bp_cis.append((float(est_val - t_crit * se_val), float(est_val + t_crit * se_val)))
+                        else:
+                            cand_bp_cis.append((np.nan, np.nan))
 
                     bic, mbic, aic = _compute_information_criteria(
                         rss_scaled, x_std, n_samples, k_int
@@ -945,6 +1317,8 @@ class HybridSegmentedTrend:
                         'resid_scaled': resid_scaled,
                         'record': record,
                     })
+                    prev_bps_c = best_bps_c
+                    prev_rss_scaled = float(rss_scaled)
                 except Exception as exc:
                     record['bic'] = np.nan
                     record['aic'] = np.nan
@@ -960,7 +1334,14 @@ class HybridSegmentedTrend:
 
                 selection_records.append(record)
 
-            # --- Score converged candidates (with optional ESS-BIC & Davies gate) ---
+            # Emit non-convergence warnings when a fixed k failed, or when no k >= 1 converged
+            # during auto-search (avoids routine noise for excess k=4,5 on clean low-k series, L6).
+            k_pos_converged = any(c['k'] > 0 for c in candidates)
+            if failed_k_warnings and (self.n_breakpoints is not None or not k_pos_converged):
+                for msg in failed_k_warnings:
+                    warnings.warn(msg, UserWarning)
+
+            # --- Score converged candidates (with deterministic ESS-BIC & optional Davies gate) ---
             if not candidates:
                 best_n = 0
                 best_bps = []
@@ -978,31 +1359,27 @@ class HybridSegmentedTrend:
             else:
                 n_eff = None
                 ess_applied = False
+                rho_ess_est = 0.0
                 if (
                     self.n_breakpoints is None
                     and self.autocorr_penalty in ('auto', True)
                     and len(candidates) > 1
                     and n_samples >= 10
                 ):
-                    richest = max(candidates, key=lambda c: c['k'])
-                    if (
-                        richest['resid_scaled'] is not None
-                        and richest['rss_scaled'] > n_samples * _REL_RSS_FLOOR
-                    ):
-                        acf_rich, _ = estimate_acf(richest['resid_scaled'], max_lag=1)
-                        rho_1_rich = (
-                            float(acf_rich[1])
-                            if len(acf_rich) > 1 and np.isfinite(acf_rich[1])
-                            else 0.0
+                    # Deterministic, hinge-invariant AR(1) rho estimator (H1, M1):
+                    # independent of random_state and Phase-1 optimizer convergence.
+                    max_k_cand = max(c['k'] for c in candidates)
+                    rho_ess_est = _estimate_ar1_rho_deterministic(
+                        t_centered, x_scaled, max_k=max(1, min(max_k_cand, 3))
+                    )
+                    acf_thresh = max(0.20, 2.2 / np.sqrt(n_samples))
+                    if rho_ess_est > acf_thresh:
+                        rho_clamped = min(rho_ess_est, 0.95)
+                        n_eff = max(
+                            3.0,
+                            n_samples * (1.0 - rho_clamped) / (1.0 + rho_clamped),
                         )
-                        acf_thresh = max(0.2, 1.96 / np.sqrt(n_samples))
-                        if rho_1_rich > acf_thresh:
-                            rho_clamped = min(rho_1_rich, 0.95)
-                            n_eff = max(
-                                3.0,
-                                n_samples * (1.0 - rho_clamped) / (1.0 + rho_clamped),
-                            )
-                            ess_applied = True
+                        ess_applied = True
 
                 best_cand = None
                 best_cand_score = np.inf
@@ -1018,6 +1395,7 @@ class HybridSegmentedTrend:
                         best_cand = cand
 
                 # Opt-in Davies test gate (only during auto-select when k > 0 selected)
+                davies_gated = False
                 if (
                     self.use_davies_test
                     and self.n_breakpoints is None
@@ -1029,12 +1407,17 @@ class HybridSegmentedTrend:
                         k0_cands = [c for c in candidates if c['k'] == 0]
                         if k0_cands:
                             best_cand = k0_cands[0]
+                            davies_gated = True
                             warnings.warn(
                                 f"Davies test for change in slope was not significant "
                                 f"(p={p_davies:.4g} >= alpha={alpha}); gating selection "
                                 f"to 0 breakpoints.",
                                 UserWarning,
                             )
+
+                if davies_gated:
+                    for rec in selection_records:
+                        rec['davies_gated'] = (rec['n_breakpoints'] == 0)
 
                 if best_cand is not None:
                     best_n = best_cand['k']
@@ -1064,7 +1447,8 @@ class HybridSegmentedTrend:
                     if abs(rho_1_sel) > acf_thresh:
                         if ess_applied:
                             penalty_note = (
-                                f"ESS-adjusted criterion (n_eff={n_eff:.1f}) was applied during model selection."
+                                f"ESS-adjusted criterion (n_eff={n_eff:.1f}, rho_d1={rho_ess_est:.3f}) "
+                                f"was applied during model selection."
                             )
                         elif rho_1_sel < 0 and self.autocorr_penalty in ('auto', True):
                             penalty_note = (
@@ -1096,6 +1480,7 @@ class HybridSegmentedTrend:
                 block_size=self.block_size,
                 inner_n_boot=self.inner_n_boot,
                 y_hat=best_y_pred_scaled,
+                min_segment_size=self.min_segment_size,
             )
             self.bootstrap_samples_ = all_samples_structured
 
@@ -1110,11 +1495,26 @@ class HybridSegmentedTrend:
                 )
 
             t_min, t_max = float(t.min()), float(t.max())
-            if (
+            bag_valid = (
                 len(robust_bps) == best_n
                 and np.all(np.isfinite(robust_bps))
                 and np.all((robust_bps > t_min) & (robust_bps < t_max))
-            ):
+            )
+            if bag_valid:
+                order = np.argsort(robust_bps).astype(np.intp, copy=False)
+                cand_bag_bps = np.asarray(robust_bps, dtype=float)[order]
+                bag_seg_ok, bag_min_n = _check_min_segment_size(
+                    t, cand_bag_bps, self.min_segment_size
+                )
+                if not bag_seg_ok:
+                    warnings.warn(
+                        f"Bagged breakpoints produced a segment with {bag_min_n} observation(s) "
+                        f"(< min_segment_size={self.min_segment_size}); falling back to Phase-1 "
+                        f"OLS breakpoints.",
+                        UserWarning,
+                    )
+                    bag_valid = False
+            if bag_valid:
                 bag_cis = []
                 for i in range(best_n):
                     col_samples = [
@@ -1129,10 +1529,13 @@ class HybridSegmentedTrend:
                     else:
                         bag_cis.append((np.nan, np.nan))
 
-                order = np.argsort(robust_bps).astype(np.intp, copy=False)
-                best_bps = np.asarray(robust_bps, dtype=float)[order]
+                best_bps = cand_bag_bps
                 best_bp_cis = [bag_cis[idx] for idx in order]
-            else:
+            elif not (
+                len(robust_bps) == best_n
+                and np.all(np.isfinite(robust_bps))
+                and np.all((robust_bps > t_min) & (robust_bps < t_max))
+            ):
                 warnings.warn(
                     "Bagging failed to produce valid breakpoints; falling back to Phase-1 OLS breakpoints.",
                     UserWarning,

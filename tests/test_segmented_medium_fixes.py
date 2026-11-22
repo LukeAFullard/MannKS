@@ -37,11 +37,11 @@ def test_f09_rejects_micro_segment_by_default_and_allows_when_disabled():
         warnings.simplefilter("always")
         res_default = segmented_trend_test(y_iso, t_iso, n_breakpoints=1, random_state=42)
 
-    assert res_default.n_breakpoints == 0
-    assert any("min_segment_size" in w for w in res_default.warnings)
-    assert bool(res_default.selection_summary.loc[0, "converged"]) is False
+    # Default min_segment_size=5 guarantees every returned segment has >= 5 observations
+    assert (res_default.segments["n"] >= 5).all()
+    assert int(res_default.segments["n"].sum()) == len(t_iso)
 
-    # Disabling min_segment_size permits the 1-point segment and reports actual n=1
+    # Disabling min_segment_size permits the 1-point micro-segment and reports actual n < 5
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         res_disabled = segmented_trend_test(
@@ -222,3 +222,108 @@ def test_f14_negative_censored_values_emit_warning():
         warnings.simplefilter("always")
         res_gt = segmented_trend_test(df_gt, t, n_breakpoints=0, random_state=42)
     assert any("negative right-censored" in w.lower() for w in res_gt.warnings)
+
+
+# ---------------------------------------------------------------------------
+# PR #9 Review Regression Tests (H1, H2, L1, L2, L3, L6, L7, L8, Nits)
+# ---------------------------------------------------------------------------
+
+def test_h1_deterministic_ess_k0_score_and_monotonic_rss():
+    """H1: k=0 ESS score must not depend on random_state, and RSS(k) <= RSS(k-1)."""
+    rng = np.random.default_rng(77)
+    n = 90
+    t = np.arange(n, dtype=float)
+    eps = rng.normal(0.0, np.sqrt(1.0 - 0.65 ** 2), size=n)
+    y = np.empty(n)
+    y[0] = rng.normal(0.0, 1.0)
+    for i in range(1, n):
+        y[i] = 0.65 * y[i - 1] + eps[i]
+    y = 5.0 + 0.05 * t + y
+
+    k0_scores = []
+    selected_ks = []
+    for seed in (0, 1, 2, 7, 42):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = segmented_trend_test(
+                y, t, max_breakpoints=3, autocorr_penalty="auto", random_state=seed
+            )
+        ss = res.selection_summary
+        k0_scores.append(float(ss.loc[ss["n_breakpoints"] == 0, "score"].iloc[0]))
+        selected_ks.append(res.n_breakpoints)
+        conv_rss = ss[ss["converged"]]["rss"].to_numpy(dtype=float)
+        assert np.all(np.diff(conv_rss) <= 1e-8), f"Non-monotonic RSS: {conv_rss}"
+
+    assert np.allclose(k0_scores, k0_scores[0], rtol=0.0, atol=1e-12)
+    assert len(set(selected_ks)) == 1
+
+
+def test_h2_bagging_enforces_min_segment_size():
+    """H2: use_bagging=True must never emit segments smaller than min_segment_size."""
+    rng = np.random.default_rng(13)
+    t = np.arange(25, dtype=float)
+    y = rng.normal(0.0, 1.0, size=25)
+
+    for seed in (13, 14, 15):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = segmented_trend_test(
+                y, t, n_breakpoints=2, use_bagging=True, n_bootstrap=20,
+                min_segment_size=5, random_state=seed,
+            )
+        assert (res.segments["n"] >= 5).all(), (
+            f"seed={seed}: got segment sizes {res.segments['n'].tolist()}"
+        )
+
+
+def test_l1_sharp_v_at_n10_recovers_5_5_split():
+    """L1: Constrained profile-OLS recovers a sharp V at n=10 with min_segment_size=5."""
+    t = np.arange(10, dtype=float)
+    y = np.abs(t - 4.5) * 3.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = segmented_trend_test(
+            y, t, max_breakpoints=1, min_segment_size=5,
+            autocorr_penalty="none", random_state=42,
+        )
+    assert res.n_breakpoints == 1
+    assert res.segments["n"].tolist() == [5, 5]
+
+
+def test_l2_l3_l7_l8_and_identical_time_score():
+    """Verify L2 (davies_gated), L3 (tie_break_method default), L7 (reversed bounds),
+    L8 (tz-naive predict warning), and Nit (identical-time score column)."""
+    import inspect
+    from MannKS import calculate_breakpoint_probability
+
+    # L3: default tie_break_method matches trend_test ('robust')
+    sig_seg = inspect.signature(segmented_trend_test)
+    sig_tt = inspect.signature(trend_test)
+    assert sig_seg.parameters["tie_break_method"].default == sig_tt.parameters["tie_break_method"].default == "robust"
+
+    # L7: reversed bounds raise ValueError
+    t = np.arange(40, dtype=float)
+    y = np.where(t < 20, 0.5 * t, 10.0 - 0.5 * (t - 20)) + np.random.default_rng(0).normal(0, 0.3, 40)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res_bag = segmented_trend_test(y, t, n_breakpoints=1, use_bagging=True, n_bootstrap=10, random_state=0)
+    with pytest.raises(ValueError, match="less than or equal"):
+        calculate_breakpoint_probability(res_bag, 25.0, 15.0)
+
+    # L8: predicting naive datetimes on tz-aware model emits UserWarning
+    t_tz = pd.date_range("2020-01-01", periods=30, freq="D", tz="Pacific/Auckland")
+    y_tz = np.where(np.arange(30) < 15, 0.5 * np.arange(30), 7.5 - 0.5 * (np.arange(30) - 15))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res_tz = segmented_trend_test(y_tz, t_tz, n_breakpoints=1, random_state=0)
+    t_naive = pd.date_range("2020-01-05", periods=5, freq="D")
+    with pytest.warns(UserWarning, match="timezone-naive"):
+        preds = res_tz.predict(t_naive)
+    assert len(preds) == 5 and np.all(np.isfinite(preds))
+
+    # Nit: identical-time selection_summary includes 'score' column
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res_id = segmented_trend_test(np.arange(10, dtype=float), np.zeros(10), max_breakpoints=1)
+    assert "score" in res_id.selection_summary.columns
+

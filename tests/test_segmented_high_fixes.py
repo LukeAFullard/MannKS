@@ -475,9 +475,9 @@ def test_f10_invalid_breakpoint_counts_and_unknown_kwargs_rejected():
         x, t, max_breakpoints=1, lt_mult=0.25, gt_mult=1.2, sens_slope_method="lwp", autocorr_method="yue_wang",
         random_state=42,
     )
-    assert list(summary2.columns[:5]) == ["n_breakpoints", "bic", "aic", "sar", "converged"] or set(
-        ["n_breakpoints", "bic", "aic", "sar", "converged"]
-    ).issubset(summary2.columns)
+    assert {"n_breakpoints", "bic", "aic", "mbic", "score", "rss", "sar", "converged"}.issubset(
+        summary2.columns
+    )
 
 
 # =============================================================================

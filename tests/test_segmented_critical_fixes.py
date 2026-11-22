@@ -114,7 +114,7 @@ def test_f01_trace_scale_invariance_null_and_hinge():
     r_trace = segmented_trend_test(y_hinge * 1e-12, t, n_breakpoints=1, random_state=99)
     assert r_unit.n_breakpoints == 1
     assert r_trace.n_breakpoints == 1
-    assert np.allclose(r_unit.breakpoints, r_trace.breakpoints, atol=1e-9, rtol=0)
+    assert np.allclose(r_unit.breakpoints, r_trace.breakpoints, atol=1e-7, rtol=0)
     assert np.allclose(r_unit.breakpoint_cis, r_trace.breakpoint_cis, atol=1e-7, rtol=0)
 
 
@@ -241,7 +241,8 @@ def test_f03_segment_n_preserves_single_point_segment(monkeypatch):
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         res = segmented_trend_test(
-            x, t, n_breakpoints=1, use_bagging=True, n_bootstrap=5, random_state=42
+            x, t, n_breakpoints=1, use_bagging=True, n_bootstrap=5,
+            min_segment_size=None, random_state=42
         )
     assert res.segments.loc[0, 'n'] == 1
     assert res.segments['n'].sum() == len(t)

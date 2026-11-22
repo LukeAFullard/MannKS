@@ -2,7 +2,7 @@
   "metadata": {
     "r_version": "R version 4.3.3 (2024-02-29)",
     "r_segmented_version": "2.0.3",
-    "mannks_version": "0.7.1",
+    "mannks_version": "0.7.2",
     "description": "Frozen reference outputs from CRAN segmented for CI parity testing."
   },
   "published": [

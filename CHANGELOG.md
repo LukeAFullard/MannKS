@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.2 — Segmented trend audit fixes, external R validation & CI portability
+
+Comprehensive statistical, numerical, and API audit release for the segmented trend subsystem (`segmented_trend_test`, `HybridSegmentedTrend`, `find_best_segmentation`, `calculate_breakpoint_probability`, and `plot_segmented_trend`).
+
+### Statistical Correctness & Model Selection
+* **Scale-invariant, deterministic multi-start Phase-1 optimization**: Standardized `(t, x)` before breakpoint fitting with a symmetric relative RSS floor (`1e-12`), eliminating scale-dependent BIC distortion and false breakpoints on constant, noiseless linear, and all-censored series. Phase-1 now combines `piecewise-regression` with deterministic multi-start and sequential `k-1` warm-started profile OLS (with exact Muggeo 2003 Delta-method SEs) and enforces `RSS(k) <= RSS(k-1)`, resolving local-minimum instability and seed dependence on multi-break series such as `globTempAnom`.
+* **Working model-selection criteria (`criterion`)**: `criterion='bic'`, `'mbic'` (modified BIC with `3 * log(n)` penalty per breakpoint), and `'aic'` all actively govern model selection. `selection_summary` now exposes `bic`, `aic`, `mbic`, `score`, `rss` (alongside backward-compatible `sar`), `converged`, and `davies_gated` (when `use_davies_test=True` gates selection to 0 breakpoints).
+* **Deterministic autocorrelation ESS penalty (`autocorr_penalty='auto'`, new default)**: Estimates lag-1 AR(1) autocorrelation deterministically from first differences of hinge-detrended residuals (independent of `random_state`) and applies an effective-sample-size (`n_eff`) likelihood heuristic during automatic model selection, substantially reducing spurious breakpoints on AR(1) series. Opt-in `use_davies_test=True` (tested at `alpha`) and Phase-2 per-segment `autocorr_method` (`'none'`, `'auto'`, `'yue_wang'`, `'block_bootstrap'`) are also supported.
+* **Minimum segment size enforcement (`min_segment_size=5`, new default)**: Enforced natively inside Phase-1 profile-OLS optimization, inside `_bootstrap_breakpoints` / `find_bagged_breakpoints`, and post-bagging (falling back to Phase-1 breakpoints with a warning if violated). Set `min_segment_size=None` to restore unconstrained splitting.
+* **Block-bootstrap bagging & uncertainty fixes**: `bootstrap_method='block'` (circular moving-block bootstrap, `block_size='auto'`) is now the default for `use_bagging=True` (with `'pairs'` and `'residual'` options), `inner_n_boot` defaults to `10`, silent IQR clipping of bootstrap CIs has been removed, out-of-order multimodal KDE modes fall back cleanly to order-preserving medians, and replicate convergence failures are tracked in `result.bootstrap_failure_rate` and `result.analysis_notes`.
+* **Phase-2 parity with `trend_test` & LWP-TRENDS**: Per-segment estimation now computes full Mann-Kendall statistics and classifications (`s`, `var_s`, `z`, `p`, `h`, `Tau`, `C`, `Cd`, `trend`, `classification`, `analysis_notes`), uses the Conover intercept (`median(x) - slope * median(t)`) to match `trend_test` exactly, supports `ci_method`, `mk_test_method`, `tau_method`, `tie_break_method` (default `'robust'`, matching `trend_test`), `continuous_confidence`, `category_map`, `computation_mode='fast'`, and `detect_size_tier` warnings.
+* **Censoring diagnostics**: Emits explicit warnings when censoring exceeds 15%, when contiguous left/right censoring floors/ceilings could induce Phase-1 OLS splits, and when multiplicative substitution (`lt_mult`/`gt_mult`) is applied to negative detection limits. Clarified that `hicensor` is applied globally before Phase-1 segmentation.
+
+### API, Datetime, Plotting & Breaking/Default Changes
+* **Default changes**: `autocorr_penalty='auto'` (was unadjusted BIC), `min_segment_size=5` (was unconstrained; series with `n < 10` now always select `k=0` unless `min_segment_size` is lowered or disabled), `bootstrap_method='block'` (was `'pairs'`), `inner_n_boot=10` (was `100`), Conover per-segment intercept (was `median(x - b*t)`), and `tie_break_method='robust'` (matches `trend_test`).
+* **Strict input validation & explicit signature**: Removed catch-all `**kwargs` on `segmented_trend_test` (unknown arguments now raise `TypeError`), `find_best_segmentation` rejects `n_breakpoints`, invalid `alpha` raises `ValueError`, `calculate_breakpoint_probability` raises `ValueError` when `start_date > end_date`, and infinite/missing timestamps are filtered with a warning.
+* **RNG isolation**: Seeded and unseeded calls preserve caller global `np.random` state (Windows `int64` safe); thread-safety caveat documented.
+* **Datetime & timezone handling**: Unit-agnostic numeric conversion (`ns`/`us`/`ms`/`s`/`D`), timezone-aware breakpoint preservation (`pytz` & `zoneinfo`), pandas 2.x/3.x overflow-safe reconstruction for dates outside nanosecond bounds (`1600`/`2500`), and warning in `predict()` when tz-naive timestamps are passed to a tz-aware model.
+* **Plotting & warning categories**: `plot_segmented_trend` pivots CI bands on the fitted line (fixing censored ATS offsets), plots right-censored observations with upward triangles, handles `NaN` timestamps and `slope_scaling` cleanly, and returns `(fig, ax)`. Re-emitted warnings from `segmented_trend_test` preserve their original warning categories.
+
+### Validation & CI
+* **External CRAN `segmented` & `LWP-TRENDS v2502` validation**: Added `validation/r_parity/r_segmented.R`, `validation/r_parity/segmented_parity.py`, `validation/r_parity/segmented_parity_report.md`, frozen fixtures (`tests/data/segmented_r_parity_fixtures.json`), and fast CI parity tests (`tests/test_segmented_r_parity.py`).
+* **Fixed OLS validation harness**: Corrected `validation/common_validation.py` (`alpha_i` segment slopes vs `beta_i` slope changes) and regenerated `validation/45` through `validation/52` plus segmented example outputs.
+* **CI portability**: Pinned Python 3.9 matrix jobs in `.github/workflows/tests.yml` to `ubuntu-24.04`.
+
 ## 0.7.1 — dependency minimums & continuous integration
 
 Packaging-only release. No library code or numerical results changed from 0.7.0.

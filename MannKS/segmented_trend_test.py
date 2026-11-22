@@ -21,13 +21,27 @@ class SegmentedTrendResult(_Segmented_Trend_Test_Tuple):
         Predict values based on the segmented trend model.
 
         Args:
-            t: Time vector (datetime or numeric).
+            t: Time vector (datetime or numeric). If the model was fitted on
+                timezone-aware timestamps and tz-naive datetimes are supplied,
+                the naive timestamps are interpreted as UTC wall time with a
+                ``UserWarning``.
 
         Returns:
             y_pred: Predicted values.
         """
         # Convert input time to numeric if needed
         if self.is_datetime:
+            bp_tz = _extract_timezone(self.breakpoints) if len(self.breakpoints) > 0 else None
+            if bp_tz is None and self.segments is not None and not self.segments.empty and 'start_time' in self.segments.columns:
+                bp_tz = _extract_timezone(self.segments['start_time'])
+            in_tz = _extract_timezone(t)
+            if bp_tz is not None and in_tz is None:
+                warnings.warn(
+                    f"Model was fitted on timezone-aware timestamps ({bp_tz}), but timezone-naive "
+                    f"timestamps were passed to predict(); naive timestamps are interpreted as UTC "
+                    f"wall time. Pass timezone-aware timestamps to avoid timezone offsets.",
+                    UserWarning,
+                )
             t = _to_numeric_time(t)
         elif isinstance(t, (pd.Series, pd.Index)) and pd.api.types.is_numeric_dtype(t):
             t = t.to_numpy(dtype=float, na_value=np.nan)
@@ -205,7 +219,7 @@ def segmented_trend_test(
     ci_method: str = 'direct',
     mk_test_method: str = 'robust',
     tau_method: str = 'b',
-    tie_break_method: str = 'lwp',
+    tie_break_method: str = 'robust',
     continuous_confidence: bool = True,
     category_map: Optional[dict] = None,
 ):
@@ -213,11 +227,13 @@ def segmented_trend_test(
     Perform Hybrid Segmented Trend Analysis.
 
     This function is a wrapper around `HybridSegmentedTrend`. It combines:
-    1. OLS-based breakpoint detection (Piecewise Regression) using continuous
-       hinged linear segments. For censored inputs, Phase-1 OLS substitutes
-       left-censored values by ``lt_mult * limit`` and right-censored values by
-       ``gt_mult * limit`` (intended for positive limits; negative limits emit
-       a warning because multiplicative scaling inverts the censoring direction).
+    1. OLS-based breakpoint detection (multi-start profile OLS combining
+       ``piecewise-regression`` with deterministic quantile and sequential
+       ``k-1`` warm-starts) using continuous hinged linear segments. For censored
+       inputs, Phase-1 OLS substitutes left-censored values by ``lt_mult * limit``
+       and right-censored values by ``gt_mult * limit`` (intended for positive
+       limits; negative limits emit a warning because multiplicative scaling
+       inverts the censoring direction).
     2. Robust Mann-Kendall test and Sen's / Akritas-Theil-Sen slope estimation
        on each identified segment. Note that Phase-2 segment lines are estimated
        independently per segment and are therefore **piecewise discontinuous**
@@ -229,8 +245,14 @@ def segmented_trend_test(
         n_breakpoints: Fixed number of breakpoints. If None, optimal number is searched.
         max_breakpoints: Maximum number of breakpoints to search (if n_breakpoints is None).
         alpha: Significance level for confidence intervals (must satisfy 0 < alpha < 1).
-        hicensor: High-censor rule flag.
+        hicensor: High-censor rule flag (bool or float threshold). Applied **globally**
+            to the full time series before Phase-1 segmentation (standard LWP-TRENDS
+            convention so shifting detection limits across the record do not create
+            artificial regime breaks).
         criterion: Model selection criterion ('bic', 'mbic', or 'aic'). Default 'bic'.
+            ``'mbic'`` uses a stronger ``(2 + 3 * k) * log(n)`` penalty (3 * log(n) per
+            breakpoint, inspired by Zhang & Siegmund 2007, omitting the segment-length
+            term).
         use_bagging: Use bootstrap aggregating for robust breakpoint locations.
             Note that bagging resamples breakpoint *locations* conditional on the
             Phase-1 selected ``n_breakpoints`` (model selection itself is not bagged,
@@ -247,11 +269,17 @@ def segmented_trend_test(
         block_size: Block length for ``'block'``/``'residual'`` bagging
             (``'auto'`` or integer >= 1).
         inner_n_boot: Internal Muggeo restarts per outer bootstrap replicate. Default 10.
-        autocorr_penalty: Effective-sample-size (ESS) penalty for autocorrelation
+        autocorr_penalty: Effective-sample-size (ESS) heuristic for autocorrelation
             during automatic Phase-1 model selection (``'auto'``, ``'none'``, ``True``,
-            or ``False``). Default ``'auto'``.
-        use_davies_test: Opt-in Davies test gate (0 vs >=1 breakpoints) during
-            automatic model selection. Default ``False``.
+            or ``False``). Default ``'auto'``. Estimates lag-1 AR(1) autocorrelation
+            deterministically from first differences of hinge-detrended residuals
+            and weights the Gaussian log-likelihood by ``n_eff``; under strong
+            positive AR(1) on short series some residual false-breakpoint rate can
+            remain (consider ``criterion='mbic'`` for stricter control).
+        use_davies_test: Opt-in Davies test gate (0 vs >=1 breakpoints, evaluated at
+            significance level ``alpha``) during automatic model selection. When
+            gating triggers, ``selection_summary`` includes a ``'davies_gated'``
+            boolean column. Default ``False``.
         autocorr_method: Optional Phase-2 per-segment autocorrelation adjustment
             for slope confidence intervals: ``'none'`` (default, i.i.d. Mann-Kendall
             variance), ``'auto'`` (detect per-segment autocorrelation and apply block
@@ -265,14 +293,14 @@ def segmented_trend_test(
             Akritas-Theil-Sen), ``'lwp'``, or ``'drop_ambiguous'``.
         min_segment_size: Minimum observations required per segment for a ``k >= 1``
             candidate breakpoint split to be accepted (``>= 2`` or ``None`` to
-            disable). Default ``5``.
+            disable). Enforced in both Phase-1 fitting and bagging. Default ``5``.
         ci_method: Method for Phase-2 Sen slope confidence intervals: ``'direct'``
             (default) or ``'lwp'`` (LWP-TRENDS R parity).
         mk_test_method: Method for Phase-2 Mann-Kendall variance: ``'robust'``
             (default) or ``'lwp'``.
         tau_method: Kendall's tau method (``'a'`` or ``'b'``). Default ``'b'``.
         tie_break_method: Tie-breaking method for censored MK (``'robust'`` or
-            ``'lwp'``). Default ``'lwp'``.
+            ``'lwp'``). Default ``'robust'`` (matching ``trend_test``).
         continuous_confidence: Use continuous confidence direction in MK trend
             classification. Default ``True``.
         category_map: Optional confidence category map passed to ``classify_trend``.
@@ -290,6 +318,10 @@ def segmented_trend_test(
         ``result.analysis_notes``, and ``result.warnings`` for diagnostics, and
         consider ``use_bagging=True`` and/or ``autocorr_method='yue_wang'`` or
         ``'block_bootstrap'`` for autocorrelated series.
+
+        **Thread Safety:** Because ``piecewise-regression`` uses legacy global
+        ``np.random`` internally, concurrent calls to ``segmented_trend_test``
+        across threads in the same Python process are not thread-safe.
 
     Returns:
         SegmentedTrendResult: Namedtuple result with ``predict()``,
@@ -474,13 +506,15 @@ def segmented_trend_test(
                 else:
                     warnings.warn("slope_scaling requires datetime inputs.", UserWarning)
 
-        # Collect warnings
+        # Collect warnings (preserving original categories, L6)
+        captured_warning_records = []
         for w in w_log:
             captured_warnings.append(str(w.message))
+            captured_warning_records.append((w.message, w.category))
 
-    # Re-issue warnings if desired (optional, but polite since we suppressed them)
-    for w_str in captured_warnings:
-        warnings.warn(w_str, UserWarning)
+    # Re-issue warnings with their original categories
+    for w_msg, w_cat in captured_warning_records:
+        warnings.warn(w_msg, w_cat)
 
     return SegmentedTrendResult(
         n_breakpoints=n_bp,
@@ -547,11 +581,15 @@ def calculate_breakpoint_probability(result, start_date, end_date):
     Args:
         result: The result from segmented_trend_test.
         start_date: Start of the window (datetime or numeric).
-        end_date: End of the window (datetime or numeric).
+        end_date: End of the window (datetime or numeric). Must satisfy
+            ``start_date <= end_date``.
 
     Returns:
         prob: Empirical bootstrap frequency in [0.0, 1.0], or ``np.nan`` if no
             valid bootstrap replicates are available.
+
+    Raises:
+        ValueError: If ``start_date > end_date``.
     """
     if result.bootstrap_samples is None or len(result.bootstrap_samples) == 0:
         warnings.warn("No bootstrap samples available. Run with use_bagging=True.", UserWarning)
@@ -560,6 +598,11 @@ def calculate_breakpoint_probability(result, start_date, end_date):
     # Convert dates to numeric scalar floats if needed
     t_start = float(_to_numeric_time(start_date)[0]) if result.is_datetime else float(start_date)
     t_end = float(_to_numeric_time(end_date)[0]) if result.is_datetime else float(end_date)
+
+    if t_start > t_end:
+        raise ValueError(
+            f"start_date ({start_date!r}) must be less than or equal to end_date ({end_date!r})."
+        )
 
     samples = result.bootstrap_samples
     valid_samples = [it for it in samples if len(it) > 0]
