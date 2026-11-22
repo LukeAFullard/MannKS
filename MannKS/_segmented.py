@@ -438,6 +438,13 @@ class HybridSegmentedTrend:
         autocorr_penalty='auto',
         use_davies_test=False,
         autocorr_method='none',
+        min_segment_size=5,
+        ci_method='direct',
+        mk_test_method='robust',
+        tau_method='b',
+        tie_break_method='lwp',
+        continuous_confidence=True,
+        category_map=None,
     ):
         """
         Args:
@@ -458,6 +465,19 @@ class HybridSegmentedTrend:
             autocorr_method (str): Optional Phase-2 per-segment autocorrelation adjustment for
                 slope confidence intervals ('none', 'auto', 'yue_wang', or 'block_bootstrap').
                 Default 'none'.
+            min_segment_size (int or None): Minimum number of observations required in every
+                segment for a ``k >= 1`` candidate fit to be accepted (``>= 2`` or ``None``
+                to disable). Default 5.
+            ci_method (str): Method for Phase-2 Sen slope CIs ('direct' or 'lwp'). Default 'direct'.
+            mk_test_method (str): Method for Phase-2 Mann-Kendall variance ('robust' or 'lwp').
+                Default 'robust'.
+            tau_method (str): Kendall's tau method ('a' or 'b'). Default 'b'.
+            tie_break_method (str): Tie-breaking method for censored MK ('robust' or 'lwp').
+                Default 'lwp'.
+            continuous_confidence (bool): Use continuous confidence direction in MK trend
+                classification. Default True.
+            category_map (dict, optional): Optional confidence category map passed to
+                ``classify_trend``.
         """
         if not _is_valid_int(max_breakpoints) or int(max_breakpoints) < 0:
             raise ValueError("max_breakpoints must be a non-negative integer.")
@@ -498,6 +518,20 @@ class HybridSegmentedTrend:
                 f"autocorr_method must be one of {_VALID_AUTOCORR_METHODS}. Got {autocorr_method!r}."
             )
 
+        if min_segment_size is not None:
+            if not _is_valid_int(min_segment_size) or int(min_segment_size) < 2:
+                raise ValueError("min_segment_size must be None or an integer >= 2.")
+            min_segment_size = int(min_segment_size)
+
+        if not isinstance(ci_method, str) or ci_method.lower() not in ('direct', 'lwp'):
+            raise ValueError(f"ci_method must be 'direct' or 'lwp'. Got {ci_method!r}.")
+        if not isinstance(mk_test_method, str) or mk_test_method.lower() not in ('robust', 'lwp'):
+            raise ValueError(f"mk_test_method must be 'robust' or 'lwp'. Got {mk_test_method!r}.")
+        if not isinstance(tau_method, str) or tau_method.lower() not in ('a', 'b'):
+            raise ValueError(f"tau_method must be 'a' or 'b'. Got {tau_method!r}.")
+        if not isinstance(tie_break_method, str) or tie_break_method.lower() not in ('robust', 'lwp'):
+            raise ValueError(f"tie_break_method must be 'robust' or 'lwp'. Got {tie_break_method!r}.")
+
         self.max_breakpoints = int(max_breakpoints)
         self.n_breakpoints = n_breakpoints
         self.use_bagging = bool(use_bagging)
@@ -510,6 +544,13 @@ class HybridSegmentedTrend:
         self.autocorr_penalty = autocorr_penalty_norm
         self.use_davies_test = bool(use_davies_test)
         self.autocorr_method = autocorr_method.lower()
+        self.min_segment_size = min_segment_size
+        self.ci_method = ci_method.lower()
+        self.mk_test_method = mk_test_method.lower()
+        self.tau_method = tau_method.lower()
+        self.tie_break_method = tie_break_method.lower()
+        self.continuous_confidence = bool(continuous_confidence)
+        self.category_map = category_map
 
         self.breakpoints_ = None
         self.breakpoint_cis_ = None
@@ -522,13 +563,16 @@ class HybridSegmentedTrend:
         self.selection_summary_ = None
         self.bootstrap_samples_ = None
         self.bootstrap_failure_rate_ = None
+        self.computation_mode_ = 'hybrid'
+        self.segment_notes_ = []
 
     def fit(self, t, x, censored=None, cen_type=None, lt_mult=0.5, gt_mult=1.1, alpha=0.05,
             large_dataset_mode='auto', max_pairs=None, sens_slope_method='ats'):
         """
         Fit breakpoints (OLS, piecewise-regression) and then estimate each
-        segment's slope robustly (Sen's slope; Akritas-Theil-Sen for censored
-        segments unless ``sens_slope_method`` is 'lwp'/'drop_ambiguous').
+        segment's trend and slope robustly (Mann-Kendall + Sen's slope;
+        Akritas-Theil-Sen for censored segments unless ``sens_slope_method`` is
+        'lwp'/'drop_ambiguous').
 
         Segment confidence intervals are conditional on the estimated
         breakpoints: they do not include breakpoint-location uncertainty.
@@ -547,6 +591,23 @@ class HybridSegmentedTrend:
         if censored is not None:
             censored = np.asarray(censored, dtype=bool)[sort_idx]
             cen_type = np.asarray(cen_type)[sort_idx]
+            # Warn if multiplicative substitution will invert censoring direction on negative limits (F-14)
+            lt_neg = (cen_type == 'lt') & (x < 0)
+            if np.any(lt_neg) and lt_mult != 1.0:
+                warnings.warn(
+                    f"Detected {int(np.sum(lt_neg))} negative left-censored value(s) (< DL with DL < 0). "
+                    f"Multiplicative Phase-1 OLS substitution (lt_mult={lt_mult}) shifts negative limits "
+                    f"upward (e.g., {lt_mult} * -5 = {lt_mult * -5:g} > -5), inverting the censoring direction.",
+                    UserWarning,
+                )
+            gt_neg = (cen_type == 'gt') & (x < 0)
+            if np.any(gt_neg) and gt_mult != 1.0:
+                warnings.warn(
+                    f"Detected {int(np.sum(gt_neg))} negative right-censored value(s) (> DL with DL < 0). "
+                    f"Multiplicative Phase-1 OLS substitution (gt_mult={gt_mult}) shifts negative limits "
+                    f"downward (e.g., {gt_mult} * -5 = {gt_mult * -5:g} < -5), inverting the censoring direction.",
+                    UserWarning,
+                )
             # OLS needs numeric x. Substitute censored values.
             x_ols = x.copy().astype(float)
             x_ols[cen_type == 'lt'] *= lt_mult
@@ -596,6 +657,8 @@ class HybridSegmentedTrend:
         x_scaled = None
         self.bootstrap_samples_ = None
         self.bootstrap_failure_rate_ = None
+        self.computation_mode_ = 'hybrid'
+        self.segment_notes_ = []
 
         selection_records = []
 
@@ -621,7 +684,7 @@ class HybridSegmentedTrend:
             for k in n_range:
                 selection_records.append({
                     'n_breakpoints': int(k), 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 })
         elif float(np.ptp(x_ols)) == 0.0 or x_std == 0.0:
             if self.n_breakpoints is None or int(self.n_breakpoints) == 0:
@@ -633,7 +696,7 @@ class HybridSegmentedTrend:
                     )
                 selection_records.append({
                     'n_breakpoints': 0, 'bic': -np.inf, 'aic': -np.inf,
-                    'mbic': -np.inf, 'sar': 0.0, 'converged': True,
+                    'mbic': -np.inf, 'rss': 0.0, 'sar': 0.0, 'converged': True,
                 })
                 best_n = 0
                 best_bic = -np.inf
@@ -649,7 +712,7 @@ class HybridSegmentedTrend:
                 )
                 selection_records.append({
                     'n_breakpoints': k_req, 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 })
         else:
             x_scaled = (x_ols - x_mean) / x_std
@@ -666,7 +729,7 @@ class HybridSegmentedTrend:
                 k_int = int(k)
                 record = {
                     'n_breakpoints': k_int, 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 }
                 try:
                     if k_int == 0:
@@ -680,7 +743,7 @@ class HybridSegmentedTrend:
                         )
                         record.update({
                             'bic': bic, 'aic': aic, 'mbic': mbic,
-                            'sar': rss_orig, 'converged': True,
+                            'rss': rss_orig, 'sar': rss_orig, 'converged': True,
                         })
                         candidates.append({
                             'k': 0,
@@ -704,6 +767,20 @@ class HybridSegmentedTrend:
                         warnings.warn(
                             f"Insufficient observations (n={n_samples}) for "
                             f"n_breakpoints={k_int} (requires > {2 + 2 * k_int}).",
+                            UserWarning,
+                        )
+                        selection_records.append(record)
+                        continue
+
+                    # Guard minimum total observations required for min_segment_size (F-09)
+                    if (
+                        self.min_segment_size is not None
+                        and n_samples < (k_int + 1) * self.min_segment_size
+                    ):
+                        warnings.warn(
+                            f"Insufficient observations (n={n_samples}) for "
+                            f"n_breakpoints={k_int} with min_segment_size={self.min_segment_size} "
+                            f"(requires >= {(k_int + 1) * self.min_segment_size}).",
                             UserWarning,
                         )
                         selection_records.append(record)
@@ -788,6 +865,30 @@ class HybridSegmentedTrend:
                     cand_bps = [b[0] for b in bps_data]
                     cand_bp_cis = [b[1] for b in bps_data]
 
+                    # Enforce min_segment_size on candidate breakpoint split (F-09)
+                    if self.min_segment_size is not None:
+                        cand_bounds = np.concatenate(([t[0]], cand_bps, [t[-1]]))
+                        n_cand_segs = len(cand_bounds) - 1
+                        min_seg_n = min(
+                            int(np.sum(
+                                (t >= cand_bounds[j]) & (
+                                    (t <= cand_bounds[j + 1])
+                                    if j == n_cand_segs - 1
+                                    else (t < cand_bounds[j + 1])
+                                )
+                            ))
+                            for j in range(n_cand_segs)
+                        )
+                        if min_seg_n < self.min_segment_size:
+                            warnings.warn(
+                                f"Breakpoint fit for n_breakpoints={k_int} produced a segment "
+                                f"with {min_seg_n} observation(s) (< min_segment_size="
+                                f"{self.min_segment_size}); rejecting candidate.",
+                                UserWarning,
+                            )
+                            selection_records.append(record)
+                            continue
+
                     try:
                         y_pred_scaled = np.asarray(bf.get_predicted_yy(), dtype=float)
                         if len(y_pred_scaled) != n_samples:
@@ -802,7 +903,7 @@ class HybridSegmentedTrend:
                     rss_orig = float(rss_scaled) * (x_std ** 2)
                     record.update({
                         'bic': bic, 'aic': aic, 'mbic': mbic,
-                        'sar': rss_orig, 'converged': True,
+                        'rss': rss_orig, 'sar': rss_orig, 'converged': True,
                     })
                     candidates.append({
                         'k': k_int,
@@ -819,6 +920,7 @@ class HybridSegmentedTrend:
                     record['bic'] = np.nan
                     record['aic'] = np.nan
                     record['mbic'] = np.nan
+                    record['rss'] = np.nan
                     record['sar'] = np.nan
                     record['converged'] = False
                     warnings.warn(
@@ -1015,16 +1117,25 @@ class HybridSegmentedTrend:
 
         # --- Phase 2: Robust Estimation (MannKS) ---
         # Import here to avoid potential circular dependencies.
+        from types import SimpleNamespace
+        from scipy.stats import norm
         from ._stats import (
             _sens_estimator_adaptive,
             _sens_estimator_censored_adaptive,
             _mk_score_and_var_censored,
-            _confidence_intervals
+            _confidence_intervals,
+            _z_score,
+            _p_value,
+            _mk_probability,
         )
-
+        from .classification import classify_trend
         from ._large_dataset import detect_size_tier
+
+        tier_info = detect_size_tier(len(t), user_mode=large_dataset_mode)
+        for tier_warn in tier_info.get('warnings', []):
+            warnings.warn(tier_warn, UserWarning)
         if max_pairs is None:
-            max_pairs = detect_size_tier(len(t), user_mode=large_dataset_mode)['max_pairs']
+            max_pairs = tier_info['max_pairs']
 
         self.segments_ = []
         boundaries = np.concatenate(([t.min()], self.breakpoints_, [t.max()]))
@@ -1034,6 +1145,7 @@ class HybridSegmentedTrend:
             if phase2_seq is not None
             else [None] * n_segs
         )
+        any_sampled = False
 
         for i in range(n_segs):
             t_start = boundaries[i]
@@ -1051,7 +1163,11 @@ class HybridSegmentedTrend:
                 self.segments_.append({
                     'slope': np.nan, 'intercept': np.nan,
                     'lower_ci': np.nan, 'upper_ci': np.nan,
-                    'n': len(x_seg)
+                    'n': len(x_seg),
+                    's': np.nan, 'var_s': np.nan, 'z': np.nan, 'p': np.nan,
+                    'h': False, 'Tau': np.nan, 'C': np.nan, 'Cd': np.nan,
+                    'trend': 'no trend', 'classification': 'Insufficient Data',
+                    'analysis_notes': '',
                 })
                 continue
 
@@ -1059,19 +1175,28 @@ class HybridSegmentedTrend:
                        else np.zeros(len(x_seg), dtype=bool))
             cen_type_seg = (np.asarray(cen_type)[mask] if cen_type is not None
                             else np.full(len(x_seg), 'not', dtype=object))
-            s, var_s, _, _ = _mk_score_and_var_censored(x_seg, t_seg, cen_seg, cen_type_seg)
+            s, var_s, _, Tau = _mk_score_and_var_censored(
+                x_seg, t_seg, cen_seg, cen_type_seg,
+                tau_method=self.tau_method,
+                mk_test_method=self.mk_test_method,
+                tie_break_method=self.tie_break_method,
+            )
             n_seg = len(x_seg)
             total_pairs = n_seg * (n_seg - 1) // 2
             sampled = max_pairs is not None and total_pairs > max_pairs
+            if sampled:
+                any_sampled = True
             seg_seed = seg_seeds[i]
+            seg_notes = []
 
             seg_ac = self.autocorr_method
             if seg_ac == 'auto' and n_seg >= 3:
-                needs_corr, _, _ = should_apply_correction(
+                needs_corr, acf1_seg, _ = should_apply_correction(
                     x_seg, t_seg, max_pairs=max_pairs, random_state=seg_seed
                 )
                 if needs_corr:
                     seg_ac = 'block_bootstrap' if n_seg >= 5 else 'yue_wang'
+                    seg_notes.append(f"Autocorrelation detected (ACF1={acf1_seg:.3f}), applying {seg_ac}")
                 else:
                     seg_ac = 'none'
             elif seg_ac == 'auto':
@@ -1085,18 +1210,84 @@ class HybridSegmentedTrend:
                 )
                 seg_ac = 'yue_wang' if n_seg >= 3 else 'none'
 
-            if seg_ac == 'yue_wang' and n_seg >= 3:
+            var_factor = 1.0
+            if seg_ac == 'block_bootstrap' and n_seg >= 5:
+                from ._bootstrap import block_bootstrap_mann_kendall, detrended_block_size
+                boot_n = (
+                    int(self.n_bootstrap)
+                    if _is_valid_int(self.n_bootstrap) and int(self.n_bootstrap) >= 2
+                    else 100
+                )
+                if self.block_size == 'auto':
+                    seg_block_size = detrended_block_size(
+                        x_seg, t_seg, cen_seg, cen_type_seg,
+                        method=sens_slope_method if cen_seg.any() else 'drop_ambiguous',
+                        lt_mult=lt_mult, gt_mult=gt_mult,
+                        max_pairs=max_pairs, random_state=seg_seed,
+                    )
+                else:
+                    seg_block_size = int(self.block_size)
+                p_val, _, s_boot_dist = block_bootstrap_mann_kendall(
+                    x_seg, t_seg, cen_seg, cen_type_seg,
+                    block_size=seg_block_size, n_bootstrap=boot_n,
+                    tau_method=self.tau_method, mk_test_method=self.mk_test_method,
+                    tie_break_method=self.tie_break_method, random_state=seg_seed,
+                    sens_slope_method=sens_slope_method, lt_mult=lt_mult, gt_mult=gt_mult,
+                    max_pairs=max_pairs,
+                )
+                z_val = float(norm.ppf(1.0 - p_val / 2.0) * np.sign(s)) if np.isfinite(p_val) else np.nan
+                h_val = bool(p_val < alpha) if np.isfinite(p_val) else False
+                var_s = float(np.var(s_boot_dist, ddof=1)) if len(s_boot_dist) > 1 else var_s
+                if self.continuous_confidence:
+                    trend_str = 'decreasing' if z_val < 0 else ('increasing' if z_val > 0 else 'indeterminate')
+                else:
+                    trend_str = ('decreasing' if z_val < 0 else 'increasing') if h_val else 'no trend'
+            elif seg_ac == 'yue_wang' and n_seg >= 3:
                 n_eff_seg, _ = effective_sample_size(
                     x_seg, t_seg, max_pairs=max_pairs, random_state=seg_seed
                 )
-                var_s = var_s * (n_seg / n_eff_seg)
+                var_factor = n_seg / n_eff_seg
+                var_s = var_s * var_factor
+                z_val = _z_score(s, var_s)
+                p_val, h_val, trend_str = _p_value(
+                    z_val, alpha, continuous_confidence=self.continuous_confidence
+                )
+                seg_notes.append(f"Yue-Wang correction applied (n_eff={n_eff_seg:.1f})")
+            else:
+                z_val = _z_score(s, var_s)
+                p_val, h_val, trend_str = _p_value(
+                    z_val, alpha, continuous_confidence=self.continuous_confidence
+                )
+
+            # Variance for slope CIs ('lwp' recomputes uncensored variance, matching trend_test)
+            var_s_ci = var_s
+            if self.ci_method == 'lwp' and seg_ac != 'block_bootstrap':
+                _, var_s_unc, _, _ = _mk_score_and_var_censored(
+                    x_seg, t_seg,
+                    np.zeros(n_seg, dtype=bool),
+                    np.full(n_seg, 'not', dtype=object),
+                    tau_method=self.tau_method,
+                    mk_test_method=self.mk_test_method,
+                    tie_break_method=self.tie_break_method,
+                )
+                var_s_ci = var_s_unc * var_factor
+
+            C_val, Cd_val = _mk_probability(p_val, s)
+            classification = classify_trend(
+                SimpleNamespace(C=C_val, Cd=Cd_val, h=h_val, s=s, trend=trend_str),
+                category_map=self.category_map,
+            )
 
             if cen_seg.any() and sens_slope_method == 'ats':
                 from ._ats import ats_slope
-                ats = ats_slope(t_seg, x_seg, cen_seg, cen_type=cen_type_seg, var_s=var_s,
+                ats = ats_slope(t_seg, x_seg, cen_seg, cen_type=cen_type_seg, var_s=var_s_ci,
                                 ci_alpha=alpha, max_pairs=max_pairs, random_state=seg_seed)
                 slope, intercept = ats['beta'], ats['intercept']
                 lower_ci, upper_ci = ats['ci_lower'], ats['ci_upper']
+                for note in ats.get('notes', []):
+                    if note:
+                        seg_notes.append(str(note))
+                        self.segment_notes_.append(f"Segment {i}: {note}")
             else:
                 if cen_seg.any():
                     method = 'lwp' if sens_slope_method == 'lwp' else 'drop_ambiguous'
@@ -1108,22 +1299,23 @@ class HybridSegmentedTrend:
                         x_seg, t_seg, max_pairs=max_pairs, random_state=seg_seed)
                 slope = np.nanmedian(slopes) if np.any(~np.isnan(slopes)) else np.nan
                 lower_ci, upper_ci = _confidence_intervals(
-                    slopes, var_s, alpha=alpha, total_pairs=total_pairs if sampled else None)
-                intercept = np.median(x_seg - slope * t_seg) if np.isfinite(slope) else np.nan
+                    slopes, var_s_ci, alpha=alpha, method=self.ci_method,
+                    total_pairs=total_pairs if sampled else None,
+                )
+                intercept = (
+                    float(np.nanmedian(x_seg) - slope * np.nanmedian(t_seg))
+                    if np.isfinite(slope)
+                    else np.nan
+                )
 
             if seg_ac == 'block_bootstrap' and n_seg >= 5:
-                boot_n = (
-                    int(self.n_bootstrap)
-                    if _is_valid_int(self.n_bootstrap) and int(self.n_bootstrap) >= 2
-                    else 100
-                )
                 boot_method = sens_slope_method if cen_seg.any() else 'drop_ambiguous'
                 _, lower_ci, upper_ci, _ = block_bootstrap_confidence_intervals(
                     x_seg,
                     t_seg,
                     cen_seg,
                     cen_type_seg,
-                    block_size=self.block_size,
+                    block_size=seg_block_size,
                     n_bootstrap=boot_n,
                     alpha=alpha,
                     random_state=seg_seed,
@@ -1138,8 +1330,21 @@ class HybridSegmentedTrend:
                 'intercept': intercept,
                 'lower_ci': lower_ci,
                 'upper_ci': upper_ci,
-                'n': len(x_seg)
+                'n': len(x_seg),
+                's': s,
+                'var_s': var_s,
+                'z': z_val,
+                'p': p_val,
+                'h': bool(h_val),
+                'Tau': Tau,
+                'C': C_val,
+                'Cd': Cd_val,
+                'trend': trend_str,
+                'classification': classification,
+                'analysis_notes': '; '.join(seg_notes),
             })
+
+        self.computation_mode_ = 'fast' if any_sampled else 'hybrid'
 
     def predict(self, t):
         t = np.asarray(t)

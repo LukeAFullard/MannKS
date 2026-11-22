@@ -140,6 +140,14 @@ class SegmentedTrendResult(_Segmented_Trend_Test_Tuple):
                 f"Bagging bootstrap replicate failure rate: {100.0 * failure_rate:.1f}% "
                 f"(failed replicates were excluded from breakpoint estimates and CIs)."
             )
+        if (
+            self.segments is not None
+            and not self.segments.empty
+            and 'analysis_notes' in self.segments.columns
+        ):
+            for idx, seg_note in enumerate(self.segments['analysis_notes']):
+                if isinstance(seg_note, str) and seg_note.strip():
+                    notes.append(f"Segment {idx}: {seg_note}")
         return notes
 
 def _prepare_data(x, t, hicensor=False):
@@ -193,13 +201,27 @@ def segmented_trend_test(
     lt_mult: float = 0.5,
     gt_mult: float = 1.1,
     sens_slope_method: str = 'ats',
+    min_segment_size: Optional[int] = 5,
+    ci_method: str = 'direct',
+    mk_test_method: str = 'robust',
+    tau_method: str = 'b',
+    tie_break_method: str = 'lwp',
+    continuous_confidence: bool = True,
+    category_map: Optional[dict] = None,
 ):
     """
     Perform Hybrid Segmented Trend Analysis.
 
     This function is a wrapper around `HybridSegmentedTrend`. It combines:
-    1. OLS-based breakpoint detection (Piecewise Regression).
-    2. Robust Mann-Kendall / Sen's slope estimation on the identified segments.
+    1. OLS-based breakpoint detection (Piecewise Regression) using continuous
+       hinged linear segments. For censored inputs, Phase-1 OLS substitutes
+       left-censored values by ``lt_mult * limit`` and right-censored values by
+       ``gt_mult * limit`` (intended for positive limits; negative limits emit
+       a warning because multiplicative scaling inverts the censoring direction).
+    2. Robust Mann-Kendall test and Sen's / Akritas-Theil-Sen slope estimation
+       on each identified segment. Note that Phase-2 segment lines are estimated
+       independently per segment and are therefore **piecewise discontinuous**
+       at the breakpoints.
 
     Args:
         x: Data vector or DataFrame.
@@ -241,6 +263,19 @@ def segmented_trend_test(
             and ``'lwp'`` slope estimation. Default ``1.1``.
         sens_slope_method: Slope estimator for censored segments: ``'ats'`` (default,
             Akritas-Theil-Sen), ``'lwp'``, or ``'drop_ambiguous'``.
+        min_segment_size: Minimum observations required per segment for a ``k >= 1``
+            candidate breakpoint split to be accepted (``>= 2`` or ``None`` to
+            disable). Default ``5``.
+        ci_method: Method for Phase-2 Sen slope confidence intervals: ``'direct'``
+            (default) or ``'lwp'`` (LWP-TRENDS R parity).
+        mk_test_method: Method for Phase-2 Mann-Kendall variance: ``'robust'``
+            (default) or ``'lwp'``.
+        tau_method: Kendall's tau method (``'a'`` or ``'b'``). Default ``'b'``.
+        tie_break_method: Tie-breaking method for censored MK (``'robust'`` or
+            ``'lwp'``). Default ``'lwp'``.
+        continuous_confidence: Use continuous confidence direction in MK trend
+            classification. Default ``True``.
+        category_map: Optional confidence category map passed to ``classify_trend``.
 
     Note:
         **Post-Selection Conditional Confidence Intervals:**
@@ -285,6 +320,13 @@ def segmented_trend_test(
         autocorr_penalty=autocorr_penalty,
         use_davies_test=use_davies_test,
         autocorr_method=autocorr_method,
+        min_segment_size=min_segment_size,
+        ci_method=ci_method,
+        mk_test_method=mk_test_method,
+        tau_method=tau_method,
+        tie_break_method=tie_break_method,
+        continuous_confidence=continuous_confidence,
+        category_map=category_map,
     )
 
     # Capture warnings
@@ -459,7 +501,7 @@ def segmented_trend_test(
         bootstrap_samples=hybrid_model.bootstrap_samples_,
         alpha=alpha,
         warnings=captured_warnings,
-        computation_mode='hybrid'
+        computation_mode=hybrid_model.computation_mode_
     )
 
 

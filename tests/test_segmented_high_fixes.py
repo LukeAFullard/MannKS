@@ -452,9 +452,8 @@ def test_f10_invalid_breakpoint_counts_and_unknown_kwargs_rejected():
     # Unknown / misspelled kwargs must raise TypeError
     for bad_kw in (
         {"use_baging": True},
-        {"ci_method": "lwp"},
-        {"mk_test_method": "lwp"},
         {"agg_method": "median"},
+        {"unknown_flag": 123},
     ):
         with pytest.raises(TypeError):
             segmented_trend_test(x, t, n_breakpoints=0, **bad_kw)
