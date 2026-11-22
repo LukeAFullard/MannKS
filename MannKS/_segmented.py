@@ -46,9 +46,9 @@ def _make_seed_sequence(random_state):
     if isinstance(random_state, np.random.SeedSequence):
         return random_state
     if isinstance(random_state, np.random.Generator):
-        return np.random.SeedSequence(int(random_state.integers(0, 2**32 - 1)))
+        return np.random.SeedSequence(int(random_state.integers(0, 2**32 - 1, dtype=np.int64)))
     if isinstance(random_state, np.random.RandomState):
-        return np.random.SeedSequence(int(random_state.randint(0, 2**32 - 1)))
+        return np.random.SeedSequence(int(random_state.randint(0, 2**32 - 1, dtype=np.int64)))
     if _is_valid_int(random_state):
         return np.random.SeedSequence(int(random_state))
     return np.random.SeedSequence(random_state)

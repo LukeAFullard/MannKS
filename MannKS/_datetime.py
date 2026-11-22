@@ -98,6 +98,44 @@ def _datetime_to_seconds(t):
     return out
 
 
+def _seconds_to_datetime(values, tz=None):
+    """
+    Convert float seconds since 1970-01-01 to pandas DatetimeIndex (or scalar
+    Timestamp) without overflowing pandas 2.x's nanosecond bounds (1677-2262).
+    """
+    is_scalar = np.ndim(values) == 0
+    if is_scalar:
+        if pd.isna(values) or not np.isfinite(float(values)):
+            return pd.NaT
+        try:
+            ts = pd.to_datetime(float(values), unit='s')
+        except pd.errors.OutOfBoundsDatetime:
+            us = np.datetime64('1970-01-01T00:00:00', 'us') + np.timedelta64(
+                int(round(float(values) * 1e6)), 'us'
+            )
+            ts = pd.Timestamp(us)
+        if tz is not None:
+            ts = ts.tz_localize('UTC').tz_convert(tz)
+        return ts
+
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        idx = pd.DatetimeIndex([])
+    else:
+        try:
+            idx = pd.to_datetime(arr, unit='s')
+        except pd.errors.OutOfBoundsDatetime:
+            epoch = np.datetime64('1970-01-01T00:00:00', 'us')
+            dt_arr = np.full(arr.shape, np.datetime64('NaT', 'us'), dtype='datetime64[us]')
+            finite = np.isfinite(arr)
+            if np.any(finite):
+                dt_arr[finite] = epoch + np.round(arr[finite] * 1e6).astype('int64').astype('timedelta64[us]')
+            idx = pd.DatetimeIndex(dt_arr)
+    if tz is not None:
+        idx = idx.tz_localize('UTC').tz_convert(tz)
+    return idx
+
+
 def _raise_if_string_times(arr):
     if arr.dtype.kind in 'US' or (arr.dtype == 'O' and arr.size and isinstance(arr.ravel()[0], str)):
         raise TypeError("The time vector `t` contains strings. Convert it first, "

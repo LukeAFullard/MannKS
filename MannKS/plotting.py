@@ -798,9 +798,8 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None, ax=None):
             y_seg = slope * x_seg_numeric + intercept
 
             if is_datetime:
-                x_seg_plot = pd.to_datetime(x_seg_numeric, unit='s')
-                if bp_tz is not None:
-                    x_seg_plot = x_seg_plot.tz_localize('UTC').tz_convert(bp_tz)
+                from ._datetime import _seconds_to_datetime
+                x_seg_plot = _seconds_to_datetime(x_seg_numeric, tz=bp_tz)
             else:
                 x_seg_plot = x_seg_numeric
 

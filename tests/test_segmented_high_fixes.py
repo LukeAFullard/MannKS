@@ -167,8 +167,8 @@ def test_f04_tz_aware_datetimeindex_and_series():
 
         expected_bp = pd.Timestamp("2020-01-16 00:00", tz="Pacific/Auckland")
         assert abs((res1.breakpoints[0] - expected_bp).total_seconds()) < 2 * 86400
-        assert res1.breakpoint_cis[0][0].tz == res1.breakpoints.tz
-        assert res1.breakpoint_cis[0][1].tz == res1.breakpoints.tz
+        assert str(res1.breakpoint_cis[0][0].tz) == str(res1.breakpoints.tz)
+        assert str(res1.breakpoint_cis[0][1].tz) == str(res1.breakpoints.tz)
 
         preds = res1.predict(t_in)
         assert preds.shape == (30,)
@@ -282,6 +282,8 @@ def test_f05_subsecond_100ms_hinge_and_trend_test():
 
 def test_f05_subsecond_1ms_100us_and_overflow_safe_far_dates():
     """_datetime_to_seconds preserves 1ms/100us precision and never overflows dates outside 1677-2262."""
+    from MannKS._datetime import _seconds_to_datetime
+
     t_ms = pd.date_range("2020-01-01", periods=10, freq="1ms")
     s_ms = _datetime_to_seconds(t_ms)
     np.testing.assert_allclose(np.diff(s_ms), 1e-3, atol=1e-6)
@@ -294,7 +296,7 @@ def test_f05_subsecond_1ms_100us_and_overflow_safe_far_dates():
         far = np.array(["1600-01-01", "2500-01-01"], dtype=dtype)
         sec = _datetime_to_seconds(far)
         assert np.all(np.isfinite(sec))
-        roundtrip = pd.to_datetime(sec, unit="s")
+        roundtrip = _seconds_to_datetime(sec)
         assert roundtrip[0].year == 1600
         assert roundtrip[1].year == 2500
 

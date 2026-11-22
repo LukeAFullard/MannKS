@@ -425,9 +425,8 @@ def segmented_trend_test(
 
         # Convert breakpoints back to original time format if datetime
         if is_datetime:
-            breakpoints_final = pd.to_datetime(breakpoints, unit='s')
-            if orig_tz is not None:
-                breakpoints_final = breakpoints_final.tz_localize('UTC').tz_convert(orig_tz)
+            from ._datetime import _seconds_to_datetime
+            breakpoints_final = _seconds_to_datetime(breakpoints, tz=orig_tz)
 
             # Convert CIs to Datetime
             breakpoint_cis_final = []
@@ -438,13 +437,8 @@ def segmented_trend_test(
                         low_val = ci[0]
                         high_val = ci[1]
 
-                        low_dt = pd.to_datetime(low_val, unit='s') if pd.notna(low_val) else pd.NaT
-                        high_dt = pd.to_datetime(high_val, unit='s') if pd.notna(high_val) else pd.NaT
-                        if orig_tz is not None:
-                            if pd.notna(low_dt):
-                                low_dt = low_dt.tz_localize('UTC').tz_convert(orig_tz)
-                            if pd.notna(high_dt):
-                                high_dt = high_dt.tz_localize('UTC').tz_convert(orig_tz)
+                        low_dt = _seconds_to_datetime(low_val, tz=orig_tz) if pd.notna(low_val) else pd.NaT
+                        high_dt = _seconds_to_datetime(high_val, tz=orig_tz) if pd.notna(high_val) else pd.NaT
                         breakpoint_cis_final.append((low_dt, high_dt))
                     else:
                         breakpoint_cis_final.append((pd.NaT, pd.NaT))
