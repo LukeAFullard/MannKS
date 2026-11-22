@@ -759,9 +759,12 @@ class HybridSegmentedTrend:
     Phase 1 (Structure Discovery): Uses standardized multi-start profile OLS
     (combining ``piecewise-regression`` with deterministic quantile and
     sequential ``k-1`` warm-starts) to find the number and location of
-    breakpoints. Optionally uses bagging for robust breakpoint locations
-    (conditional on the Phase-1 selected number of breakpoints; ``bic_`` and
-    ``aic_`` remain Phase-1 OLS values).
+    breakpoints. Because Phase-1 uses Gaussian OLS likelihood, ``criterion='bic'``
+    can occasionally over-split heavy-tailed, outlier-prone, or strongly
+    heteroscedastic series; ``criterion='mbic'`` is recommended for such records.
+    Optionally uses bagging for robust breakpoint locations (conditional on the
+    Phase-1 selected number of breakpoints; ``bic_`` and ``aic_`` remain Phase-1
+    OLS values).
 
     Phase 2 (Robust Estimation): Uses Mann-Kendall / Sen's Slope on the
     identified segments to estimate robust slopes and confidence intervals.
@@ -1488,9 +1491,14 @@ class HybridSegmentedTrend:
             n_failed = sum(1 for bps in all_samples_structured if len(bps) != best_n)
             self.bootstrap_failure_rate_ = (n_failed / n_total) if n_total > 0 else 1.0
             if n_failed > 0:
+                reason = (
+                    f"failed to converge or violated min_segment_size={self.min_segment_size}"
+                    if self.min_segment_size is not None
+                    else "failed to converge"
+                )
                 warnings.warn(
                     f"{n_failed}/{n_total} ({100.0 * self.bootstrap_failure_rate_:.1f}%) "
-                    f"bagging bootstrap replicates failed to converge and were excluded.",
+                    f"bagging bootstrap replicates {reason} and were excluded.",
                     UserWarning,
                 )
 

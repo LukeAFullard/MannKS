@@ -104,8 +104,8 @@ class SegmentedTrendResult(_Segmented_Trend_Test_Tuple):
     @property
     def bootstrap_failure_rate(self) -> Optional[float]:
         """
-        Fraction of bagging bootstrap replicates that failed to converge,
-        or ``None`` if bagging was not used.
+        Fraction of bagging bootstrap replicates excluded due to non-convergence
+        or ``min_segment_size`` violations, or ``None`` if bagging was not used.
         """
         if self.bootstrap_samples is None:
             return None
@@ -252,7 +252,9 @@ def segmented_trend_test(
         criterion: Model selection criterion ('bic', 'mbic', or 'aic'). Default 'bic'.
             ``'mbic'`` uses a stronger ``(2 + 3 * k) * log(n)`` penalty (3 * log(n) per
             breakpoint, inspired by Zhang & Siegmund 2007, omitting the segment-length
-            term).
+            term). Because Phase-1 uses Gaussian OLS likelihood, ``'bic'`` can
+            occasionally over-split heavy-tailed, outlier-prone, or strongly
+            heteroscedastic series; ``criterion='mbic'`` is recommended for such data.
         use_bagging: Use bootstrap aggregating for robust breakpoint locations.
             Note that bagging resamples breakpoint *locations* conditional on the
             Phase-1 selected ``n_breakpoints`` (model selection itself is not bagged,
