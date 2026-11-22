@@ -244,11 +244,11 @@ print(f"Censored: Probability change occurred in 2010: {prob_cens:.1%}")
 Running Model Selection (0-2 breakpoints) on Censored Data...
 
 Model Selection Summary (Censored):
-|   n_breakpoints |      bic |      aic |       sar | converged   |
-|----------------:|---------:|---------:|----------:|:------------|
-|               0 |  652.065 |  645.104 | 3469.98   | True        |
-|               1 |  280.711 |  266.788 |  705.511  | True        |
-|               2 | -421.626 | -442.51  |   36.1201 | True        |
+|   n_breakpoints |      bic |      aic |     mbic |    score |       rss |       sar | converged   |
+|----------------:|---------:|---------:|---------:|---------:|----------:|----------:|:------------|
+|               0 |  652.065 |  645.104 |  652.065 |  652.065 | 3469.98   | 3469.98   | True        |
+|               1 |  280.711 |  266.788 |  286.191 |  280.711 |  705.511  |  705.511  | True        |
+|               2 | -421.626 | -442.51  | -410.665 | -421.626 |   36.1201 |   36.1201 | True        |
 
 Best Model (Censored): 2 Breakpoints
 Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored.png
@@ -257,22 +257,22 @@ Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regres
 Running Model Selection (0-2 breakpoints) on Uncensored Data...
 
 Model Selection Summary (Uncensored):
-|   n_breakpoints |      bic |      aic |        sar | converged   |
-|----------------:|---------:|---------:|-----------:|:------------|
-|               0 |  940.669 |  933.708 | 11549.8    | True        |
-|               1 | -328.415 | -342.337 |    55.7513 | True        |
-|               2 | -322.515 | -343.398 |    54.5879 | True        |
+|   n_breakpoints |      bic |      aic |     mbic |    score |        rss |        sar | converged   |
+|----------------:|---------:|---------:|---------:|---------:|-----------:|-----------:|:------------|
+|               0 |  940.669 |  933.708 |  940.669 |  940.669 | 11549.8    | 11549.8    | True        |
+|               1 | -328.415 | -342.337 | -322.934 | -328.415 |    55.7513 |    55.7513 | True        |
+|               2 | -322.861 | -343.744 | -311.899 | -322.861 |    54.5092 |    54.5092 | True        |
 
 Best Model (Uncensored): 1 Breakpoints
 Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored.png
 
 --- CI Comparison: Bootstrap vs Standard OLS ---
-Censored (Bootstrap): 2010-05-25 22:14:02.896479845 (CI: 2010-05-03 12:09:42.807063818 to 2010-06-12 15:38:21.830445528)
-Censored (Standard OLS): 2010-05-25 01:55:24.474270582 (CI: 2010-05-03 16:04:51.965868235 to 2010-06-15 11:45:56.982672930)
+Censored (Bootstrap): 2010-05-26 06:25:37.657592297 (CI: 2010-04-14 07:44:34.749985456 to 2010-06-06 15:29:28.017023802)
+Censored (Standard OLS): 2010-05-25 01:55:24.497673988 (CI: 2010-05-03 16:04:51.989310980 to 2010-06-15 11:45:57.006036997)
 Standard OLS Censored Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_censored_ols.png
 
-Uncensored (Bootstrap): 2010-06-02 10:04:44.404549837 (CI: 2010-05-24 18:39:56.929931879 to 2010-06-16 17:12:08.454396248)
-Uncensored (Standard OLS): 2010-05-30 18:27:04.428439379 (CI: 2010-05-11 23:17:11.799437761 to 2010-06-18 13:36:57.057440996)
+Uncensored (Bootstrap): 2010-05-25 16:58:23.011419773 (CI: 2010-05-17 13:19:21.816558838 to 2010-06-08 16:14:57.032531737)
+Uncensored (Standard OLS): 2010-05-30 18:27:04.376173496 (CI: 2010-05-11 23:17:11.747124434 to 2010-06-18 13:36:57.005222559)
 Standard OLS Uncensored Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/32_Segmented_Regression/segmented_plot_uncensored_ols.png
 Uncensored: Probability change occurred in 2010: 100.0%
 Censored: Probability change occurred in 2010: 100.0%

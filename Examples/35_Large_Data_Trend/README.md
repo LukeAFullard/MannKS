@@ -47,7 +47,7 @@ Timings depend on the machine.
 
 ```text
 --- 1. Linear trend (medium noise) ---
-Time: 0.05s
+Time: 0.09s
 Mode: fast
 Pairs used for the slope: 99,919
 Estimated slope: 0.499995 units per unit of t
@@ -58,7 +58,7 @@ Conf. interval:  (0.499944, 0.500047)
 Trend: increasing, p = 0
 
 --- 2. Linear trend (high noise) ---
-Time: 0.04s
+Time: 0.09s
 Mode: fast
 Pairs used for the slope: 99,919
 Estimated slope: 0.100192 units per unit of t
@@ -70,7 +70,7 @@ Trend: increasing, p = 0
 
 (Proportion censored: 17%)
 --- 3. Censored data (Akritas-Theil-Sen slope) ---
-Time: 0.04s
+Time: 0.10s
 Mode: fast
 Pairs used for the slope: 99,919
 Estimated slope: 0.499298 units per unit of t
@@ -81,7 +81,7 @@ Conf. interval:  (0.497731, 0.501064)
 Trend: increasing, p = 0
 
 --- 4. Seasonal trend (24 hourly seasons) ---
-Time: 0.27s
+Time: 0.67s
 Mode: fast
 Pairs used for the slope: 98,424
 Estimated slope: 0.199999 units per hour
@@ -92,10 +92,10 @@ Conf. interval:  (0.199972, 0.200027)
 Trend: increasing, p = 0
 
 --- 5. Segmented trend ---
-Time: 4.97s
+Time: 2.85s
 Breakpoint: 5999.9 (true: 6000)
   Segment 1: slope = 1.0000, CI = (1.0000, 1.0001)
-  Segment 2: slope = -0.5000, CI = (-0.5000, -0.4999)
+  Segment 2: slope = -0.5000, CI = (-0.5001, -0.4999)
 True slopes: segment 1 = 1.0, segment 2 = -0.5
 Plot saved to /home/antigravity/LukeAFullard/MannKS/Examples/35_Large_Data_Trend/large_data_trends.png
 ```

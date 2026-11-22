@@ -35,9 +35,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,  python: "3.9",  deps: minimum }
+          - { os: ubuntu-24.04,   python: "3.9",  deps: minimum }
           - { os: ubuntu-latest,  python: "3.13", deps: scipy-1.14 }
-          - { os: ubuntu-latest,  python: "3.9",  deps: latest }
+          - { os: ubuntu-24.04,   python: "3.9",  deps: latest }
           - { os: ubuntu-latest,  python: "3.13", deps: latest }
           - { os: windows-latest, python: "3.13", deps: latest }
           - { os: macos-latest,   python: "3.13", deps: latest }

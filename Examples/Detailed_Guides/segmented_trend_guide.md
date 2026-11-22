@@ -74,7 +74,7 @@ A list of timestamps (or numeric values) where the structural changes occur.
 A pandas DataFrame, with one row for each period between breakpoints. Columns include:
 *   `slope`: Sen's slope (Akritas-Theil-Sen for censored segments) for that segment.
 *   `intercept`: The intercept for the line equation $y = mx + c$, on the unscaled time axis (seconds since 1970 for datetime `t`).
-*   `lower_ci`, `upper_ci`: (1 - `alpha`) confidence bounds for the slope. They are **conditional on the estimated breakpoints**: the uncertainty in the breakpoint locations is not included.
+*   `lower_ci`, `upper_ci`: (1 - `alpha`) confidence bounds for the slope. When `result.n_breakpoints > 0` (`result.ci_is_conditional` is `True`), these intervals are **conditional on the estimated breakpoints** (post-selection inference) and do not include breakpoint-location uncertainty; nominal coverage can be lower under low SNR, small slope changes, edge breakpoints, outliers, or serial correlation. Check `result.analysis_notes` and `result.warnings` for runtime diagnostics, and consider setting `autocorr_method='yue_wang'`, `'block_bootstrap'`, or `'auto'` when segments exhibit serial correlation.
 *   `n`: Number of samples in the segment.
 
 An observation exactly at a breakpoint belongs to the later segment.
@@ -87,15 +87,16 @@ A method to generate the fitted trend line for any time vector `t`. Useful for p
 y_fitted = result.predict(dates)
 ```
 
-## Advanced: Breakpoint Uncertainty
+## Advanced: Breakpoint Uncertainty & Conditional CIs
 
-The result always includes **Confidence Intervals for the Breakpoints** (`result.breakpoint_cis`), but their source depends on the method used:
+The result always includes **Confidence Intervals for the Breakpoints** (`result.breakpoint_cis`), diagnostic properties (`result.ci_is_conditional`, `result.analysis_notes`), and `result.warnings`:
 
-1.  **Standard OLS (`use_bagging=False`)**: The CIs are derived from the standard error of the Piecewise Regression model. These assume normality and are typically symmetric.
-2.  **Bootstrap Bagging (`use_bagging=True`)**: The CIs are percentile intervals (level 1 - `alpha`) of the bootstrap distribution of the breakpoints, after removing outlying bootstrap fits. These are more robust to noise and can handle asymmetric uncertainty (e.g., "the change happened *at least* by 2010, but possibly much earlier").
+1.  **Standard OLS (`use_bagging=False`)**: Breakpoint CIs are derived from the asymptotic Delta-method t-interval of the Piecewise Regression model. These assume i.i.d. Gaussian errors, are symmetric, and can undercover nominal `1 - alpha` levels under low SNR, small slope changes, edge breakpoints, outliers, or serial correlation.
+2.  **Bootstrap Bagging (`use_bagging=True`)**: Breakpoint CIs are empirical percentile intervals (level `1 - alpha`) of the converged bootstrap draws (using circular block bootstrap by default to respect serial correlation). These handle asymmetric uncertainty (e.g., "the change happened *at least* by 2010, but possibly much earlier"), though per-segment slope CIs remain conditional on the bagged breakpoint estimates.
 
 *   A wide CI (e.g., "2010 to 2014") indicates the exact timing of the change is uncertain, often due to a gradual transition or high noise.
 *   A narrow CI (e.g., "May 2010 to June 2010") indicates a sharp, sudden change.
+*   For autocorrelated time series, use `autocorr_penalty='auto'` (default) for Phase-1 model selection and optionally `autocorr_method='yue_wang'`, `'block_bootstrap'`, or `'auto'` for Phase-2 per-segment slope CIs.
 
 ### Calculating Probability of a Change
 If you used **bagging** (`use_bagging=True`), you can calculate the probability that a structural break occurred within a specific time window. This is not possible with standard OLS.

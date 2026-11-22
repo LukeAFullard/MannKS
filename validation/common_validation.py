@@ -31,6 +31,26 @@ def setup_logging(output_dir):
     return logging.getLogger()
 
 # --- 1. OLS Piecewise Implementation (piecewise-regression) ---
+def _extract_piecewise_estimates(estimates, n_bp):
+    """
+    Extract sorted breakpoints and per-segment slopes from a piecewise_regression
+    estimates dict.
+
+    In piecewise_regression, ``alpha1..alpha_{n_bp+1}`` are the segment slopes
+    directly, while ``beta1..beta_{n_bp}`` are the slope changes at each breakpoint.
+    """
+    bps = sorted(
+        val['estimate']
+        for key, val in estimates.items()
+        if key.startswith('breakpoint') and isinstance(val, dict) and 'estimate' in val
+    )
+    slopes = [
+        estimates.get(f'alpha{i}', {}).get('estimate', np.nan)
+        for i in range(1, n_bp + 2)
+    ]
+    return bps, slopes
+
+
 def fit_piecewise_ols(t, y, max_breakpoints=2):
     """
     Fits piecewise linear regression using the piecewise_regression library.
@@ -50,17 +70,17 @@ def fit_piecewise_ols(t, y, max_breakpoints=2):
             ssr = resid[0]
         else:
             # Perfect fit
-            y_pred = sol[0]*t + sol[1]
-            ssr = np.sum((y - y_pred)**2)
+            y_pred = sol[0] * t + sol[1]
+            ssr = np.sum((y - y_pred) ** 2)
 
         k = 2
-        if ssr <= 1e-10: ssr = 1e-10
-        bic = n * np.log(ssr/n) + k * np.log(n)
+        ssr_eff = max(float(ssr), np.finfo(float).tiny)
+        bic = n * np.log(ssr_eff / n) + k * np.log(n)
 
         best_bic = bic
         best_n = 0
         best_bps = []
-    except:
+    except Exception:
         pass
 
     # Loop for 1 to max_breakpoints
@@ -71,74 +91,41 @@ def fit_piecewise_ols(t, y, max_breakpoints=2):
             pw_fit = piecewise_regression.Fit(t, y, n_breakpoints=n_bp, verbose=False)
 
             # Access results via best_muggeo as requested for robust estimate access
-            if hasattr(pw_fit, 'best_muggeo') and hasattr(pw_fit.best_muggeo, 'best_fit'):
-                 best_fit = pw_fit.best_muggeo.best_fit
+            bm = getattr(pw_fit, 'best_muggeo', None)
+            best_fit = getattr(bm, 'best_fit', None) if bm is not None else None
+            if best_fit is not None:
+                # Use the library's calculated BIC directly if available
+                if hasattr(best_fit, 'bic') and best_fit.bic is not None:
+                    current_bic = best_fit.bic
+                else:
+                    rss = getattr(best_fit, 'residual_sum_squares', None)
+                    if rss is None:
+                        rss = getattr(best_fit, 'rss', np.inf)
+                    k = 2 * n_bp + 2
+                    rss_eff = max(float(rss), np.finfo(float).tiny)
+                    current_bic = n * np.log(rss_eff / n) + k * np.log(n)
 
-                 # BIC
-                 # Use the library's calculated BIC directly if available
-                 if hasattr(best_fit, 'bic'):
-                     current_bic = best_fit.bic
-                 else:
-                     # Fallback calculation
-                     rss = getattr(best_fit, 'residual_sum_squares', None)
-                     if rss is None:
-                         # Try finding it in dict if it's not an attribute
-                         rss = getattr(best_fit, 'rss', np.inf)
-
-                     k = 2 * n_bp + 2
-                     if rss <= 1e-10: rss = 1e-10
-                     current_bic = n * np.log(rss/n) + k * np.log(n)
-
-                 if current_bic < best_bic:
+                if np.isfinite(current_bic) and current_bic < best_bic:
                     best_bic = current_bic
                     best_n = n_bp
-
-                    # Extract breakpoints from estimates
-                    estimates = best_fit.estimates
-                    bps = []
-                    for key, val in estimates.items():
-                        if key.startswith('breakpoint'):
-                            bps.append(val['estimate'])
-                    best_bps = sorted(bps)
-
-                    # Extract slopes
-                    # piecewise_regression gives beta1, alpha1, alpha2...
-                    # Slope 1 = beta1
-                    # Slope 2 = beta1 + alpha1
-                    # Slope k = beta1 + sum(alpha1..alpha_k-1)
-                    slopes = []
-                    # Get beta1
-                    beta1_est = estimates.get('beta1', {}).get('estimate', np.nan)
-                    slopes.append(beta1_est)
-
-                    current_slope = beta1_est
-                    for i in range(1, n_bp + 1):
-                        alpha_key = f'alpha{i}'
-                        alpha_est = estimates.get(alpha_key, {}).get('estimate', 0.0)
-                        current_slope += alpha_est
-                        slopes.append(current_slope)
-                    best_slopes = slopes
-
+                    best_bps, best_slopes = _extract_piecewise_estimates(
+                        best_fit.estimates, n_bp
+                    )
             else:
-                 # Fallback to standard get_results if best_muggeo fails.
-                 res = pw_fit.get_results()
-                 current_bic = res.get('bic')
-                 if current_bic is not None and current_bic < best_bic:
+                # Fallback to standard get_results if best_muggeo is unavailable.
+                res = pw_fit.get_results()
+                current_bic = res.get('bic')
+                if (
+                    bool(res.get('converged', False))
+                    and current_bic is not None
+                    and np.isfinite(current_bic)
+                    and current_bic < best_bic
+                ):
                     best_bic = current_bic
                     best_n = n_bp
-                    best_bps = res['estimates']['breakpoints']
-                    # Slope extraction fallback (similar logic but from res['estimates'])
-                    slopes = []
-                    estimates = res['estimates']
-                    beta1_est = estimates.get('beta1', {}).get('estimate', np.nan)
-                    slopes.append(beta1_est)
-                    current_slope = beta1_est
-                    for i in range(1, n_bp + 1):
-                        alpha_key = f'alpha{i}'
-                        alpha_est = estimates.get(alpha_key, {}).get('estimate', 0.0)
-                        current_slope += alpha_est
-                        slopes.append(current_slope)
-                    best_slopes = slopes
+                    best_bps, best_slopes = _extract_piecewise_estimates(
+                        res.get('estimates', {}), n_bp
+                    )
 
         except Exception:
             # Convergence failure or other error
@@ -149,7 +136,7 @@ def fit_piecewise_ols(t, y, max_breakpoints=2):
         try:
             p = np.polyfit(t, y, 1)
             best_slopes = [p[0]]
-        except:
+        except Exception:
             best_slopes = [np.nan]
 
     return best_n, best_bps, best_slopes
@@ -191,11 +178,12 @@ def run_validation_suite(data_generator, output_dir, n_iterations=100):
             pred_slopes = []
             try:
                 if m_type == 'ols':
+                    np.random.seed(42 + i)
                     pred_n, pred_bps, pred_slopes = fit_piecewise_ols(t, x, max_breakpoints=2)
                 elif m_type == 'mannks_hybrid':
                     # Hybrid Segmented Trend via Public API
                     # Note: segmented_trend_test takes (x, t) order
-                    result = segmented_trend_test(x, t, max_breakpoints=2)
+                    result = segmented_trend_test(x, t, max_breakpoints=2, random_state=42 + i)
 
                     pred_n = result.n_breakpoints
                     pred_bps = list(result.breakpoints)
