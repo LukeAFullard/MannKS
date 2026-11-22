@@ -49,13 +49,30 @@ def generate_data(n=100, pattern='linear', noise_std=0.5, censor_level=None):
     df['t'] = t
     return df
 
+def _df_to_markdown(df):
+    """Render a DataFrame as a Markdown table without requiring optional tabulate."""
+    try:
+        return df.to_markdown(index=False)
+    except ImportError:
+        cols = [str(c) for c in df.columns]
+        lines = [
+            "| " + " | ".join(cols) + " |",
+            "| " + " | ".join(["---"] * len(cols)) + " |",
+        ]
+        for _, row in df.iterrows():
+            lines.append("| " + " | ".join(str(row[c]) for c in df.columns) + " |")
+        return "\n".join(lines)
+
+
 def run_case_v01():
     """V-45-01: No Breakpoint (Type I Error Check)"""
     print("Running V-45-01: No Breakpoint Check...")
     df = generate_data(pattern='linear', noise_std=0.5)
 
     # Expect n=0 to be selected
-    best_result, summary = find_best_segmentation(df, df['t'], max_breakpoints=2, n_bootstrap=20)
+    best_result, summary = find_best_segmentation(
+        df, df['t'], max_breakpoints=2, n_bootstrap=20, random_state=42
+    )
 
     success = (best_result.n_breakpoints == 0)
 
@@ -68,7 +85,8 @@ def run_case_v01():
         'desc': 'No Breakpoint (Linear Trend)',
         'success': success,
         'selected_n': best_result.n_breakpoints,
-        'summary': summary.to_markdown(index=False),
+        'summary': _df_to_markdown(summary),
+        'warnings': best_result.warnings,
         'plot': 'v45_01_plot.png'
     }
 
@@ -78,7 +96,9 @@ def run_case_v02():
     df = generate_data(pattern='hinge', noise_std=0.5)
 
     # Expect n=1 to be selected
-    best_result, summary = find_best_segmentation(df, df['t'], max_breakpoints=2, n_bootstrap=20)
+    best_result, summary = find_best_segmentation(
+        df, df['t'], max_breakpoints=2, n_bootstrap=20, random_state=42
+    )
 
     n_ok = (best_result.n_breakpoints == 1)
 
@@ -101,7 +121,8 @@ def run_case_v02():
         'success': success,
         'selected_n': best_result.n_breakpoints,
         'detected_bp': bp_val,
-        'summary': summary.to_markdown(index=False),
+        'summary': _df_to_markdown(summary),
+        'warnings': best_result.warnings,
         'plot': 'v45_02_plot.png'
     }
 
@@ -113,26 +134,32 @@ def run_case_v03():
     # Censored at start and end.
     df = generate_data(pattern='hinge', noise_std=0.5, censor_level=1.0)
 
-    # Expect n=1 (or maybe 2 if censoring creates artifacts, but ideally 1)
-    best_result, summary = find_best_segmentation(df, df['t'], max_breakpoints=2, n_bootstrap=20)
+    # True model has exactly 1 breakpoint at t=50
+    best_result, summary = find_best_segmentation(
+        df, df['t'], max_breakpoints=2, n_bootstrap=20, random_state=42
+    )
 
-    # We accept n=1 OR n=2 (since we know censoring can create false regimes)
-    # But for "Validation", we'd prefer robust n=1.
-    # Let's see what happens.
     selected_n = best_result.n_breakpoints
+    n_ok = (selected_n == 1)
+    bp_val = None
+    bp_ok = False
+    if n_ok:
+        bp_val = best_result.breakpoints[0]
+        bp_ok = 45 <= bp_val <= 55
+    success = n_ok and bp_ok
 
-    success = (selected_n >= 1)
-
-    # Plot
+    # Plot (pass full DataFrame so censoring markers are displayed)
     plot_path = os.path.join(OUTPUT_DIR, 'v45_03_plot.png')
-    plot_segmented_trend(best_result, df['value'], df['t'], save_path=plot_path)
+    plot_segmented_trend(best_result, df, df['t'], save_path=plot_path)
 
     return {
         'id': 'V-45-03',
-        'desc': 'Censored Hinge (Robustness)',
+        'desc': 'Censored Hinge (Robustness, True BP=50)',
         'success': success,
         'selected_n': selected_n,
-        'summary': summary.to_markdown(index=False),
+        'detected_bp': bp_val if n_ok else list(best_result.breakpoints),
+        'summary': _df_to_markdown(summary),
+        'warnings': best_result.warnings,
         'plot': 'v45_03_plot.png'
     }
 
@@ -142,7 +169,9 @@ def run_case_v04():
     df = generate_data(pattern='double_jump', noise_std=0.5)
 
     # Expect n=2
-    best_result, summary = find_best_segmentation(df, df['t'], max_breakpoints=3, n_bootstrap=20)
+    best_result, summary = find_best_segmentation(
+        df, df['t'], max_breakpoints=3, n_bootstrap=20, random_state=42
+    )
 
     success = (best_result.n_breakpoints == 2)
 
@@ -155,7 +184,8 @@ def run_case_v04():
         'desc': 'Double Jump (True BPs=30, 70)',
         'success': success,
         'selected_n': best_result.n_breakpoints,
-        'summary': summary.to_markdown(index=False),
+        'summary': _df_to_markdown(summary),
+        'warnings': best_result.warnings,
         'plot': 'v45_04_plot.png'
     }
 
@@ -165,7 +195,9 @@ def run_case_v05():
     df = generate_data(pattern='hinge', noise_std=0.5)
 
     # Run with n=1 fixed
-    result = segmented_trend_test(df, df['t'], n_breakpoints=1, use_bagging=True, n_bootstrap=100)
+    result = segmented_trend_test(
+        df, df['t'], n_breakpoints=1, use_bagging=True, n_bootstrap=100, random_state=42
+    )
 
     # Calculate probability that break is in [45, 55] (True is 50)
     prob = calculate_breakpoint_probability(result, 45, 55)
@@ -178,6 +210,7 @@ def run_case_v05():
         'desc': 'Probability Calibration (True BP=50, Window=[45, 55])',
         'success': success,
         'metric': f"Probability: {prob:.2%}",
+        'warnings': result.warnings,
         'plot': None
     }
 
@@ -209,6 +242,12 @@ def write_report(results):
 
             if 'metric' in res:
                 f.write(f"**Metric:** {res['metric']}\n\n")
+
+            if res.get('warnings'):
+                f.write("#### Warnings\n")
+                for w in res['warnings']:
+                    f.write(f"- {w}\n")
+                f.write("\n")
 
             if res.get('plot'):
                 f.write(f"![Plot]({res['plot']})\n")

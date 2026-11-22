@@ -7,15 +7,16 @@ from ._datetime import _is_datetime_like, _datetime_to_seconds, _raise_if_string
 
 
 def _preprocessing(x):
-    x = np.asarray(x)
-
     # Convert datetime objects to numeric timestamps if necessary
     if _is_datetime_like(x):
         x = _datetime_to_seconds(x)
+    elif isinstance(x, (pd.Series, pd.Index)) and pd.api.types.is_numeric_dtype(x):
+        x = x.to_numpy(dtype=float, na_value=np.nan)
     else:
+        x = np.asarray(x)
         _raise_if_string_times(x)
 
-    x = x.astype(float)
+    x = np.asarray(x, dtype=float)
 
     if x.ndim == 2:
         (n, c) = x.shape
@@ -119,20 +120,22 @@ def _prepare_data(x, t, hicensor):
             'cen_type': np.full(len(x_proc), 'not', dtype=object)
         })
 
-    t_raw = np.asarray(t)
-    is_datetime = _is_datetime_like(t_raw)
-    t_numeric, _ = _preprocessing(t_raw)
-    data['t_original'] = t_raw
+    is_datetime = _is_datetime_like(t)
+    t_numeric, _ = _preprocessing(t)
+    data['t_original'] = np.asarray(t)
     data['t'] = t_numeric
 
     # Handle missing values.  NaN values are dropped silently (missing data);
-    # infinite values and missing times are dropped with a warning.
-    vals = data['value'].to_numpy(dtype=float)
-    times = data['t'].to_numpy(dtype=float)
-    bad = np.isinf(vals) | (np.isnan(times) & ~np.isnan(vals))
+    # infinite values and missing/infinite times are dropped with a warning.
+    vals = data['value'].to_numpy(dtype=float, na_value=np.nan)
+    times = data['t'].to_numpy(dtype=float, na_value=np.nan)
+    bad = np.isinf(vals) | np.isinf(times) | (np.isnan(times) & ~np.isnan(vals))
     if bad.any():
-        warnings.warn(f"Removed {int(bad.sum())} observation(s) with an infinite value or a "
-                      f"missing time.", UserWarning)
+        warnings.warn(
+            f"Removed {int(bad.sum())} observation(s) with an infinite value or a "
+            f"missing/infinite time.",
+            UserWarning,
+        )
     mask = ~np.isnan(vals) & ~bad
     data_filtered = data[mask].copy()
 

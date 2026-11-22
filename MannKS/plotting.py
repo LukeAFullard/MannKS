@@ -644,22 +644,29 @@ def plot_rolling_trend(rolling_results, data=None, time_col=None, value_col=None
         plt.close(fig)
 
 def _create_segments(t, breakpoints):
-    """Internal helper to split time vector into segments"""
-    t_min, t_max = np.min(t), np.max(t)
-    sorted_bp = np.sort(breakpoints)
+    """Internal helper to split time vector into segments."""
+    t_arr = np.asarray(t, dtype=float)
+    finite_t = t_arr[np.isfinite(t_arr)]
+    if finite_t.size == 0:
+        return []
+
+    t_min, t_max = float(np.min(finite_t)), float(np.max(finite_t))
+    bp_arr = np.asarray(breakpoints, dtype=float)
+    sorted_bp = np.sort(bp_arr[np.isfinite(bp_arr)])
     segments = []
 
     if len(sorted_bp) == 0:
         return [(t_min, t_max)]
 
-    segments.append((t_min, sorted_bp[0]))
+    segments.append((t_min, float(sorted_bp[0])))
     for i in range(len(sorted_bp) - 1):
-        segments.append((sorted_bp[i], sorted_bp[i+1]))
-    segments.append((sorted_bp[-1], t_max))
+        segments.append((float(sorted_bp[i]), float(sorted_bp[i + 1])))
+    segments.append((float(sorted_bp[-1]), t_max))
 
     return segments
 
-def plot_segmented_trend(result, x_data, t_data, save_path=None):
+
+def plot_segmented_trend(result, x_data, t_data, save_path=None, ax=None):
     """
     Visualizes the segmented trend analysis results, including confidence intervals.
 
@@ -668,41 +675,98 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
         x_data: Original data values, or the DataFrame from
             ``prepare_censored_data`` (censored values are marked).
         t_data: Original time values.
-        save_path: Path to save the plot.
-    """
-    if save_path is None:
-        return
+        save_path: Path or file-like object to save the plot. If ``None``,
+            returns ``(fig, ax)`` without saving or closing the figure.
+        ax: Optional existing matplotlib Axes to plot into.
 
+    Returns:
+        ``(fig, ax)`` when ``save_path is None``, otherwise ``None``.
+    """
     censored_mask = None
+    cen_type_arr = None
     if isinstance(x_data, pd.DataFrame):
         if 'censored' in x_data.columns:
             censored_mask = x_data['censored'].to_numpy(dtype=bool)
-        x_data = x_data['value'].to_numpy(dtype=float) if 'value' in x_data.columns \
-            else x_data.iloc[:, 0].to_numpy(dtype=float)
+        if 'cen_type' in x_data.columns:
+            cen_type_arr = x_data['cen_type'].to_numpy()
+        x_data = (
+            x_data['value'].to_numpy(dtype=float, na_value=np.nan)
+            if 'value' in x_data.columns
+            else x_data.iloc[:, 0].to_numpy(dtype=float, na_value=np.nan)
+        )
+    elif isinstance(x_data, (pd.Series, pd.Index)) and pd.api.types.is_numeric_dtype(x_data):
+        x_data = x_data.to_numpy(dtype=float, na_value=np.nan)
     else:
         x_data = np.asarray(x_data, dtype=float)
 
     from ._datetime import _to_numeric_time
 
-    # Determine CI label from alpha if available
+    # Determine CI label from alpha without truncation
     alpha_val = getattr(result, 'alpha', 0.05)
-    ci_percent = int((1 - alpha_val) * 100)
+    ci_level = round((1.0 - float(alpha_val)) * 100.0, 6)
+    ci_percent = f"{ci_level:g}"
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    else:
+        fig = ax.figure
+
     try:
         # Prepare data for plotting
         t_numeric = _to_numeric_time(t_data)
         is_datetime = result.is_datetime
+        bp_tz = getattr(result.breakpoints, 'tz', None) if is_datetime else None
 
-        x_axis = pd.to_datetime(t_data) if is_datetime else t_data
+        if is_datetime:
+            if isinstance(t_data, pd.DatetimeIndex):
+                x_axis = t_data
+            elif isinstance(t_data, pd.Series) and isinstance(t_data.dtype, pd.DatetimeTZDtype):
+                x_axis = t_data
+            else:
+                try:
+                    x_axis = pd.to_datetime(t_data)
+                except (TypeError, ValueError):
+                    x_axis = pd.to_datetime(t_data, utc=True)
+            if bp_tz is not None:
+                if isinstance(x_axis, pd.DatetimeIndex) and x_axis.tz is not None:
+                    x_axis = x_axis.tz_convert(bp_tz)
+                elif isinstance(x_axis, pd.Series) and isinstance(x_axis.dtype, pd.DatetimeTZDtype):
+                    x_axis = x_axis.dt.tz_convert(bp_tz)
+        else:
+            x_axis = t_data
 
         # Plot raw data
         if censored_mask is not None and censored_mask.any():
             x_axis_arr = np.asarray(x_axis)
-            ax.scatter(x_axis_arr[~censored_mask], x_data[~censored_mask], color='gray', alpha=0.5,
-                       label='Observations')
-            ax.scatter(x_axis_arr[censored_mask], x_data[censored_mask], color='red', marker='v',
-                       alpha=0.6, label='Censored (limit)')
+            ax.scatter(
+                x_axis_arr[~censored_mask], x_data[~censored_mask],
+                color='gray', alpha=0.5, label='Observations'
+            )
+            if cen_type_arr is not None:
+                lt_mask = censored_mask & (cen_type_arr == 'lt')
+                gt_mask = censored_mask & (cen_type_arr == 'gt')
+                other_mask = censored_mask & ~lt_mask & ~gt_mask
+                if lt_mask.any():
+                    ax.scatter(
+                        x_axis_arr[lt_mask], x_data[lt_mask],
+                        color='red', marker='v', alpha=0.6, label='Left-Censored'
+                    )
+                if gt_mask.any():
+                    ax.scatter(
+                        x_axis_arr[gt_mask], x_data[gt_mask],
+                        color='blue', marker='^', alpha=0.6, label='Right-Censored'
+                    )
+                if other_mask.any():
+                    ax.scatter(
+                        x_axis_arr[other_mask], x_data[other_mask],
+                        color='red', marker='x', alpha=0.6, label='Censored (Other)'
+                    )
+            else:
+                ax.scatter(
+                    x_axis_arr[censored_mask], x_data[censored_mask],
+                    color='red', marker='x', alpha=0.6, label='Censored (limit)'
+                )
         else:
             ax.scatter(x_axis, x_data, color='gray', alpha=0.5, label='Observations')
 
@@ -735,49 +799,56 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
 
             if is_datetime:
                 x_seg_plot = pd.to_datetime(x_seg_numeric, unit='s')
+                if bp_tz is not None:
+                    x_seg_plot = x_seg_plot.tz_localize('UTC').tz_convert(bp_tz)
             else:
                 x_seg_plot = x_seg_numeric
 
             ax.plot(x_seg_plot, y_seg, linewidth=2, label=f'Segment {i+1}')
 
-            # Plot Slope CIs (if available)
-            if hasattr(row, 'lower_ci_per_second') and pd.notna(row.lower_ci_per_second):
-                # Calculate CI band.
-                # To plot the band correctly, we need the pivot point (t_center, y_center)
-                # of the segment data, as the intercepts are defined relative to this point.
-                # We re-calculate the pivot point for the segment data.
-
+            # Plot Slope CIs (if available), pivoted on the fitted trend line at t_center
+            slope_lower = getattr(row, 'lower_ci_per_second', np.nan)
+            slope_upper = getattr(row, 'upper_ci_per_second', np.nan)
+            if pd.notna(slope_lower) and pd.notna(slope_upper):
                 is_last = i == len(segments) - 1
                 mask = (t_numeric >= start) & ((t_numeric <= end) if is_last else (t_numeric < end))
-                if np.sum(mask) > 0:
-                    t_seg = t_numeric[mask]
-                    x_seg = x_data[mask]
+                t_seg = t_numeric[mask]
+                x_seg = x_data[mask]
+                valid = np.isfinite(t_seg) & np.isfinite(x_seg)
+                if np.any(valid):
+                    t_center = float(np.median(t_seg[valid]))
+                else:
+                    t_center = 0.5 * (start + end)
 
-                    # Ensure data is numeric for median calculation.
-                    if np.issubdtype(np.asarray(x_seg).dtype, np.number):
-                        t_center = np.median(t_seg)
-                        x_center = np.nanmedian(x_seg)
+                if np.isfinite(t_center):
+                    y_center = slope * t_center + intercept
+                    y_lower = y_center + slope_lower * (x_seg_numeric - t_center)
+                    y_upper = y_center + slope_upper * (x_seg_numeric - t_center)
 
-                        slope_lower = row.lower_ci_per_second
-                        slope_upper = row.upper_ci_per_second
+                    ax.fill_between(
+                        x_seg_plot, y_lower, y_upper, alpha=0.2,
+                        label=f'{ci_percent}% CI (Seg {i+1})'
+                    )
 
-                        # CI lines passing through (t_center, x_center)
-                        y_lower = x_center + slope_lower * (x_seg_numeric - t_center)
-                        y_upper = x_center + slope_upper * (x_seg_numeric - t_center)
+        # Plot Breakpoints and their CIs (defense-in-depth joint sort with np.intp)
+        if len(result.breakpoints) > 0:
+            order = np.argsort(np.asarray(bp_numeric)).astype(np.intp, copy=False)
+            bps_ordered = [result.breakpoints[idx] for idx in order]
+            has_cis = (
+                hasattr(result, 'breakpoint_cis')
+                and result.breakpoint_cis is not None
+                and len(result.breakpoint_cis) == len(result.breakpoints)
+            )
+            cis_ordered = [result.breakpoint_cis[idx] for idx in order] if has_cis else []
 
-                        ax.fill_between(x_seg_plot, y_lower, y_upper, alpha=0.2, label=f'{ci_percent}% CI (Seg {i+1})')
+            for i, bp in enumerate(bps_ordered):
+                ax.axvline(bp, color='black', linestyle='--', label='Breakpoint')
 
-
-        # Plot Breakpoints and their CIs
-        for i, bp in enumerate(result.breakpoints):
-            ax.axvline(bp, color='black', linestyle='--', label='Breakpoint')
-
-            # Plot Breakpoint CI if available
-            if hasattr(result, 'breakpoint_cis') and i < len(result.breakpoint_cis):
-                ci_low, ci_high = result.breakpoint_cis[i]
-                # Add shaded region
-                if pd.notna(ci_low) and pd.notna(ci_high):
-                    ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label=f'Breakpoint {ci_percent}% CI')
+                # Plot Breakpoint CI if available
+                if has_cis and i < len(cis_ordered):
+                    ci_low, ci_high = cis_ordered[i]
+                    if pd.notna(ci_low) and pd.notna(ci_high):
+                        ax.axvspan(ci_low, ci_high, color='orange', alpha=0.3, label=f'Breakpoint {ci_percent}% CI')
 
         ax.set_title('Segmented Trend Analysis')
         ax.set_xlabel('Time')
@@ -788,12 +859,20 @@ def plot_segmented_trend(result, x_data, t_data, save_path=None):
         by_label = dict(zip(labels, handles))
         ax.legend(by_label.values(), by_label.keys())
 
-        if hasattr(save_path, 'write'):
-            fig.savefig(save_path, format='png')
-        else:
-            fig.savefig(save_path)
+        if save_path is not None:
+            if hasattr(save_path, 'write'):
+                fig.savefig(save_path, format='png')
+            else:
+                fig.savefig(save_path)
+            return None
+        return fig, ax
+    except Exception:
+        if created_fig:
+            plt.close(fig)
+        raise
     finally:
-        plt.close(fig)
+        if save_path is not None and created_fig:
+            plt.close(fig)
 
 
 def plot_quantile_trend(

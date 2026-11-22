@@ -1,9 +1,16 @@
+import datetime
 import numpy as np
 import pandas as pd
 
 
 def _is_datetime_like(x):
-    """Checks if an array is datetime-like."""
+    """Checks if an array or scalar is datetime-like."""
+    if isinstance(x, (pd.Timestamp, datetime.date, np.datetime64)):
+        return True
+    if pd.api.types.is_datetime64_any_dtype(x):
+        return True
+    if hasattr(x, 'dtype') and isinstance(x.dtype, pd.api.extensions.ExtensionDtype):
+        return False
     if not hasattr(x, 'dtype'):
         x = np.asarray(x)
 
@@ -12,9 +19,38 @@ def _is_datetime_like(x):
     if x.dtype == 'O':
         if x.ndim == 0:
             return hasattr(x.item(), 'year')
-        elif len(x) > 0:
-            return hasattr(x[0], 'year')
+        for item in x.ravel():
+            if (
+                item is not None
+                and item is not pd.NA
+                and not (isinstance(item, float) and np.isnan(item))
+            ):
+                return hasattr(item, 'year')
     return False
+
+
+def _extract_timezone(t):
+    """
+    Extract a common timezone from a datetime-like input, or None if tz-naive.
+
+    If mixed timezones are present across elements, returns
+    ``datetime.timezone.utc`` to match the UTC-instant conversion used
+    internally by ``_datetime_to_seconds``.
+    """
+    if isinstance(t, pd.DatetimeIndex):
+        return t.tz
+    if isinstance(t, pd.Series) and isinstance(t.dtype, pd.DatetimeTZDtype):
+        return t.dtype.tz
+    if isinstance(t, (pd.Timestamp, datetime.datetime)):
+        return t.tzinfo
+    try:
+        return pd.DatetimeIndex(t).tz
+    except (TypeError, ValueError):
+        arr = np.asarray(t, dtype=object)
+        for item in arr.ravel():
+            if getattr(item, 'tzinfo', None) is not None:
+                return datetime.timezone.utc
+        return None
 
 
 def _datetime_to_seconds(t):
@@ -22,15 +58,42 @@ def _datetime_to_seconds(t):
     Seconds since 1970-01-01 (float) for any datetime-like array.
 
     numpy ``datetime64`` and naive datetimes are taken as UTC wall time;
-    timezone-aware values are converted to their UTC instant.  Missing
-    values (NaT/None) become NaN.
+    timezone-aware values are converted to their UTC instant.  Sub-second
+    precision (ms/us/ns) is preserved without overflowing dates outside
+    1677-2262.  Missing values (NaT/None) become NaN.
     """
-    arr = np.asarray(t)
-    if not np.issubdtype(arr.dtype, np.datetime64):
-        idx = pd.to_datetime(pd.Index(arr.ravel(), dtype=object), utc=True)
-        arr = idx.tz_convert(None).to_numpy().reshape(arr.shape)
-    missing = np.isnat(arr)
-    out = arr.astype('datetime64[s]').astype(float)
+    if isinstance(t, pd.DatetimeIndex) and t.tz is not None:
+        arr = t.tz_convert('UTC').tz_localize(None).to_numpy()
+    elif isinstance(t, pd.Series) and isinstance(t.dtype, pd.DatetimeTZDtype):
+        arr = t.dt.tz_convert('UTC').dt.tz_localize(None).to_numpy()
+    else:
+        arr = np.asarray(t)
+        if not np.issubdtype(arr.dtype, np.datetime64):
+            idx = pd.to_datetime(pd.Index(arr.ravel(), dtype=object), utc=True)
+            arr = idx.tz_convert(None).to_numpy().reshape(arr.shape)
+
+    unit, step = np.datetime_data(arr.dtype)
+    if unit in ('ns', 'us', 'ms', 's') and step == 1:
+        target, target_unit = arr, unit
+    elif unit in ('Y', 'M', 'W', 'D', 'h', 'm'):
+        target, target_unit = arr.astype('datetime64[s]'), 's'
+    else:
+        target = None
+        target_unit = 's'
+        for u in ('ns', 'us', 's'):
+            try:
+                target = arr.astype(f'datetime64[{u}]')
+                target_unit = u
+                break
+            except OverflowError:
+                continue
+        if target is None:
+            target = arr.astype('datetime64[s]')
+            target_unit = 's'
+
+    missing = np.isnat(target)
+    epoch = np.datetime64('1970-01-01T00:00:00', target_unit)
+    out = np.asarray((target - epoch) / np.timedelta64(1, 's'), dtype=float)
     out[missing] = np.nan
     return out
 
@@ -46,11 +109,16 @@ def _to_numeric_time(t):
     Converts a time vector to numeric (seconds since 1970-01-01 for
     datetimes, see ``_datetime_to_seconds``).  Returns a float array.
     """
+    if _is_datetime_like(t):
+        out = _datetime_to_seconds(t)
+        return out.reshape(1) if out.ndim == 0 else out
+    if isinstance(t, (pd.Series, pd.Index)) and pd.api.types.is_numeric_dtype(t):
+        out = t.to_numpy(dtype=float, na_value=np.nan)
+        return out.reshape(1) if out.ndim == 0 else out
+
     t_arr = np.asarray(t)
     if t_arr.ndim == 0:
         t_arr = t_arr.reshape(1)
-    if _is_datetime_like(t_arr):
-        return _datetime_to_seconds(t_arr)
     try:
         return t_arr.astype(float)
     except (ValueError, TypeError):
