@@ -712,11 +712,12 @@ class HybridSegmentedTrend:
                 )
                 selection_records.append({
                     'n_breakpoints': k_req, 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'score': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 })
         else:
             x_scaled = (x_ols - x_mean) / x_std
             t_centered = (t - t_mean) / t_std
+            t_span_val = float(t[-1] - t[0])
 
             candidates = []
             k_seeds = (
@@ -729,7 +730,7 @@ class HybridSegmentedTrend:
                 k_int = int(k)
                 record = {
                     'n_breakpoints': k_int, 'bic': np.nan, 'aic': np.nan,
-                    'mbic': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
+                    'mbic': np.nan, 'score': np.nan, 'rss': np.nan, 'sar': np.nan, 'converged': False,
                 }
                 try:
                     if k_int == 0:
@@ -755,6 +756,7 @@ class HybridSegmentedTrend:
                             'bp_cis': [],
                             'y_pred_scaled': y_pred_scaled,
                             'resid_scaled': resid_scaled,
+                            'record': record,
                         })
                         selection_records.append(record)
                         # Short-circuit exact noiseless linear series during auto-select only
@@ -786,9 +788,29 @@ class HybridSegmentedTrend:
                         selection_records.append(record)
                         continue
 
+                    fit_kwargs = {}
+                    if (
+                        self.min_segment_size is not None
+                        and self.min_segment_size >= 2
+                        and t_span_val > 0
+                        and n_samples >= (k_int + 1) * self.min_segment_size
+                    ):
+                        ms = int(self.min_segment_size)
+                        left_frac = float(t[ms - 1] - t[0]) / t_span_val
+                        right_frac = float(t[-1] - t[-ms]) / t_span_val
+                        edge_frac = min(left_frac, right_frac)
+                        max_edge = 0.4 / max(1, k_int)
+                        if 0.0 < edge_frac < max_edge:
+                            fit_kwargs['min_distance_to_edge'] = max(0.02, edge_frac)
+                        if k_int >= 2:
+                            between_frac = float(np.min(t[ms:] - t[:-ms])) / t_span_val
+                            if 0.0 < between_frac < max_edge:
+                                fit_kwargs['min_distance_between_breakpoints'] = max(0.01, between_frac)
+
                     with _isolated_legacy_numpy_seed(k_seeds[idx_k]):
                         pw_fit = piecewise_regression.Fit(
-                            t_centered, x_scaled, n_breakpoints=k_int, verbose=False
+                            t_centered, x_scaled, n_breakpoints=k_int, verbose=False,
+                            **fit_kwargs,
                         )
 
                     res = pw_fit.get_results()
@@ -803,8 +825,14 @@ class HybridSegmentedTrend:
                         or not np.isfinite(rss_scaled)
                         or rss_scaled < 0
                     ):
+                        constraint_note = (
+                            f" (with min_segment_size={self.min_segment_size})"
+                            if fit_kwargs
+                            else ""
+                        )
                         warnings.warn(
-                            f"Breakpoint fit for n_breakpoints={k_int} did not converge.",
+                            f"Breakpoint fit for n_breakpoints={k_int} did not converge"
+                            f"{constraint_note}.",
                             UserWarning,
                         )
                         selection_records.append(record)
@@ -915,11 +943,13 @@ class HybridSegmentedTrend:
                         'bp_cis': cand_bp_cis,
                         'y_pred_scaled': y_pred_scaled,
                         'resid_scaled': resid_scaled,
+                        'record': record,
                     })
                 except Exception as exc:
                     record['bic'] = np.nan
                     record['aic'] = np.nan
                     record['mbic'] = np.nan
+                    record['score'] = np.nan
                     record['rss'] = np.nan
                     record['sar'] = np.nan
                     record['converged'] = False
@@ -982,6 +1012,7 @@ class HybridSegmentedTrend:
                     )
                     score = {'bic': s_bic, 'mbic': s_mbic, 'aic': s_aic}[self.criterion]
                     cand['score'] = score
+                    cand['record']['score'] = score
                     if np.isfinite(score) and score < best_cand_score:
                         best_cand_score = score
                         best_cand = cand

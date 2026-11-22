@@ -2,20 +2,20 @@
 ## 1. Model Selection Accuracy (Correct N)
 | Method | Accuracy | Mean Time (s) |
 | :--- | :--- | :--- |
-| Piecewise_Regression | 83.3% | 1.8777 |
-| MannKS_Hybrid | 83.3% | 1.7524 |
+| Piecewise_Regression | 83.3% | 4.7367 |
+| MannKS_Hybrid | 83.3% | 4.6087 |
 
 ## 2. Breakpoint Location Accuracy (MAE)
 | Method | Mean Error | Std Dev | Min | Max |
 | :--- | :--- | :--- | :--- | :--- |
 | Piecewise_Regression | 1.1924 | 0.8328 | 0.0501 | 2.5670 |
-| MannKS_Hybrid | 1.1799 | 0.8301 | 0.0501 | 2.5670 |
+| MannKS_Hybrid | 1.1924 | 0.8328 | 0.0501 | 2.5670 |
 
 ## 3. Slope Estimation Accuracy (MAE)
 | Method | Mean Error | Std Dev | Min | Max |
 | :--- | :--- | :--- | :--- | :--- |
-| Piecewise_Regression | 0.1785 | 0.1658 | 0.0000 | 0.4848 |
-| MannKS_Hybrid | 0.0110 | 0.0107 | 0.0004 | 0.0374 |
+| Piecewise_Regression | 0.0114 | 0.0115 | 0.0000 | 0.0461 |
+| MannKS_Hybrid | 0.0108 | 0.0106 | 0.0004 | 0.0374 |
 
 ## 3. Confusion Matrix (True N vs Predicted N)
 

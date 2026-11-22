@@ -10,3 +10,5 @@ python run_parity.py           | tee out/run_parity.txt         # ~10 min (R on 
 python censored_slope_study.py | tee out/censored_slope_study.txt
 python regional_parity.py      | tee out/regional_parity.txt
 python monte_carlo.py          | tee out/monte_carlo.txt        # ~10 min
+python segmented_parity.py     | tee out/segmented_parity.txt   # CRAN segmented + calibration
+
