@@ -14,6 +14,7 @@ from .plotting import (
     plot_segmented_trend,
     plot_quantile_trend,
     plot_quantile_kendall,
+    plot_decomposition,
 )
 from .inspection import inspect_trend_data
 from .regional_test import regional_test
@@ -27,6 +28,7 @@ from .segmented_trend_test import (
     find_best_segmentation,
     calculate_breakpoint_probability
 )
+from .decomposition import decompose, DecompositionResult, deseasonalized_trend_test
 from .quantile_trend_test import (
     quantile_trend_test,
     QuantileTrendResult,
@@ -57,6 +59,10 @@ __all__ = [
     'quantile_trend_test',
     'QuantileTrendResult',
     'summarize_quantile_regimes',
+    'decompose',
+    'DecompositionResult',
+    'deseasonalized_trend_test',
+    'plot_decomposition',
 ]
 
 __version__ = "0.7.2"

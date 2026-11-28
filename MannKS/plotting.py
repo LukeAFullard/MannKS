@@ -1219,3 +1219,118 @@ def plot_quantile_trend(
 
 
 plot_quantile_kendall = plot_quantile_trend
+
+
+def plot_decomposition(result, save_path=None, axes=None):
+    """
+    Plot a :func:`MannKS.decompose` result.
+
+    Five panels: data with the fitted trend + seasonal (censored values drawn
+    as open triangles at their limits), the trend (with bootstrap bands when
+    available), the seasonal component, the remainder (zero-weight points
+    highlighted), and the seasonal cycle by day of year.  All on the
+    transformed scale.
+
+    Args:
+        result: The ``DecompositionResult`` returned by ``decompose``.
+        save_path: Path or file-like object to save the plot.  If ``None``,
+            returns ``(fig, axes)`` without saving or closing the figure.
+        axes: Optional sequence of five existing matplotlib Axes.
+
+    Returns:
+        ``(fig, axes)`` when ``save_path is None``, otherwise ``None``.
+    """
+    import numpy as _np
+    from . import _decompose as _dd
+
+    if axes is None:
+        fig, axes = plt.subplots(5, 1, figsize=(10, 14), constrained_layout=True)
+        created = True
+    else:
+        axes = list(axes)
+        if len(axes) != 5:
+            raise ValueError("`axes` must contain exactly five Axes.")
+        fig = axes[0].figure
+        created = False
+
+    t = result.t_years
+    cens = _np.asarray(result.censored, dtype=bool)
+    lt = cens & (_np.asarray(result.cen_type) == 'lt')
+    gt = cens & (_np.asarray(result.cen_type) == 'gt')
+    det = ~cens
+    ylab = 'ln(value)' if result.transform == 'log' else 'value'
+
+    ax = axes[0]
+    ax.plot(t[det], result.values[det], '.', color='0.35', ms=4, label='detected')
+    if lt.any():
+        ax.plot(t[lt], result.values[lt], 'v', mfc='none', color='tab:blue', ms=5,
+                label='left-censored (limit)')
+    if gt.any():
+        ax.plot(t[gt], result.values[gt], '^', mfc='none', color='tab:purple', ms=5,
+                label='right-censored (limit)')
+    ax.plot(t, result.trend + result.seasonal, '-', color='tab:orange', lw=1, label='trend + seasonal')
+    ax.set_ylabel(ylab)
+    ax.set_title('Data and fit')
+    ax.legend(loc='best', fontsize=8)
+
+    ax = axes[1]
+    if result.trend_low is not None:
+        ax.fill_between(t, result.trend_low, result.trend_high, color='tab:orange', alpha=0.25,
+                        lw=0, label='95% pointwise band')
+    if result.trend_simul_low is not None:
+        ax.plot(t, result.trend_simul_low, ':', color='tab:orange', lw=1, label='95% simultaneous band')
+        ax.plot(t, result.trend_simul_high, ':', color='tab:orange', lw=1)
+    ax.plot(t, result.trend, '-', color='tab:orange', lw=1.5, label='trend')
+    ax.set_ylabel(ylab)
+    ax.set_title('Trend')
+    ax.legend(loc='best', fontsize=8)
+
+    ax = axes[2]
+    if result.seasonal_low is not None:
+        ax.fill_between(t, result.seasonal_low, result.seasonal_high, color='tab:green',
+                        alpha=0.25, lw=0)
+    ax.plot(t, result.seasonal, '-', color='tab:green', lw=1)
+    ax.axhline(0, color='0.6', lw=0.8)
+    ax.set_ylabel(ylab)
+    ax.set_title(f"Seasonal ({result.seasonal_mode_used}, K={result.n_harmonics_used})")
+
+    ax = axes[3]
+    zero = result.weights == 0
+    ax.axhline(0, color='0.6', lw=0.8)
+    ax.plot(t[~zero], result.remainder[~zero], '.', color='0.35', ms=4, label='remainder')
+    if zero.any():
+        ax.plot(t[zero], result.remainder[zero], 'x', color='tab:red', ms=5, label='weight 0')
+    ax.set_ylabel(ylab)
+    ax.set_xlabel('decimal year')
+    ax.set_title('Remainder')
+    ax.legend(loc='best', fontsize=8)
+
+    ax = axes[4]
+    doy = _np.mod(t, 1.0) * 365.2425 + 1
+    ax.plot(doy[det], (result.values - result.trend)[det], '.', color='0.6', ms=3,
+            label='data - trend')
+    phase = _np.linspace(0, 1, 366)
+    s = result.settings
+    if result.seasonal_mode_used == 'global':
+        ax.plot(phase * 365.2425 + 1, _dd.harmonics(phase, s['K']) @ s['coef'], '-',
+                color='tab:green', lw=1.5, label='seasonal cycle')
+    else:
+        years = result.seasonal_by_year['year'].to_numpy()
+        cmap = plt.get_cmap('viridis')
+        for i, yr in enumerate(years):
+            mid = float(_np.clip(yr + 0.5, t[0], t[-1]))
+            c = s['seasonal_model'].coef_at(s['coef'], [mid])[0]
+            ax.plot(phase * 365.2425 + 1, _dd.harmonics(phase, s['K']) @ c, '-', lw=1,
+                    color=cmap(i / max(1, len(years) - 1)))
+    ax.set_xlim(1, 367)
+    ax.set_xlabel('day of year')
+    ax.set_ylabel(ylab)
+    ax.set_title('Seasonal cycle')
+    ax.legend(loc='best', fontsize=8)
+
+    if save_path is not None:
+        fig.savefig(save_path)
+        if created:
+            plt.close(fig)
+        return None
+    return fig, axes
